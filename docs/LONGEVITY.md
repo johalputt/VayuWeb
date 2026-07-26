@@ -81,10 +81,22 @@ lapse rather than handing a name to an attacker.
 bytes get signed; a format with two valid encodings of one value is a format with two valid
 signatures and one interoperability failure.
 
-4.2 The unknown-field rule MUST be **reject, not ignore**, for anything inside the signed
-envelope. "Must-ignore" is right for extensible documents and wrong for signed ones: silently
-ignoring a field means two implementations can disagree about what a signature covers, which is
-how signature schemes get broken in practice rather than in theory.
+4.2 The unknown-field rule is **preserve for relay, refuse to act**. These are two different
+questions and an earlier draft of this document ran them together, contradicting Constitution
+Article 47.4.
+
+- **Storage and replication: preserve, byte for byte.** Article 47.4 requires it, and the reason
+  is decisive: a record signed under a newer version must survive round-tripping through older
+  software without its signature breaking. An implementation that drops a field it does not
+  recognise silently invalidates records it was only supposed to carry.
+- **Validation and use: refuse.** A peer MUST NOT treat a record containing fields it does not
+  understand as semantically validated, and MUST NOT act on it — resolve it, index it as current,
+  or serve it. "Must-ignore" is right for extensible documents and wrong for signed ones, because
+  silently ignoring a field means two implementations disagree about what the signature covers.
+
+The resolution is therefore: **relay everything, honour only what you understand.** The record
+propagates so the network is not partitioned by version skew; the peer refuses to make decisions
+on semantics it cannot check.
 
 4.3 New fields therefore arrive with a version increment and an activation epoch, per
 Constitution Article 47, so every peer knows to expect them before any peer emits them.

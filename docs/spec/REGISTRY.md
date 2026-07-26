@@ -324,6 +324,45 @@ consistent view. The mitigations are partial — query several independent peers
 greatest verified length, and show that length and the observation time with every answer — and
 nothing here solves it.
 
+## Epochs
+
+The Constitution and WXIP-0000 both schedule changes against an *activation epoch*, and both
+treat "Epoch" as a defined unit. This section defines it.
+
+An **Epoch** is a numbered interval of the registry's life, not of the calendar. Epoch 0 begins
+at the genesis entry. An epoch boundary is crossed when **both** of the following hold:
+
+1. at least `2,592,000` seconds (30 days) of `notBefore` time has elapsed since the boundary that
+   opened the current epoch, measured at the median of the last 1,000 accepted records rather
+   than from any single clock; and
+2. at least one checkpoint has been computed since that boundary.
+
+Requiring both conditions is deliberate. Time alone would let a peer with a wrong or hostile
+clock disagree with the network about which epoch it is in — the weakness recorded in
+[LONGEVITY.md](../LONGEVITY.md) section 3. Log progress alone would stall the epoch counter
+whenever registration activity dropped, which over a century is a near certainty. Taking the
+median `notBefore` of a thousand records makes a single lying clock irrelevant, because moving
+the median requires controlling the majority of recent registrations, which proof-of-work already
+prices.
+
+Consequences, all normative:
+
+- The current epoch number is **derived from the log**, identically by every peer, and is never
+  taken from a peer's own clock or from any announcement.
+- A Standards Track activation epoch MUST be at least **two epochs** beyond the epoch in which
+  the WXIP reached Accepted — roughly sixty days minimum — so that deployment has time to
+  propagate before behaviour changes. Article 47.3 forbids a silent breaking change; this is the
+  interval that makes the prohibition operable.
+- A peer that has not yet reached the activation epoch MUST continue to apply the previous rules.
+  A peer that has reached it MUST apply the new ones. Because the number is derived from shared
+  log state rather than from wall-clock time, peers transition consistently rather than smeared
+  across whatever their clocks say.
+- Epoch numbers are monotonic and never reused, including across a substrate migration.
+
+The residual: a peer under eclipse sees whatever epoch its attacker's log says it is in. That is
+the same limitation as freshness above, with the same partial mitigation — query several
+independent peers and take the greatest verified length — and it is not solved here either.
+
 ## Size Limits
 
 A serialised record SHALL be at most 4096 bytes, the `records` array SHALL hold at most 32
