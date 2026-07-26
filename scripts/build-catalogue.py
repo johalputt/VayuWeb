@@ -5,10 +5,13 @@ The catalogue is generated, not hand-maintained, so that the collision and gramm
 rules in NAMESPACE.md are enforced by code rather than by review.
 
 Rules enforced here rather than trusted from the generator:
-  - 3 to 12 characters, lowercase ASCII letters only
-  - never 2 characters (that is the entire ISO 3166 ccTLD space)
+  - 2 to 12 characters, lowercase ASCII letters only
   - never a well-known ICANN gTLD
   - no duplicates across categories (first category to claim it keeps it)
+
+Two-letter extensions are permitted and curated by hand below. WebX defines its own
+namespace, and ISO 3166 is a shared reference rather than an authority here. What is
+forbidden is a country NAME -- see NAMESPACE.md section 5.3.
 """
 import json
 import re
@@ -43,9 +46,94 @@ GTLD = {
     "reviews", "guide", "how", "wiki", "faith", "bible", "church", "christmas", "gives", "give",
 }
 
-ok = re.compile(r"^[a-z]{3,12}$")
+ok = re.compile(r"^[a-z]{2,12}$")
+
+# Two-letter extensions, curated by hand rather than generated.
+#
+# WebX defines its own namespace; ISO 3166 is a shared reference, not an authority
+# here. Each entry below is included for its ordinary meaning as a string, never as
+# a country reference -- see NAMESPACE.md section 5.3, which forbids country NAMES
+# (.india, .bharat) precisely because those read as a claim rather than a word.
+TWO_LETTER = [
+    # pronouns and greetings
+    ("me", "An individual's own page, the shortest personal address there is"),
+    ("my", "Anything a person calls theirs"),
+    ("we", "Collectives, co-ops and shared projects"),
+    ("us", "Groups speaking in the first person plural"),
+    ("hi", "Introduction and landing pages"),
+    ("yo", "Short, informal, attention-getting addresses"),
+    ("ok", "Plain, unfussy sites that do one thing"),
+    # prepositions and small words
+    ("in", "Membership, inclusion and being part of something"),
+    ("on", "Live things: broadcasts, streams, status pages"),
+    ("at", "Location and presence — where someone can be found"),
+    ("to", "Directories, redirects and pointers to elsewhere"),
+    ("by", "Attribution — work credited to its maker"),
+    ("of", "Collections and belonging"),
+    ("up", "Launches, status pages and things going live"),
+    ("go", "Short links, launchers and jumping-off points"),
+    ("do", "Task tools, checklists and action-oriented sites"),
+    ("be", "Identity, philosophy and personal statements"),
+    ("so", "Conclusions, essays and commentary"),
+    ("if", "Speculation, fiction and thought experiments"),
+    ("is", "Definitional and reference pages"),
+    ("it", "Technology generally, and information tools"),
+    ("as", "Comparison, analogy and framing"),
+    ("an", "Single-subject sites and short essays"),
+    ("no", "Refusals, campaigns and statements against"),
+    # technology
+    ("io", "Input and output — developer tools and services"),
+    ("ai", "Machine learning projects, research and tooling"),
+    ("ui", "Interface design and component libraries"),
+    ("ux", "Experience research and design practice"),
+    ("os", "Operating systems and low-level software"),
+    ("db", "Databases, datasets and storage projects"),
+    ("js", "JavaScript libraries, tooling and communities"),
+    ("py", "Python libraries, tooling and communities"),
+    ("ml", "Machine learning models and pipelines"),
+    ("vr", "Virtual reality projects and worlds"),
+    ("ar", "Augmented reality tools and experiences"),
+    ("xr", "Extended reality generally"),
+    ("hd", "High-definition media and video projects"),
+    ("cc", "Creative commons and open-licensed collections"),
+    ("cd", "Continuous delivery, and record collections"),
+    ("ci", "Continuous integration and build tooling"),
+    ("kb", "Knowledge bases and internal documentation"),
+    ("qa", "Testing, quality assurance and question-answer sites"),
+    ("ip", "Intellectual property, and networking projects"),
+    ("fx", "Visual effects, and audio effects"),
+    ("gg", "Gaming clans, tournaments and esports"),
+    ("dj", "Disc jockeys, mixes and sets"),
+    ("tv", "Video channels and episodic programming"),
+    ("fm", "Audio stations, podcasts and radio"),
+    ("pm", "Product management, and project management"),
+    ("hr", "People operations and hiring"),
+    ("pr", "Public relations and press pages"),
+    ("cv", "Curricula vitae and professional histories"),
+    ("id", "Identity pages and credential endpoints"),
+    ("op", "Operations, runbooks and on-call documentation"),
+    ("rd", "Research and development groups"),
+    ("ad", "Advertising, and public notices"),
+    ("co", "Companies, cooperatives and joint ventures"),
+    ("ex", "Former things: archives, retrospectives, post-mortems"),
+    ("ax", "Sharp, minimal single-purpose tools"),
+    ("wp", "Wallpapers, whitepapers and working papers"),
+]
 
 seen, rejected, cats = {}, [], []
+
+# The hand-curated two-letter set is claimed first, so a generated duplicate
+# defers to it rather than the other way round.
+two = []
+for ext, purpose in TWO_LETTER:
+    if ext in GTLD or not ok.match(ext):
+        rejected.append((ext, "two-letter rejected"))
+        continue
+    seen[ext] = "two-letter"
+    two.append((ext, purpose))
+if two:
+    cats.append(("two-letter", sorted(two)))
+
 for line in open(JOURNAL, encoding="utf-8"):
     result = json.loads(line).get("result")
     if not isinstance(result, dict) or "extensions" not in result:
@@ -69,6 +157,7 @@ for line in open(JOURNAL, encoding="utf-8"):
         cats.append((key, sorted(kept)))
 
 TITLES = {
+    "two-letter": "Two letters",
     "core-identity": "Core and identity",
     "publishing": "Writing and publishing",
     "creative-media": "Art and media",
@@ -94,11 +183,14 @@ with open(OUT, "w", encoding="utf-8") as fh:
       "extension that is more official than another — Constitution Article 35 requires it and\n"
       "no client may present otherwise.\n\n")
     w("## Rules every entry satisfies\n\n")
-    w("- **Three characters minimum.** Every ISO 3166 country code is two letters, so a\n"
-      "  three-character floor keeps WebX clear of the entire country-code space.\n")
+    w("- **Two to twelve characters.** Two-letter extensions are permitted: WebX defines its\n"
+      "  own namespace, and a two-letter string is a string. The clearnet has treated `.io`,\n"
+      "  `.ai` and `.me` as generic for two decades. What is forbidden is a country *name*\n"
+      "  such as `.india` — that reads as a claim rather than a word, and WebX cannot\n"
+      "  adjudicate who represents a nation. See NAMESPACE.md section 5.3.\n")
     w("- **No echo of a well-known ICANN generic domain.** A `webx://` name that looks like a\n"
       "  clearnet one teaches readers that WebX names mean nothing.\n")
-    w("- **Lowercase ASCII, three to twelve characters**, pronounceable, and meaning something.\n\n")
+    w("- **Lowercase ASCII**, pronounceable, and meaning something.\n\n")
     w("**Status:** Draft — not yet implemented. No extension is registrable until the protocol\n"
       "exists and each has completed the 180-day dormancy period required by Article 35.\n\n")
     w("---\n\n")

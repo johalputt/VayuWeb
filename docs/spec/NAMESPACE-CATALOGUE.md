@@ -1,6 +1,6 @@
 # WebX Launch Catalogue
 
-**349 extensions**, grouped by what people actually register them for.
+**409 extensions**, grouped by what people actually register them for.
 
 This is a starting point, not a boundary. The WebX namespace is **elastic**: anyone may
 propose a new extension at any time, it costs proof-of-work rather than a fee, and the
@@ -14,16 +14,86 @@ no client may present otherwise.
 
 ## Rules every entry satisfies
 
-- **Three characters minimum.** Every ISO 3166 country code is two letters, so a
-  three-character floor keeps WebX clear of the entire country-code space.
+- **Two to twelve characters.** Two-letter extensions are permitted: WebX defines its
+  own namespace, and a two-letter string is a string. The clearnet has treated `.io`,
+  `.ai` and `.me` as generic for two decades. What is forbidden is a country *name*
+  such as `.india` — that reads as a claim rather than a word, and WebX cannot
+  adjudicate who represents a nation. See NAMESPACE.md section 5.3.
 - **No echo of a well-known ICANN generic domain.** A `webx://` name that looks like a
   clearnet one teaches readers that WebX names mean nothing.
-- **Lowercase ASCII, three to twelve characters**, pronounceable, and meaning something.
+- **Lowercase ASCII**, pronounceable, and meaning something.
 
 **Status:** Draft — not yet implemented. No extension is registrable until the protocol
 exists and each has completed the 180-day dormancy period required by Article 35.
 
 ---
+
+## Two letters
+
+*60 extensions*
+
+| Extension | Who registers it |
+|---|---|
+| `.ad` | Advertising, and public notices |
+| `.ai` | Machine learning projects, research and tooling |
+| `.an` | Single-subject sites and short essays |
+| `.ar` | Augmented reality tools and experiences |
+| `.as` | Comparison, analogy and framing |
+| `.at` | Location and presence — where someone can be found |
+| `.ax` | Sharp, minimal single-purpose tools |
+| `.be` | Identity, philosophy and personal statements |
+| `.by` | Attribution — work credited to its maker |
+| `.cc` | Creative commons and open-licensed collections |
+| `.cd` | Continuous delivery, and record collections |
+| `.ci` | Continuous integration and build tooling |
+| `.co` | Companies, cooperatives and joint ventures |
+| `.cv` | Curricula vitae and professional histories |
+| `.db` | Databases, datasets and storage projects |
+| `.dj` | Disc jockeys, mixes and sets |
+| `.do` | Task tools, checklists and action-oriented sites |
+| `.ex` | Former things: archives, retrospectives, post-mortems |
+| `.fm` | Audio stations, podcasts and radio |
+| `.fx` | Visual effects, and audio effects |
+| `.gg` | Gaming clans, tournaments and esports |
+| `.go` | Short links, launchers and jumping-off points |
+| `.hd` | High-definition media and video projects |
+| `.hi` | Introduction and landing pages |
+| `.hr` | People operations and hiring |
+| `.id` | Identity pages and credential endpoints |
+| `.if` | Speculation, fiction and thought experiments |
+| `.in` | Membership, inclusion and being part of something |
+| `.io` | Input and output — developer tools and services |
+| `.ip` | Intellectual property, and networking projects |
+| `.is` | Definitional and reference pages |
+| `.it` | Technology generally, and information tools |
+| `.js` | JavaScript libraries, tooling and communities |
+| `.kb` | Knowledge bases and internal documentation |
+| `.me` | An individual's own page, the shortest personal address there is |
+| `.ml` | Machine learning models and pipelines |
+| `.my` | Anything a person calls theirs |
+| `.no` | Refusals, campaigns and statements against |
+| `.of` | Collections and belonging |
+| `.ok` | Plain, unfussy sites that do one thing |
+| `.on` | Live things: broadcasts, streams, status pages |
+| `.op` | Operations, runbooks and on-call documentation |
+| `.os` | Operating systems and low-level software |
+| `.pm` | Product management, and project management |
+| `.pr` | Public relations and press pages |
+| `.py` | Python libraries, tooling and communities |
+| `.qa` | Testing, quality assurance and question-answer sites |
+| `.rd` | Research and development groups |
+| `.so` | Conclusions, essays and commentary |
+| `.to` | Directories, redirects and pointers to elsewhere |
+| `.tv` | Video channels and episodic programming |
+| `.ui` | Interface design and component libraries |
+| `.up` | Launches, status pages and things going live |
+| `.us` | Groups speaking in the first person plural |
+| `.ux` | Experience research and design practice |
+| `.vr` | Virtual reality projects and worlds |
+| `.we` | Collectives, co-ops and shared projects |
+| `.wp` | Wallpapers, whitepapers and working papers |
+| `.xr` | Extended reality generally |
+| `.yo` | Short, informal, attention-getting addresses |
 
 ## Core and identity
 

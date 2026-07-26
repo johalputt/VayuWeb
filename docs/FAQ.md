@@ -82,10 +82,25 @@ majority vote can move a name, because no such mechanism exists to be invoked. W
 name is theft or coercion of your key — see T1 and T3 in the [threat model](THREAT-MODEL.md).
 
 **What about trademarks? Someone registered my company's name.**
-WebX will not help you, and that is deliberate. Constitution Article 36 refuses to make the
-registry a trademark court. The registry answers two questions — is this signature valid, is this
-name free — and no others. A protocol that can adjudicate a trademark dispute is a protocol with
-an office that can be petitioned, and everything else follows from that.
+The registry will not take it back, and that is deliberate. Article 36 refuses to make WebX a
+trademark court, because a protocol that can adjudicate a dispute is a protocol with an office
+that can be petitioned — and once that office exists it can be pointed at anyone.
+
+What you can do instead is **prove who you are**, which turns out to work better. Publish a DNS
+TXT record on the domain you already control, binding it to your WebX key. Any reader's client
+verifies it mechanically, with no panel involved. The squatter keeps the label and cannot produce
+that proof, so it stops being useful for impersonating you. See
+[spec/ATTESTATION.md](spec/ATTESTATION.md).
+
+This is deliberately weaker than a reserved-names list in one way and stronger in three. It will
+not stop `yourbrand-shop` from being registered. But it protects every name rather than only the
+listed ones, it works for a corner shop and a pseudonymous writer as well as a multinational, and
+nobody has to apply to anybody.
+
+**Do I get first claim on a WebX name because I own the matching clearnet domain?**
+No. Article 30.2 rules out priority windows and sunrise periods for every class of claimant,
+naming trademark holders and incumbent operators explicitly — and the drafters of the
+Constitution too. First valid signature wins, for everyone. Register early, and attest afterwards.
 
 **Can I sell a name?**
 You can transfer it. WebX deliberately declines to build a secondary market: Article 33 imposes a

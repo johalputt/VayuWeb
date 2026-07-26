@@ -76,6 +76,13 @@ Clients SHOULD make this visible: an interface that shows a reader "this is the 
 before" defeats lookalike labels more effectively than any registration policy, and it costs
 nothing to implement.
 
+[ATTESTATION.md](ATTESTATION.md) takes this further. A holder of a clearnet domain can prove the
+connection mechanically — a DNS TXT record, verified by the reader's own client, with no panel and
+no adjudication. A squatter who takes `brand.shop` keeps it, exactly as Article 30 requires, and
+cannot produce a signature from the key that controls `brand.com`. The label stays theirs and
+becomes worthless for impersonation, which removes the incentive rather than fighting it with a
+reservation list.
+
 **3.5 The honest residual.** None of this eliminates squatting or confusion. A determined actor
 with hardware will take labels, and a reader who has never seen a publisher before cannot tell a
 lookalike from the original. Section 3.4 protects returning readers, not first-time ones.
@@ -102,24 +109,43 @@ proposing hundreds speculatively is expensive while proposing one is not.
 
 ## 5. Collision policy
 
-5.1 An extension MUST be **at least three characters**. Every ISO 3166 country code is two
-letters, so a three-character floor keeps WebX clear of the entire ccTLD space at no meaningful
-cost.
+5.1 An extension MUST be **two to twelve characters**.
 
-5.2 An extension MUST NOT duplicate a well-known ICANN generic top-level domain.
+**Two-letter extensions are permitted.** An earlier draft of this document set a three-character
+floor to avoid the ISO 3166 country-code space. That reasoning does not survive examination and
+is withdrawn.
 
-Both rules are about the reader, not about law. WebX has no obligation to ICANN and ICANN has no
-jurisdiction here — but a `webx://example.com` that is unrelated to `https://example.com` teaches
-readers that WebX names cannot be trusted to mean anything, which is a self-inflicted wound. A
-parallel web should be recognisably parallel, not a confusing echo.
+WebX defines its own namespace. ISO 3166 is a useful shared reference, not an authority WebX
+recognises, and declining to use two-letter strings would mean ceding namespace design to a body
+the project exists to route around. The confusion argument is also empirically weak: the clearnet
+has already spent two decades treating `.io`, `.ai`, `.co`, `.me`, `.tv` and `.fm` as generic
+strings, and essentially nobody believes `.io` sites originate in the British Indian Ocean
+Territory. A two-letter string is a string. `in` is an English preposition, `io` is
+input/output, `me` is a pronoun.
 
-5.3 Country names, government identifiers and the names of living public figures MUST NOT be
-created as extensions. WebX cannot adjudicate who represents a nation, and creating a namespace
-that implies it can is an invitation to exactly the political pressure the project exists to
-avoid.
+The scheme settles any residual ambiguity: `webx://shop.io` and `https://shop.io` are visibly
+different systems, and [URI-SCHEME.md](URI-SCHEME.md) section 4.4 already requires clients to
+display the full authority without elision.
 
-5.4 Where an existing clearnet extension carries meaning worth preserving, the catalogue SHOULD
-offer an unambiguous alternative that reads clearly rather than a near-clone.
+5.2 An extension MUST NOT duplicate a well-known ICANN generic top-level domain. This rule
+survives, and for a different reason than 5.1 did: `webx://example.com` unrelated to
+`https://example.com` teaches readers that WebX names cannot be trusted to mean anything. A
+parallel web should be recognisably parallel, not a confusing echo of the most familiar strings
+on the clearnet.
+
+5.3 **Country names, government identifiers and the names of living public figures MUST NOT be
+created as extensions.** This is the rule that carries the weight 5.1 was wrongly asked to carry,
+and the distinction is between a string and a claim.
+
+`.in` is a two-letter string with an ordinary English meaning, and registering it asserts nothing
+about India. `.india` or `.bharat` reads as representing a nation, and WebX cannot adjudicate who
+does. Creating a namespace that implies it can invites exactly the political pressure the project
+exists to avoid.
+
+5.4 An extension MUST NOT be presented, in any client or any official material, as carrying
+national, governmental or official affiliation. Constitution Article 35's equality requirement
+already forbids treating any extension as more official than another; this makes the national
+case explicit.
 
 ## 6. Retirement
 

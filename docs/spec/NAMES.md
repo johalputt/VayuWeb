@@ -189,7 +189,8 @@ Further rules:
 
 ## Launch TLDs
 
-**The launch catalogue holds 349 extensions across ten categories.** It is listed in
+**The launch catalogue holds 409 extensions across eleven categories**, including 60
+two-letter extensions. It is listed in
 [NAMESPACE-CATALOGUE.md](NAMESPACE-CATALOGUE.md), and the reasoning behind a broad
 namespace — why breadth is safe here and expensive on the clearnet — is in
 [NAMESPACE.md](NAMESPACE.md).
