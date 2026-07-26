@@ -1,10 +1,10 @@
-# WebX Naming and TLD Policy
+# VayuWeb Naming and TLD Policy
 
-This document is the normative specification for WebX names: what a label may
+This document is the normative specification for VayuWeb names: what a label may
 contain, which labels are withheld, how a registration moves through its
 lifecycle, how ownership is handed between keys, which top-level domains exist
 at launch, and how a TLD is created or retired. It is a design document. No part
-of the system described here has been implemented, and no WebX name has ever
+of the system described here has been implemented, and no VayuWeb name has ever
 been registered.
 
 Record format, signature rules and log semantics are specified in
@@ -17,8 +17,8 @@ Record format, signature rules and log semantics are specified in
 The key words MUST, MUST NOT, SHALL, SHOULD, SHOULD NOT and MAY are to be
 interpreted as described in RFC 2119.
 
-A WebX name is a single label joined to a single top-level domain by a full
-stop: `label.tld`. WebX has no subdomains at the protocol layer in v1. The
+A VayuWeb name is a single label joined to a single top-level domain by a full
+stop: `label.tld`. VayuWeb has no subdomains at the protocol layer in v1. The
 registry indexes exactly one label per TLD and nothing beneath it, because
 subdomain delegation would require either a second namespace layer inside each
 record or a per-name delegation log, and neither has a ratified design.
@@ -49,7 +49,7 @@ encoding them there would obscure more than it clarifies:
 
 1. For any label of 4 or more characters, characters 3 and 4 MUST NOT both be
    `-`. This reserves the `xx--` shape, which is how internationalised labels
-   are signalled in the wider naming world, so that a future IDN WXIP can adopt
+   are signalled in the wider naming world, so that a future IDN VWIP can adopt
    a prefixed encoding without colliding with names already registered.
 2. The submitted label MUST already be NFC-normalised, lowercase ASCII. A peer
    MUST reject a non-conforming label rather than silently canonicalising it, so
@@ -68,15 +68,15 @@ an invalid operation never becomes an ownership fact.
 
 | Reserved | Reason |
 | --- | --- |
-| All 36 single-character labels (`a`-`z`, `0`-`9`) | Only 36 exist per TLD and their value is set by scarcity, not by use. First-come allocation turns a governance question into a race. Held pending an allocation WXIP. |
-| All 1,296 two-character labels | Scarcity, not sovereignty. Only 1,296 exist per TLD and their value comes from that scarcity rather than from use, so first-come allocation turns a governance question into a race. Held pending an allocation WXIP, on the same reasoning as single-character labels. The earlier rationale here — that they read as sovereign claims because they collide with ISO 3166 codes — is withdrawn: [NAMESPACE.md](NAMESPACE.md) section 5.3 establishes that a two-letter string is a string, and that a country *name* is the thing that constitutes a claim. |
+| All 36 single-character labels (`a`-`z`, `0`-`9`) | Only 36 exist per TLD and their value is set by scarcity, not by use. First-come allocation turns a governance question into a race. Held pending an allocation VWIP. |
+| All 1,296 two-character labels | Scarcity, not sovereignty. Only 1,296 exist per TLD and their value comes from that scarcity rather than from use, so first-come allocation turns a governance question into a race. Held pending an allocation VWIP, on the same reasoning as single-character labels. The earlier rationale here — that they read as sovereign claims because they collide with ISO 3166 codes — is withdrawn: [NAMESPACE.md](NAMESPACE.md) section 5.3 establishes that a two-letter string is a string, and that a country *name* is the thing that constitutes a claim. |
 | `www` | Universally read as a host prefix rather than a site. Registering it invites a name that resolves to something other than what a user typed. |
-| `localhost` | Special-use in RFC 6761. A resolver MUST treat it as loopback and MUST NOT resolve it through WebX. |
+| `localhost` | Special-use in RFC 6761. A resolver MUST treat it as loopback and MUST NOT resolve it through VayuWeb. |
 | `example`, `invalid`, `test` | RFC 2606 reserves these for documentation and testing. Documentation that uses a live name eventually points somewhere its author did not intend. |
-| `webx` | Protocol identity. It is withheld in every TLD, including `.webx`, so that no holder can speak as the protocol. |
-| `control`, `api`, `resolver`, `proxy`, `pac`, `wpad`, `_webx` | These collide with the resolver's control surface on `127.0.0.1:7653` or with proxy auto-configuration conventions. `wpad` in particular is a long-standing proxy-hijack vector; a name that a browser might fetch as configuration MUST NOT be registrable by a stranger. |
+| `vayu` | Protocol identity. It is withheld in every TLD, including `.vayu`, so that no holder can speak as the protocol. |
+| `control`, `api`, `resolver`, `proxy`, `pac`, `wpad`, `_vayu` | These collide with the resolver's control surface on `127.0.0.1:7653` or with proxy auto-configuration conventions. `wpad` in particular is a long-standing proxy-hijack vector; a name that a browser might fetch as configuration MUST NOT be registrable by a stranger. |
 
-Reserved labels are not permanently unregistrable. A WXIP MAY release a class of
+Reserved labels are not permanently unregistrable. A VWIP MAY release a class of
 them under an allocation policy, but until one is ratified the class stays
 closed. Withholding is reversible; a bad allocation is not.
 
@@ -189,7 +189,7 @@ Further rules:
 
 ## Launch TLDs
 
-**The launch catalogue holds 1,260 extensions across 33 categories**, including 60
+**The launch catalogue holds 1,267 extensions across 34 categories**, including 60
 two-letter extensions. It is listed in
 [NAMESPACE-CATALOGUE.md](NAMESPACE-CATALOGUE.md), and the reasoning behind a broad
 namespace — why breadth is safe here and expensive on the clearnet — is in
@@ -206,11 +206,11 @@ its charter adds) and its own proof-of-work difficulty curve, driven by its
 registration rate over the trailing 30 days.
 
 The twelve below are the protocol's founding extensions, described here because
-they carry meaning specific to WebX itself. They hold no privileged status:
+they carry meaning specific to VayuWeb itself. They hold no privileged status:
 Constitution Article 35 requires every extension to be equal, and no client may
 present one as more official than another.
 
-- `.webx` — the protocol's own namespace; general-purpose, the default suggestion.
+- `.vayu` — the protocol's own namespace; general-purpose, the default suggestion.
 - `.vayu` — general-purpose, for projects in the Vayu ecosystem and its neighbours.
 - `.p2p` — peer-to-peer software, protocols and node operators.
 - `.free` — projects whose defining claim is that they cost nothing to use.
@@ -226,13 +226,13 @@ present one as more official than another.
 These characterisations are descriptive, not enforced. The registry answers
 whether a signature is valid and whether a name is free; it does not audit
 whether a `.news` site publishes news. A TLD MAY adopt an enforced eligibility
-rule through a WXIP, but none does at launch.
+rule through a VWIP, but none does at launch.
 
 ## Creating a TLD
 
-A new TLD requires a ratified WXIP. The proposal MUST specify the string, the
+A new TLD requires a ratified VWIP. The proposal MUST specify the string, the
 character of the TLD, its additional reserved labels, its initial proof-of-work
-parameters, and a collision analysis against existing WebX TLDs and against
+parameters, and a collision analysis against existing VayuWeb TLDs and against
 currently delegated public DNS TLDs.
 
 Ratification requires, over a 30-day voting period, at least a two-thirds
@@ -241,24 +241,24 @@ of eligible signing keys — those active in the log during the trailing 90 days
 These figures are restated here for readability only:
 [CONSTITUTION.md](../../constitution/CONSTITUTION.md) is the normative source
 for eligibility, ballot format, quorum and threshold, and governs where the two
-differ. The WXIP process itself is described in
+differ. The VWIP process itself is described in
 [GOVERNANCE.md](../GOVERNANCE.md).
 
-A limitation worth stating plainly: WebX cannot prevent ICANN from later
-delegating a string that WebX already uses. The collision analysis reduces the
+A limitation worth stating plainly: VayuWeb cannot prevent ICANN from later
+delegating a string that VayuWeb already uses. The collision analysis reduces the
 chance of user confusion at the moment of creation; it does not bind anyone
-outside WebX, and it never will.
+outside VayuWeb, and it never will.
 
 ## Retiring a TLD
 
-A TLD MAY be retired only by a ratified WXIP, and retirement MUST NOT strand its
+A TLD MAY be retired only by a ratified VWIP, and retirement MUST NOT strand its
 holders. The minimum sunset is 24 months from ratification, chosen so that every
 holder meets at least two renewal prompts inside the window; a single-cycle
 sunset would silently drop anyone who renewed the week before the vote.
 
 - At ratification, peers MUST immediately refuse new registrations in the
   retiring TLD.
-- The retirement WXIP MUST designate a successor TLD. For every name live at
+- The retirement VWIP MUST designate a successor TLD. For every name live at
   ratification, the identical label in the successor TLD is reserved for that
   name's `ownerKey` for the full 24 months, claimable by a signed registration
   with no proof-of-work.
@@ -268,27 +268,27 @@ sunset would silently drop anyone who renewed the week before the vote.
 - At month 24 the TLD becomes historic. Resolvers MUST keep serving the alias
   for a further 12 months so links in the wild keep working, after which the
   names enter QUARANTINE and then FREE.
-- Holders who never claim their successor name lose it at month 24. WebX has no
+- Holders who never claim their successor name lose it at month 24. VayuWeb has no
   mechanism to act on an absent holder's behalf, and inventing one would mean
   someone other than the key holder controls the name.
 
-WebX cannot compel third parties to update links that point at a retired TLD.
+VayuWeb cannot compel third parties to update links that point at a retired TLD.
 The 12-month alias tail is mitigation, not a fix.
 
 ## Deferred: internationalised labels and homograph defence
 
 Labels are ASCII-only at launch. Internationalised labels and any homograph
 policy are explicitly out of scope for v1 and MUST be addressed by a future
-WXIP.
+VWIP.
 
-The reasoning is that WebX's dispute doctrine is first-valid-signature-wins and
+The reasoning is that VayuWeb's dispute doctrine is first-valid-signature-wins and
 the registry is not a court. Where an adjudicator exists, a homograph
 registration is a reversible mistake; here it is permanent. Admitting
 mixed-script labels before a confusable policy is ratified would create a class
 of names that look identical to existing names, cannot be revoked, and cannot be
 appealed. That is not a rough edge; it is an unrecoverable failure mode.
 
-A future WXIP will need to settle, at minimum: which Unicode scripts are
+A future VWIP will need to settle, at minimum: which Unicode scripts are
 admissible; whether mixed-script labels are permitted at all; a confusable
 skeleton computation in the manner of Unicode Technical Standard 39, and whether
 a colliding skeleton blocks registration or merely flags it; the exact Unicode
@@ -300,7 +300,7 @@ a non-ASCII label MUST be rejected at validation.
 ## Status
 
 Status: Draft — not yet implemented. This document specifies intended behaviour
-against the pre-implementation WebX design; nothing described here is running.
+against the pre-implementation VayuWeb design; nothing described here is running.
 
 ## See also
 

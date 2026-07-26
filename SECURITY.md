@@ -2,7 +2,7 @@
 
 ## Current status
 
-WebX has **no implementation**. There is no released software, no running network, and no
+VayuWeb has **no implementation**. There is no released software, no running network, and no
 deployed registry. Today the attack surface is the *design*: the
 [Constitution](constitution/CONSTITUTION.md), the specifications in [docs/spec](docs/spec),
 and the [Threat Model](docs/THREAT-MODEL.md).
@@ -16,7 +16,7 @@ Report privately if you find:
 
 - A way to take, block or destroy a name that its holder controls.
 - A way to make a resolver accept a record it should reject, or reject one it should accept.
-- A path that leaks a WebX lookup to a clearnet DNS resolver, an analytics endpoint, or any
+- A path that leaks a VayuWeb lookup to a clearnet DNS resolver, an analytics endpoint, or any
   third party.
 - A deanonymisation path that the [Threat Model](docs/THREAT-MODEL.md) does not already
   acknowledge.
@@ -30,7 +30,7 @@ wording, and design questions that are not exploitable.
 
 ## How to report
 
-Email **security@webx.dev** with:
+Email **security@vayupress.com** with:
 
 - What the flaw is, stated as an attack: who does what, in what order, to get what.
 - Which document and which clause or section it applies to.
@@ -74,5 +74,5 @@ In scope: everything in this repository, and any successor mirror published unde
 own keys.
 
 Out of scope: GitHub itself, Radicle itself, IPFS, Hypercore, Hyperswarm and other upstream
-dependencies — report those to their maintainers. If an upstream flaw has a WebX-specific
+dependencies — report those to their maintainers. If an upstream flaw has a VayuWeb-specific
 consequence, report that consequence here as well.

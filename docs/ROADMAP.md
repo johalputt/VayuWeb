@@ -1,4 +1,4 @@
-# WebX Roadmap
+# VayuWeb Roadmap
 
 **Nothing here is implemented, and no date is promised.**
 
@@ -16,13 +16,13 @@ earlier one, but it cannot *finish* early.
 
 | Item | State |
 |---|---|
-| The WebX Constitution — six Titles, sixty Articles | Complete |
+| The VayuWeb Constitution — six Titles, sixty Articles | Complete |
 | Registry specification | Complete (draft) |
 | Naming and TLD policy | Complete (draft) |
 | Resolution specification | Complete (draft) |
 | Hosting and publishing specification | Complete (draft) |
 | Proof-of-work specification | Complete (draft) |
-| WXIP-0000, the improvement process | Complete |
+| VWIP-0000, the improvement process | Complete |
 | Threat model | Complete (draft) |
 | Whitepaper, architecture, governance guide, glossary, FAQ | Complete (draft) |
 | Independent adversarial review of the above | **Open — this is the current work** |
@@ -65,7 +65,7 @@ conformance suite.
 
 ## Phase 3 — Resolution proxy
 
-**Goal:** WebX names work in a browser nobody modified.
+**Goal:** VayuWeb names work in a browser nobody modified.
 
 The loopback HTTP proxy on `127.0.0.1:7654`; the token-authenticated control API on
 `127.0.0.1:7653`; the resolution algorithm with its cache and TTL policy including negative
@@ -74,7 +74,7 @@ catalogue.
 
 **Depends on:** Phase 2.
 
-**Done when:** an unmodified browser, pointed at the proxy, renders a WebX page end to end — and
+**Done when:** an unmodified browser, pointed at the proxy, renders a VayuWeb page end to end — and
 the outbound-connection conformance test of Constitution Article 14 passes, showing that a
 single-name lookup produces no clearnet DNS query and no phone-home.
 
@@ -120,7 +120,7 @@ implementation-diversity report.
 **Done when:** a second implementation, written by parties with no common employer or funder,
 interoperates fully with the first across the conformance suite. This is the only real proof that
 a specification is complete, and Constitution Article 44.2 makes it a precondition of any
-Standards Track WXIP reaching Final.
+Standards Track VWIP reaching Final.
 
 ## Phase 7 — Convenience layers
 
@@ -132,7 +132,7 @@ anyone must ask permission from.
 **Depends on:** Phase 5.
 
 **Built last on purpose.** A convenience shipped early becomes a requirement, and a requirement
-becomes a chokepoint. The extension must never be necessary to use WebX; if it becomes so, that
+becomes a chokepoint. The extension must never be necessary to use VayuWeb; if it becomes so, that
 is a defect against Constitution Article 4.
 
 **Done when:** every convenience layer can be removed and the system still works completely.
@@ -151,11 +151,11 @@ What is worth doing today, in descending order of value:
 3. **Break a specification.** Find the ambiguity two implementers would resolve differently — the
    place where the text is not sufficient to build a conformant client.
 4. **Challenge a number.** Every threshold and duration was chosen and justified. If a
-   justification is weak, say so; that is a legitimate WXIP.
-5. **Find an overclaim.** Any sentence that makes WebX sound more private, more available or more
+   justification is weak, say so; that is a legitimate VWIP.
+5. **Find an overclaim.** Any sentence that makes VayuWeb sound more private, more available or more
    censorship-resistant than the design supports is a bug, and a serious one.
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for how, and [spec/WXIP-0000.md](spec/WXIP-0000.md) for
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for how, and [spec/VWIP-0000.md](spec/VWIP-0000.md) for
 the process.
 
 ## What would make us stop and rethink
@@ -180,7 +180,7 @@ Listed in advance, so that changing our minds later looks like integrity rather 
 
 ## See also
 
-- [The WebX Constitution](../constitution/CONSTITUTION.md)
+- [The VayuWeb Constitution](../constitution/CONSTITUTION.md)
 - [Whitepaper](WHITEPAPER.md)
 - [Threat model](THREAT-MODEL.md)
-- [WXIP-0000](spec/WXIP-0000.md)
+- [VWIP-0000](spec/VWIP-0000.md)

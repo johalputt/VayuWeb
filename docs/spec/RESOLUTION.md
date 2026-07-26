@@ -1,6 +1,6 @@
-# WebX Resolution Specification
+# VayuWeb Resolution Specification
 
-This document specifies how a WebX name is turned into bytes in a browser: the
+This document specifies how a VayuWeb name is turned into bytes in a browser: the
 local HTTP proxy, the control API, the ordered resolution algorithm, caching,
 privacy obligations, the origin and security model, and the error catalogue.
 
@@ -11,7 +11,7 @@ Nothing described here has been implemented. This is a design under review.
 
 ## Scope and conformance
 
-A conforming resolver replicates the WebX registry log and serves reads from
+A conforming resolver replicates the VayuWeb registry log and serves reads from
 its local Hyperbee index (see [REGISTRY.md](REGISTRY.md)), validates labels
 against [NAMES.md](NAMES.md), fetches content over IPFS/IPNS as described in
 [HOSTING.md](HOSTING.md), and exposes the two loopback listeners defined below.
@@ -26,14 +26,14 @@ network listener**:
 
 ```text
 127.0.0.1:7654         HTTP proxy    browser-facing, unauthenticated
-<runtime-dir>/webx.sock  control API   tooling-facing, bearer-token authenticated
+<runtime-dir>/vayuweb.sock  control API   tooling-facing, bearer-token authenticated
 ```
 
 The proxy MUST bind `127.0.0.1` (and `[::1]` where available). A resolver MUST
 NOT bind `0.0.0.0`, `::`, a LAN address or a tunnel interface, and MUST refuse
 to start if configuration requests one. There is no "share my resolver" mode: a
 resolver answering for other hosts becomes an unauthenticated proxy and a
-query-log collector, precisely the shape WebX exists to avoid.
+query-log collector, precisely the shape VayuWeb exists to avoid.
 
 The control API is served over a **Unix domain socket (or a named pipe on
 Windows)** with mode `0600`, in a directory owned by the user with mode `0700`.
@@ -49,18 +49,18 @@ the hardening rules for the proxy that must remain on TCP are specified in
 ## Resolution algorithm
 
 The following steps are normative and ordered. The trigger is a browser request
-for `http://example.webx/` arriving at the proxy.
+for `http://example.vayu/` arriving at the proxy.
 
 1. **Parse.** Take host and path from the absolute-form request URI or the
    `Host` header. Split the host into label and TLD at the last dot. Reject a
    host with more than two dot-separated components (subdomains are deferred;
    see the limitations section).
-2. **TLD classification.** If the TLD is in the WebX launch set — `.webx .vayu
+2. **TLD classification.** If the TLD is in the VayuWeb launch set — `.vayu .vayu
    .p2p .free .decent .libre .sov .dao .indie .open .news .blog` — continue at
    step 4; otherwise go to step 3.
-3. **Non-WebX host.** In the default `webx-only` mode the proxy MUST return
+3. **Non-VayuWeb host.** In the default `vayu-only` mode the proxy MUST return
    error 1403 `TLD_UNKNOWN`. In `passthrough` mode it MAY forward the request
-   to the operating system's networking stack. In neither mode is a WebX TLD
+   to the operating system's networking stack. In neither mode is a VayuWeb TLD
    eligible for step 3; that is what makes the no-DNS-fallback rule enforceable
    rather than aspirational.
 4. **Label validation.** Normalise the label to NFC, lowercase, and check it
@@ -94,14 +94,14 @@ for `http://example.webx/` arriving at the proxy.
 12. **Integrity check.** Verify the bytes hash to the requested CID. A mismatch
     MUST return 1512 `CONTENT_INTEGRITY` and MUST NOT reach the browser; if
     detected mid-stream the connection is aborted. This check is the whole of
-    WebX's transport authenticity story — there is no certificate authority to
+    VayuWeb's transport authenticity story — there is no certificate authority to
     consult.
 13. **Path mapping.** Treat the CID as a directory root and map the request
     path onto it, resolving `/` and directory paths to `index.html` when
     present. No match returns 1414 `PATH_NOT_FOUND` — an ordinary 404, the
     site's problem rather than the network's.
 14. **Response.** Emit the bytes with the security headers below, the
-    diagnostic `X-WebX-*` headers, and a `Content-Type` from the file
+    diagnostic `X-VayuWeb-*` headers, and a `Content-Type` from the file
     extension. Populate the caches. Return.
 
 Steps 7 through 12 are the only slow ones. A resolver SHOULD report per-step
@@ -125,13 +125,13 @@ availability problem.
 
 The proxy on `127.0.0.1:7654` speaks HTTP/1.1 forward-proxy semantics:
 absolute-form request URIs, plus `CONNECT` in `passthrough` mode only. It
-accepts plaintext HTTP. There is no CA-issued certificate for `example.webx`
+accepts plaintext HTTP. There is no CA-issued certificate for `example.vayu`
 and there cannot be one; confidentiality on that hop comes from the hop being
 loopback, and authenticity from content addressing.
 
 The proxy MUST refuse any request whose target host is `localhost`, an address
 in `127.0.0.0/8`, `::1`, a link-local address, or one of the resolver's own
-listeners. That is what stops a WebX page reaching the control API through the
+listeners. That is what stops a VayuWeb page reaching the control API through the
 proxy it is already talking to. The proxy MUST NOT accept proxy credentials,
 MUST NOT emit `X-Forwarded-For`, and MUST NOT add any header identifying the
 user, the install or the resolver version.
@@ -170,8 +170,8 @@ POST   /v1/token/rotate      issue a new bearer token
 ```
 
 The API MUST reject any request carrying an `Origin` header and MUST require
-the custom header `X-WebX-Control: 1`. A custom header forces a CORS preflight
-that the API answers with a denial, so no browser page — WebX or clearnet — can
+the custom header `X-VayuWeb-Control: 1`. A custom header forces a CORS preflight
+that the API answers with a denial, so no browser page — VayuWeb or clearnet — can
 reach these endpoints even if it learns the port. The API MUST NOT set
 `Access-Control-Allow-Origin` for any origin, ever.
 
@@ -185,7 +185,7 @@ Options are ranked. A resolver SHALL support option 1 and SHOULD support
 option 2.
 
 1. **PAC file, preferred.** The resolver serves a proxy auto-configuration
-   script routing only the WebX TLD set to `127.0.0.1:7654` and returning
+   script routing only the VayuWeb TLD set to `127.0.0.1:7654` and returning
    `DIRECT` for everything else. Recommended because it keeps clearnet traffic
    outside the resolver, works in every major browser with no install, and
    yields the correct origin per name automatically.
@@ -196,7 +196,7 @@ option 2.
 3. **Optional extension.** An extension MAY add address-bar completion, a
    name-status indicator and one-click pinning.
 
-A browser extension MUST NOT be required to browse WebX. Requiring one would
+A browser extension MUST NOT be required to browse VayuWeb. Requiring one would
 put an extension store — an entity that can review, reject, remove or silently
 update the code — between users and a protocol whose premise is the absence of
 such an entity. The extension MUST be a convenience layer over the same proxy
@@ -233,17 +233,17 @@ Negative caching:
 - `REGISTRY_UNAVAILABLE`, `CONTENT_INTEGRITY`: never cached.
 
 When the registry is unreachable the resolver MAY serve a record up to 600
-seconds past its TTL, MUST mark it `X-WebX-Stale: 1`, and MUST NOT serve past
+seconds past its TTL, MUST mark it `X-VayuWeb-Stale: 1`, and MUST NOT serve past
 `notAfter`.
 
-Diagnostic headers — `X-WebX-Name`, `X-WebX-Seq`, `X-WebX-CID`, `X-WebX-Source`
-(`cid`, `ipns`, `peer`), `X-WebX-Resolved-From` (`cache`, `registry`) and
-`X-WebX-Stale` — MUST be **off by default** and enabled only through the control
+Diagnostic headers — `X-VayuWeb-Name`, `X-VayuWeb-Seq`, `X-VayuWeb-CID`, `X-VayuWeb-Source`
+(`cid`, `ipns`, `peer`), `X-VayuWeb-Resolved-From` (`cache`, `registry`) and
+`X-VayuWeb-Stale` — MUST be **off by default** and enabled only through the control
 API.
 
-Emitted unconditionally they brand every response as WebX, which is the most
+Emitted unconditionally they brand every response as VayuWeb, which is the most
 consequential fingerprint the resolver produces: it lets any page that can
-elicit a response determine that WebX is installed. For a reader in a hostile
+elicit a response determine that VayuWeb is installed. For a reader in a hostile
 jurisdiction that single fact may be all an adversary needs. Diagnostics that
 disclose the tool's presence are disclosure, not diagnostics. See
 [LOCAL-SURFACE.md](LOCAL-SURFACE.md) section 2.4.
@@ -257,24 +257,24 @@ disclose the tool's presence are disclosure, not diagnostics. See
 - The resolver MUST NOT send telemetry, analytics, crash reports or update
   pings to any host. Update checks, if offered, MUST be manual.
 - The resolver MUST NOT contact the clearnet DNS resolver for any host in the
-  WebX TLD set, in any mode, for any reason, including when the name does not
+  VayuWeb TLD set, in any mode, for any reason, including when the name does not
   exist. Enforcement is structural: step 2 classifies the TLD before a network
-  path is chosen, step 3 is unreachable for WebX TLDs, and the negative answer
+  path is chosen, step 3 is unreachable for VayuWeb TLDs, and the negative answer
   is produced locally as error 1404 rather than by falling through. A leaked
-  lookup would tell a DNS operator exactly which WebX names a user visits — the
+  lookup would tell a DNS operator exactly which VayuWeb names a user visits — the
   most valuable metadata in the system.
 - The resolver MUST NOT prefetch, speculatively resolve, or warm caches from
   names the user has not requested.
 
 Stated plainly as a limitation: swarm participation reveals to peers that an
-address runs WebX, and content requests reveal to the serving peer which CIDs
-are fetched. WebX removes the DNS observer; it does not make browsing
+address runs VayuWeb, and content requests reveal to the serving peer which CIDs
+are fetched. VayuWeb removes the DNS observer; it does not make browsing
 anonymous. See [THREAT-MODEL.md](../THREAT-MODEL.md).
 
 ## Origin and security model
 
 Because the proxy answers absolute-form requests, the browser derives the
-origin from the request URL. `http://example.webx` and `http://other.webx` are
+origin from the request URL. `http://example.vayu` and `http://other.vayu` are
 therefore distinct origins with separate cookie jars, storage and permissions,
 requiring nothing of the resolver beyond not rewriting hosts. The resolver MUST
 NOT serve one name's content under another name's host.
@@ -293,7 +293,7 @@ explicitly, so a directive nobody remembered to add fails closed. Every source
 is `'self'`, so a page loads only bytes from its own verified CID. Clearnet
 subresources are refused because each one reintroduces a DNS lookup, a
 certificate authority, and a third party learning the visitor's address and
-which WebX page they are reading — three things the protocol exists to remove.
+which VayuWeb page they are reading — three things the protocol exists to remove.
 There is no `'unsafe-inline'`, for styles or anything else, and no CSP
 reporting endpoint, because a report endpoint is an outbound channel that fires
 precisely when something unexpected happens.
@@ -309,18 +309,18 @@ Each is scoped to that site alone and MUST be surfaced to the reader. No flag,
 control-API setting or configuration file widens the policy to clearnet, or
 applies a relaxation globally; those refusals are not tunable.
 
-HSTS is never sent: WebX names are served over plaintext loopback HTTP, and an
+HSTS is never sent: VayuWeb names are served over plaintext loopback HTTP, and an
 HSTS entry would poison the browser's state for that host permanently.
 
 ## Error catalogue
 
 A failure is returned as an HTML page carrying the numeric code in an
-`X-WebX-Error` header, and as a JSON object on the control API.
+`X-VayuWeb-Error` header, and as a JSON object on the control API.
 
 | Code | Name | HTTP | User-facing message |
 | --- | --- | --- | --- |
-| 1400 | LABEL_INVALID | 400 | That name is not a valid WebX name. |
-| 1403 | TLD_UNKNOWN | 502 | This resolver only handles WebX names. |
+| 1400 | LABEL_INVALID | 400 | That name is not a valid VayuWeb name. |
+| 1403 | TLD_UNKNOWN | 502 | This resolver only handles VayuWeb names. |
 | 1404 | NAME_NOT_FOUND | 404 | No one has registered this name. |
 | 1408 | CONTENT_TIMEOUT | 504 | The site took too long to load. |
 | 1409 | NAME_QUARANTINED | 409 | This name expired and is on hold. |
@@ -346,7 +346,7 @@ name onward.
 ## Known limitations
 
 Subdomains are not resolvable at launch; a record addresses one name. Wildcard
-and delegated subdomain semantics are deferred to a WXIP.
+and delegated subdomain semantics are deferred to a VWIP.
 
 There is no transport encryption beyond the loopback boundary, so a local
 process running as the same user can observe traffic — an accepted trade
@@ -358,7 +358,7 @@ remedy beyond volunteers.
 
 Status: Draft — not yet implemented. This describes the intended behaviour of a
 resolver that has not been written; every number is open to revision through
-the WXIP process.
+the VWIP process.
 
 See also: [REGISTRY.md](REGISTRY.md), [NAMES.md](NAMES.md),
 [HOSTING.md](HOSTING.md), [THREAT-MODEL.md](../THREAT-MODEL.md).

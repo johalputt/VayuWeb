@@ -1,6 +1,6 @@
-# Services on WebX
+# Services on VayuWeb
 
-How anyone — including the project's founder — can build a business on WebX without capturing it,
+How anyone — including the project's founder — can build a business on VayuWeb without capturing it,
 and how VayuPress, VayuMail and VayuTalk fit on top of a name you own.
 
 **Status:** Draft against the pre-implementation design.
@@ -57,7 +57,7 @@ configuration, staff onboarding.
 
 ## 3. What a service may never do
 
-3.1 It MUST NOT be required to use WebX. Every function above MUST remain achievable by a person
+3.1 It MUST NOT be required to use VayuWeb. Every function above MUST remain achievable by a person
 with the free client and no account.
 
 3.2 It MUST NOT hold a name such that non-payment loses it. A lapsed subscription may stop the
@@ -88,7 +88,7 @@ that **nothing you buy here can be taken away by us.** Their name works whether 
 Very few infrastructure businesses can say that, and the ones that can do not lose customers to
 the fear of lock-in.
 
-## 5. The Vayu suite on WebX
+## 5. The Vayu suite on VayuWeb
 
 The clearest demonstration of what a name you own is actually for.
 
@@ -97,11 +97,11 @@ for the domain, a host for the site, a mail provider for the mailbox, and a chat
 elsewhere. Four bills, four accounts, four parties who can each end it, and an identity assembled
 from things other people control.
 
-On WebX it is **one key and one name**:
+On VayuWeb it is **one key and one name**:
 
 | | Product | What it gives the name |
 |---|---|---|
-| Site | **VayuPress** | Publishes to `webx://you.vayu` — content-addressed, signed, no server to run |
+| Site | **VayuPress** | Publishes to `vayu://you.vayu` — content-addressed, signed, no server to run |
 | Mail | **VayuMail** | `hi@you.vayu`, keyed to the same identity |
 | Chat | **VayuTalk** | Messaging bound to the same keypair, no separate account |
 
@@ -109,10 +109,10 @@ One registration. One recovery configuration. One thing to lose or keep.
 
 ### 5.1 Rules for the integration
 
-5.1.1 Each product MUST work with a WebX name **and** without one. Neither may become a
+5.1.1 Each product MUST work with a VayuWeb name **and** without one. Neither may become a
 requirement for the other, or the suite becomes the chokepoint.
 
-5.1.2 The WebX name MUST remain fully usable with none of these products installed. A name is not
+5.1.2 The VayuWeb name MUST remain fully usable with none of these products installed. A name is not
 a Vayu account.
 
 5.1.3 Any Vayu-specific record type MUST be specified publicly and implementable by anyone. A
@@ -125,7 +125,7 @@ one-to-one, require the recipient to be reachable, and involve metadata that a p
 never carry.** Neither product may put addressing or delivery metadata into the registry. That
 design is not settled and MUST NOT be presented as though it is.
 
-5.1.5 The suite MUST NOT be pre-selected in the WebX client, and the client MUST work fully
+5.1.5 The suite MUST NOT be pre-selected in the VayuWeb client, and the client MUST work fully
 without it.
 
 ## 6. Conformance
@@ -136,11 +136,11 @@ without it.
 4. No provider is pre-selected in any client.
 5. Customer data and pinned content are exportable in a form another provider can accept.
 6. Keypairs are generated on the customer's device; custody is opt-in and exportable.
-7. Each Vayu product runs without a WebX name, and a WebX name runs without any Vayu product.
+7. Each Vayu product runs without a VayuWeb name, and a VayuWeb name runs without any Vayu product.
 
 ## See also
 
 - [Position](POSITION.md) — the four commitments
 - [Cost model](spec/COST.md) — why the protocol is free
 - [Namespace](spec/NAMESPACE.md) — why extensions are not sold
-- [The WebX Constitution](../constitution/CONSTITUTION.md) — Articles 4, 7, 9, 35
+- [The VayuWeb Constitution](../constitution/CONSTITUTION.md) — Articles 4, 7, 9, 35

@@ -1,12 +1,12 @@
-# WebX FAQ
+# VayuWeb FAQ
 
 Short answers, including the unwelcome ones. Several of these are "no".
 
-**Status:** Draft against the pre-implementation design. WebX is not built yet.
+**Status:** Draft against the pre-implementation design. VayuWeb is not built yet.
 
 ## Basics
 
-**What is WebX?**
+**What is VayuWeb?**
 A peer-to-peer naming and hosting protocol. It lets you register a name, publish a site, and have
 other people reach it from an ordinary browser — without a registrar, a certificate authority, a
 hosting company, or anyone who can be asked to make you disappear.
@@ -23,7 +23,7 @@ Rules are cheap to change while the only thing at stake is an argument. Once peo
 live on the system, they are not.
 
 **Is this a blockchain?**
-No. There is no global consensus on ordering, no mining, no block reward, and no chain. WebX uses
+No. There is no global consensus on ordering, no mining, no block reward, and no chain. VayuWeb uses
 a signed append-only log per participant with a deterministic convergence rule for the one case
 that genuinely conflicts — two people claiming the same free name at the same time. That is
 dramatically cheaper than a blockchain and it is sufficient, because naming does not need
@@ -43,9 +43,9 @@ No money. It costs a few seconds of your computer's time — a memory-hard proof
 trivial for one name and grows superlinearly if you try to take ten thousand. See
 [spec/PROOF-OF-WORK.md](spec/PROOF-OF-WORK.md).
 
-**Who runs WebX?**
+**Who runs VayuWeb?**
 Nobody. Constitution Article 39 is titled "There Is No Governing Body" and means it. Protocol
-changes move through the [WXIP process](spec/WXIP-0000.md); the network runs whatever its peers
+changes move through the [VWIP process](spec/VWIP-0000.md); the network runs whatever its peers
 choose to run.
 
 ## Names
@@ -55,7 +55,7 @@ Generate an Ed25519 keypair, do the proof-of-work, sign a registration record, a
 valid signature wins.
 
 **What extensions are there?**
-Twelve at launch: `.webx`, `.vayu`, `.p2p`, `.free`, `.decent`, `.libre`, `.sov`, `.dao`,
+Twelve at launch: `.vayu`, `.vayu`, `.p2p`, `.free`, `.decent`, `.libre`, `.sov`, `.dao`,
 `.indie`, `.open`, `.news`, `.blog`. Plural on purpose — a single namespace is a single thing
 worth capturing. All extensions are equal; none is the "real" one.
 
@@ -82,12 +82,12 @@ majority vote can move a name, because no such mechanism exists to be invoked. W
 name is theft or coercion of your key — see T1 and T3 in the [threat model](THREAT-MODEL.md).
 
 **What about trademarks? Someone registered my company's name.**
-The registry will not take it back, and that is deliberate. Article 36 refuses to make WebX a
+The registry will not take it back, and that is deliberate. Article 36 refuses to make VayuWeb a
 trademark court, because a protocol that can adjudicate a dispute is a protocol with an office
 that can be petitioned — and once that office exists it can be pointed at anyone.
 
 What you can do instead is **prove who you are**, which turns out to work better. Publish a DNS
-TXT record on the domain you already control, binding it to your WebX key. Any reader's client
+TXT record on the domain you already control, binding it to your VayuWeb key. Any reader's client
 verifies it mechanically, with no panel involved. The squatter keeps the label and cannot produce
 that proof, so it stops being useful for impersonating you. See
 [spec/ATTESTATION.md](spec/ATTESTATION.md).
@@ -97,17 +97,17 @@ not stop `yourbrand-shop` from being registered. But it protects every name rath
 listed ones, it works for a corner shop and a pseudonymous writer as well as a multinational, and
 nobody has to apply to anybody.
 
-**Do I get first claim on a WebX name because I own the matching clearnet domain?**
+**Do I get first claim on a VayuWeb name because I own the matching clearnet domain?**
 No. Article 30.2 rules out priority windows and sunrise periods for every class of claimant,
 naming trademark holders and incumbent operators explicitly — and the drafters of the
 Constitution too. First valid signature wins, for everyone. Register early, and attest afterwards.
 
 **Can I sell a name?**
-You can transfer it. WebX deliberately declines to build a secondary market: Article 33 imposes a
+You can transfer it. VayuWeb deliberately declines to build a secondary market: Article 33 imposes a
 settlement delay on transfers and refuses to provide market infrastructure. Names are for use.
 
 **Can new extensions be added?**
-Yes, through a WXIP with a ratification threshold set by the Constitution. Retiring one is
+Yes, through a VWIP with a ratification threshold set by the Constitution. Retiring one is
 harder than creating one, and requires a minimum 24-month sunset with mandatory alias records, so
 that a retirement cannot strand people who built an identity on it.
 
@@ -141,20 +141,20 @@ be an optional extension for convenience, but Constitution Article 4 means it mu
 requirement.
 
 **Will ordinary links work?**
-Within WebX, yes. A `.webx` page linking to a clearnet page works. A clearnet page linking to a
-`.webx` name only works for readers who are running the resolver — which is the same bootstrapping
-problem every parallel network has, and WebX has no magic answer to it.
+Within VayuWeb, yes. A `.vayu` page linking to a clearnet page works. A clearnet page linking to a
+`.vayu` name only works for readers who are running the resolver — which is the same bootstrapping
+problem every parallel network has, and VayuWeb has no magic answer to it.
 
-**Does a WebX lookup leak to normal DNS?**
-No, and this is a hard requirement rather than a preference. The resolver answers WebX names
+**Does a VayuWeb lookup leak to normal DNS?**
+No, and this is a hard requirement rather than a preference. The resolver answers VayuWeb names
 authoritatively and returns a defined error rather than falling through to a clearnet resolver.
 Constitution Article 14 makes it testable: the conformance suite checks the outbound connections
 produced by a single-name lookup.
 
 ## Privacy
 
-**Does WebX make me anonymous?**
-**No, and it is not trying to.** WebX is a parallel web, not a hidden one. It does not hide your
+**Does VayuWeb make me anonymous?**
+**No, and it is not trying to.** VayuWeb is a parallel web, not a hidden one. It does not hide your
 IP address, your traffic patterns, or what you fetched from anyone watching your network. Your
 network provider can see that you are using it.
 
@@ -162,19 +162,19 @@ network provider can see that you are using it.
 It is a sequencing decision, and it buys three things worth having. Anonymity done properly means
 onion routing or a mixnet: seconds of latency, constant cover traffic, heavy battery use, and a
 small anonymity set that provides false assurance until the network is large. Not paying that
-cost keeps WebX fast, keeps it simple enough to be secure, and keeps it usable by people who just
+cost keeps VayuWeb fast, keeps it simple enough to be secure, and keeps it usable by people who just
 want a website nobody can switch off. An optional layer can be added later; latency baked in at
 the start cannot be removed.
 
-**So what does WebX actually protect?**
+**So what does VayuWeb actually protect?**
 Two things, and both are concrete. First, nobody can take your name or switch off your site,
 because there is no registrar, certificate authority, host or content network in the path to
 petition. Second, **nobody learns what you looked up** — resolution runs against your local copy
 of the registry, so the query never leaves your machine. A clearnet DNS lookup tells a resolver
-operator every name you visit; a WebX lookup tells nobody anything.
+operator every name you visit; a VayuWeb lookup tells nobody anything.
 
 **What should I use if I need anonymity?**
-Tor, and understand its limits too. WebX composes with it rather than replacing it, and
+Tor, and understand its limits too. VayuWeb composes with it rather than replacing it, and
 Constitution Article 24 forbids claiming otherwise.
 
 ## Governance
@@ -190,7 +190,7 @@ Structurally: there is no power for a founder to abuse. No privileged writer, no
 override key, no office that can move a name. Procedurally: Article 55 covers founder sunset,
 incapacity and succession. Ultimately: Article 59 and the fork.
 
-**Who owns the name "WebX"?**
+**Who owns the name "VayuWeb"?**
 Article 54 governs marks and network identity. The important part is that the protocol does not
 depend on the word: the registry state, the specifications and the charter are all public and
 forkable, so losing the name would be painful and survivable.
@@ -218,7 +218,7 @@ exploit is worth more today than any pull request. See [CONTRIBUTING.md](../CONT
 **Why Radicle?**
 Because a project whose entire purpose is removing dependence on centralised infrastructure
 should not permanently live on centralised infrastructure. GitHub is a mirror, kept because it is
-where people currently are — which is exactly the dependency WebX exists to end.
+where people currently are — which is exactly the dependency VayuWeb exists to end.
 
 **What licence?**
 MIT for code. The Constitution text is public domain (CC0), deliberately: a licence on a founding
@@ -226,7 +226,7 @@ charter is a leash on a fork.
 
 ## See also
 
-- [The WebX Constitution](../constitution/CONSTITUTION.md)
+- [The VayuWeb Constitution](../constitution/CONSTITUTION.md)
 - [Whitepaper](WHITEPAPER.md)
 - [Threat model](THREAT-MODEL.md)
 - [Glossary](GLOSSARY.md)

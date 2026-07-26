@@ -6,12 +6,12 @@
 
 <!-- What problem does this solve? If it fixes a defect, link the issue. -->
 
-## WXIP
+## VWIP
 
 <!--
-Anything that changes behaviour, wire format, policy or governance requires a WXIP.
+Anything that changes behaviour, wire format, policy or governance requires a VWIP.
 Link it here, or write "Not required — <reason>" for a typo, link fix or clarification.
-See docs/spec/WXIP-0000.md.
+See docs/spec/VWIP-0000.md.
 -->
 
 ## Checklist

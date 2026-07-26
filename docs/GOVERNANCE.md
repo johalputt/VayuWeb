@@ -1,6 +1,6 @@
-# WebX Governance
+# VayuWeb Governance
 
-How WebX is actually governed, in practical terms.
+How VayuWeb is actually governed, in practical terms.
 
 This document is a guide, not the law. Where it and the
 [Constitution](../constitution/CONSTITUTION.md) differ, the Constitution governs and this
@@ -12,25 +12,25 @@ not been built yet.
 
 ## The three instruments
 
-WebX is governed by three things and nothing else.
+VayuWeb is governed by three things and nothing else.
 
 **The Constitution** says what the project is, what every participant is owed, and what can
 never be changed no matter how many people want to change it. It is the only instrument with
 entrenched clauses. It is deliberately hard to amend and deliberately easy to copy: its text
 is in the public domain so that any fork carries it away intact.
 
-**The WXIP process** ([WXIP-0000](spec/WXIP-0000.md)) is how everything else changes. A new
+**The VWIP process** ([VWIP-0000](spec/VWIP-0000.md)) is how everything else changes. A new
 extension, a wire-format change, a difficulty parameter, a policy — all of it moves through a
 numbered proposal with an author, a rationale, a mandatory security and privacy section, a
 recorded objection set, and a permanent archive.
 
 **The maintainers** execute. They merge, tag, publish and keep the lights on. They do not
-decide what is correct — the WXIP process does that, and the Constitution bounds it. A
-maintainer who overrules a settled WXIP is not exercising authority, they are exceeding it.
+decide what is correct — the VWIP process does that, and the Constitution bounds it. A
+maintainer who overrules a settled VWIP is not exercising authority, they are exceeding it.
 
 ## How a decision is actually made
 
-1. Someone writes a WXIP. Anyone may; there is no membership to obtain first.
+1. Someone writes a VWIP. Anyone may; there is no membership to obtain first.
 2. It gets a number and enters Draft. Nothing is gatekept at this stage except spam.
 3. Review happens in public and is archived, including the objections — especially the
    objections that were overruled. A decision whose dissent is unrecorded cannot be audited
@@ -67,7 +67,7 @@ being wrong about it is a reason to remove an editor.
 
 **Contributors** write proposals, reviews, attacks and code. No status required.
 
-**WXIP editors** judge process, never merit. They check that a proposal is complete, correctly
+**VWIP editors** judge process, never merit. They check that a proposal is complete, correctly
 formatted, has its mandatory sections, and has genuinely had its objections answered. An editor
 MUST NOT reject a proposal because they disagree with it. That separation is what stops the
 process from becoming a taste filter.
@@ -94,7 +94,7 @@ identities on it. The sunset requirements exist so that a retirement cannot stra
 ## What is deliberately absent
 
 Most governance failures in this space were not accidents of process. They were the predictable
-consequence of a structure that had something worth capturing. WebX removes those structures
+consequence of a structure that had something worth capturing. VayuWeb removes those structures
 rather than promising to guard them:
 
 - **No treasury.** There is no pot of money, so there is nothing to fight over, embezzle,
@@ -141,13 +141,13 @@ the entire mechanism, and it works precisely because nobody has to invoke it oft
 ## How to participate
 
 Read the [Constitution](../constitution/CONSTITUTION.md). Read
-[WXIP-0000](spec/WXIP-0000.md). Then attack the design — see
+[VWIP-0000](spec/VWIP-0000.md). Then attack the design — see
 [CONTRIBUTING.md](../CONTRIBUTING.md) for what is most useful right now, which at this stage is
 adversarial review rather than code.
 
 ## See also
 
-- [The WebX Constitution](../constitution/CONSTITUTION.md)
-- [WXIP-0000: the improvement proposal process](spec/WXIP-0000.md)
+- [The VayuWeb Constitution](../constitution/CONSTITUTION.md)
+- [VWIP-0000: the improvement proposal process](spec/VWIP-0000.md)
 - [Naming and TLD policy](spec/NAMES.md)
 - [Threat model](THREAT-MODEL.md)

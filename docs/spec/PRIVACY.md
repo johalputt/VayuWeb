@@ -1,15 +1,15 @@
-# WebX Privacy and Zero-Trail Specification
+# VayuWeb Privacy and Zero-Trail Specification
 
-What WebX writes down, what it sends, and what can be reconstructed afterwards.
+What VayuWeb writes down, what it sends, and what can be reconstructed afterwards.
 
 The goal of this document is stated precisely rather than as a slogan:
 
-> **Everything within WebX's control is closed completely.** Zero requests to any party other
-> than the WebX network. Zero logs. Zero telemetry. Zero durable trail on disk. Not "minimised",
+> **Everything within VayuWeb's control is closed completely.** Zero requests to any party other
+> than the VayuWeb network. Zero logs. Zero telemetry. Zero durable trail on disk. Not "minimised",
 > not "configurable off by default" — absent, and structurally impossible to add back without
 > amending the Constitution.
 >
-> **Two things are outside WebX's control**, and are named here rather than buried: the network
+> **Two things are outside VayuWeb's control**, and are named here rather than buried: the network
 > path, which Private Mode closes by routing through an anonymising transport, and the reader's
 > own device, which no software anywhere can protect once an adversary holds it unlocked.
 
@@ -20,7 +20,7 @@ composition is specified rather than left to the reader.
 The key words MUST, MUST NOT, SHALL, SHALL NOT, SHOULD, SHOULD NOT and MAY are to be interpreted
 as described in RFC 2119.
 
-**Status:** Draft — not yet implemented. Proposed formally by [WXIP-0001](WXIP-0001.md).
+**Status:** Draft — not yet implemented. Proposed formally by [VWIP-0001](VWIP-0001.md).
 
 ## 1. The adversary
 
@@ -33,7 +33,7 @@ observation still leaves a machine that answers the question under examination.
 
 ## 2. Modes
 
-WebX has exactly two modes. There is no third, no partial, and no per-feature toggle, because a
+VayuWeb has exactly two modes. There is no third, no partial, and no per-feature toggle, because a
 matrix of privacy settings is a matrix of ways to be wrong.
 
 | | **Standard** | **Private** |
@@ -42,15 +42,15 @@ matrix of privacy settings is a matrix of ways to be wrong.
 | Third-party requests **the browser may still make** | **Possible.** The browser is not contained: top-level navigation, WebRTC, omnibox lookups and extensions are outside the resolver's reach. | **Contained**, because full-proxy configuration and the client's own webview are mandatory (section 2.1). |
 | Query logging | None | None |
 | Telemetry | None | None |
-| Egress transport | Direct to the WebX network | Anonymising transport, mandatory |
+| Egress transport | Direct to the VayuWeb network | Anonymising transport, mandatory |
 | Durable local state | Registry log and content cache on disk | **Memory only. Nothing durable.** |
 | Behaviour if transport unavailable | n/a | **Refuses to start** |
-| Browser requirement | Proxy configured for WebX names | **Full-proxy configuration required** |
+| Browser requirement | Proxy configured for VayuWeb names | **Full-proxy configuration required** |
 
 Standard Mode is private against everyone except an observer of the reader's own network link.
 Private Mode closes that too, at the cost of speed and of a cold start on every launch.
 
-The mode is selected by `WEBX_MODE=standard|private` and is fixed for the life of the process. It
+The mode is selected by `VAYU_MODE=standard|private` and is fixed for the life of the process. It
 MUST NOT be switchable at runtime: a process that has already written to disk in Standard Mode
 cannot become a Private Mode process by changing a variable, and pretending otherwise would be the
 worst kind of false assurance.
@@ -79,14 +79,14 @@ compile error.
 
 ### 3.2 Destination policy
 
-The browsing proxy MUST refuse any destination that is not part of the WebX network. This is what
+The browsing proxy MUST refuse any destination that is not part of the VayuWeb network. This is what
 closes the top-level-navigation exfiltration channel described in
 [CONTENT-SECURITY.md](CONTENT-SECURITY.md) section 4.2: a page that navigates to a clearnet URL
 produces a request the resolver sees, and refuses with error `1403 EGRESS_REFUSED`.
 
 In Private Mode this is absolute. In Standard Mode a resolver MAY be configured to pass clearnet
 navigation through to the system's normal handling, and if it is, it MUST tell the reader at the
-moment of the first such navigation, once per site, that they are leaving WebX.
+moment of the first such navigation, once per site, that they are leaving VayuWeb.
 
 ### 3.3 Fail closed, always
 
@@ -102,7 +102,7 @@ A fallback is a leak that fires exactly when the protection was most needed, and
 leak with a consent form attached. This behaviour is not configurable, and a build that makes it
 configurable is non-conformant.
 
-## 4. What WebX writes to disk
+## 4. What VayuWeb writes to disk
 
 Every file the resolver may create, and the rule governing it. Anything not on this list MUST NOT
 be written.
@@ -128,7 +128,7 @@ be written.
 Four properties of this table are normative and testable:
 
 1. **The registry log reveals participation, not reading.** It is the public, replicated state.
-   Holding it says you run WebX; it does not say what you looked up.
+   Holding it says you run VayuWeb; it does not say what you looked up.
 2. **The content cache is encrypted at rest.** It is the one artefact that does record what was
    fetched, so it is never plaintext on disk in either mode.
 3. **There is no logging subsystem.** Not "logging defaults to off" — no code path that writes a
@@ -142,7 +142,7 @@ Four properties of this table are normative and testable:
 The browser writes its own record of what the reader did, and the resolver's headers are the only
 influence it has over that.
 
-**`Clear-Site-Data` is ignored on insecure origins, and WebX origins are insecure by deliberate
+**`Clear-Site-Data` is ignored on insecure origins, and VayuWeb origins are insecure by deliberate
 design** — see [CONTENT-SECURITY.md](CONTENT-SECURITY.md) section 1 and
 [URI-SCHEME.md](URI-SCHEME.md) section 4.1. Any design that reaches for it to clear storage is
 reaching for nothing. This specification therefore does not use it, and an implementer who adds
@@ -154,7 +154,7 @@ it should understand they have added a no-op.
 | Back/forward cache | Suppressed by `no-store` |
 | Service-worker registration | **Structurally impossible.** Service workers require a secure context, and `worker-src 'none'` denies it a second time. |
 | `localStorage`, `IndexedDB`, Cache API | Origin-scoped by construction. Cleared by destroying the **ephemeral profile directory**, not by any header. |
-| Cookies | The resolver strips every `Set-Cookie`; WebX pages cannot set one |
+| Cookies | The resolver strips every `Set-Cookie`; VayuWeb pages cannot set one |
 | `sessionStorage` | Survives reload and tab duplication within a session; gone with the profile |
 | `window.name` | **Survives cross-name navigation**, because COOP is inert on an insecure origin. A live cross-name correlation channel; the client MUST clear it on navigation between names where it controls the webview. |
 | Browser history and session restore | **Not controllable by any header.** |
@@ -171,14 +171,14 @@ Where the reader insists on a third-party browser, the client MUST require a pri
 window, MUST detect and refuse to proceed where detection is possible, and MUST warn plainly where
 it is not.
 
-## 6. Traces WebX cannot remove
+## 6. Traces VayuWeb cannot remove
 
 Named so that nobody discovers them by being arrested.
 
 - **Swap and hibernation images.** Keys and content in memory may be written to swap by the
   operating system. Mitigated by locking sensitive pages where the platform allows it
   (`mlock`/`VirtualLock`), which the implementation MUST attempt and MUST report when it fails.
-  Full-disk encryption is the real answer and is outside WebX.
+  Full-disk encryption is the real answer and is outside VayuWeb.
 - **Filesystem metadata.** Access times, journal entries and free-space remnants can outlive a
   deleted file. Private Mode avoids creating the file at all, which is the only reliable defence.
 - **The IPFS repository and provider records.** Announcing that you hold a CID is how content
@@ -232,7 +232,7 @@ Each of these is an executable test in the conformance suite, and each asserts o
 behaviour**, not on configuration:
 
 1. **The zero-egress test.** Resolve one name and load one page under a socket monitor. Assert the
-   observed connection set contains only WebX network peers. Any other socket fails the build.
+   observed connection set contains only VayuWeb network peers. Any other socket fails the build.
    This is the test Constitution Article 14 requires and Article 44.8 places alongside the wire
    vectors.
 2. **The fail-closed test.** Start in Private Mode, kill the anonymising transport, assert the
@@ -254,7 +254,7 @@ Required by Constitution Article 21, the Duty of Honest Claiming, and repeated h
 is the document most likely to be quoted out of context:
 
 - It does not claim anonymity against an adversary who controls the reader's device.
-- It does not claim that Standard Mode hides WebX use from the reader's network provider.
+- It does not claim that Standard Mode hides VayuWeb use from the reader's network provider.
 - It does not claim the registry log can be made private. It is public replicated state.
 - It does not claim that content, once fetched by others, can be recalled.
 - It does not claim the browser's own history can be erased by any header the resolver sends.
@@ -277,4 +277,4 @@ the difference between a specification and a brochure.
 - [Content security specification](CONTENT-SECURITY.md) — the browser-layer profile
 - [Resolution specification](RESOLUTION.md) — the proxy and its privacy obligations
 - [Threat model](../THREAT-MODEL.md) — T12, T13 and T14 in particular
-- [The WebX Constitution](../../constitution/CONSTITUTION.md) — Articles 13, 14, 19, 24
+- [The VayuWeb Constitution](../../constitution/CONSTITUTION.md) — Articles 13, 14, 19, 24

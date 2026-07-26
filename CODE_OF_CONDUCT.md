@@ -34,7 +34,7 @@ it, and that misuse is itself a violation.
 
 ## Enforcement
 
-Report to **conduct@webx.dev**. Reports are handled by the maintainers, excluding any
+Report to **conduct@vayupress.com**. Reports are handled by the maintainers, excluding any
 maintainer who is a party to the report.
 
 Responses, in escalating order: a private word; a public correction; a temporary suspension
@@ -42,7 +42,7 @@ from project spaces; a permanent one. Nothing beyond a private word happens with
 rationale, and the rationale is published — redacted only to protect a reporter's identity.
 
 Enforcement is recorded and auditable. A project whose moderation cannot be reviewed has
-recreated exactly the unaccountable power WebX exists to remove.
+recreated exactly the unaccountable power VayuWeb exists to remove.
 
 ## Appeal
 

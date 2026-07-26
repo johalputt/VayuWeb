@@ -1,6 +1,6 @@
-# WebX Architecture
+# VayuWeb Architecture
 
-WebX is a peer-to-peer naming and hosting protocol: a parallel web with no ICANN, no
+VayuWeb is a peer-to-peer naming and hosting protocol: a parallel web with no ICANN, no
 certificate authority, no hosting company and no privileged operator. This document describes
 the component-level design — what the pieces are, how they talk, what each is allowed to
 trust, and what each is forbidden to do.
@@ -10,7 +10,7 @@ Every "SHALL" below is an obligation on an implementation that does not yet exis
 
 ## System Shape
 
-WebX is four layers and two surfaces.
+VayuWeb is four layers and two surfaces.
 
 The layers are identity, registry, discovery and content, strictly ordered: identity signs
 registry entries, the registry replicates over discovery, and registry entries point into
@@ -31,9 +31,9 @@ against another.
 
 Key rotation is a transfer to a new key by the current key. There is no recovery path: a lost
 secret key means the name expires at `notAfter` and returns to the pool through the normal
-grace and quarantine sequence. WebX trades recoverability for the absence of an authority that
+grace and quarantine sequence. VayuWeb trades recoverability for the absence of an authority that
 could seize a name. Social recovery (threshold co-signers named in the record) is a candidate
-for a future WXIP and is NOT part of the launch design.
+for a future VWIP and is NOT part of the launch design.
 
 ## Layer 2 — Registry
 
@@ -49,7 +49,7 @@ A record carries `name`, `tld`, `ownerKey`, `seq`, `notBefore`, `notAfter`, `rec
 `powProof`, `prevHash` and `sig`. Implementations SHALL cap a record at 4 KiB and the
 `records` set at 32 entries, because at 4 KiB one million names averaging four updates each is
 roughly 16 GiB of log — still within reach of a volunteer peer. Exceeding that budget requires
-a WXIP, not a silent relaxation.
+a VWIP, not a silent relaxation.
 
 The per-name chain is enforced by `seq` and `prevHash`: `seq` MUST be exactly one greater than
 the previous accepted record for that name, and `prevHash` MUST equal that record's hash. The
@@ -63,7 +63,7 @@ swarm topic; joining it is how a peer announces that it carries the registry.
 
 Discovery is deliberately dumb: it answers "who else is here" and nothing more. A peer
 returned by the DHT has zero authority, since everything it sends is verified before it is
-believed. A hostile DHT can waste a peer's time and observe its interest in WebX, but cannot
+believed. A hostile DHT can waste a peer's time and observe its interest in VayuWeb, but cannot
 make it accept a false record. See [docs/THREAT-MODEL.md](THREAT-MODEL.md).
 
 ## Layer 4 — Content
@@ -75,7 +75,7 @@ immutable snapshot.
 Pinning is the owner's job. The owner's node pins the site, and any volunteer MAY pin it too.
 There is no obligatory pinning service, no built-in payment and no default provider. The
 consequence, stated plainly: if the owner's node is offline and nobody else pinned the
-content, the name resolves correctly and the site does not load. WebX guarantees name
+content, the name resolves correctly and the site does not load. VayuWeb guarantees name
 resolution, not availability. See [docs/spec/HOSTING.md](spec/HOSTING.md).
 
 ## Surface 1 — Resolver Proxy
@@ -84,9 +84,9 @@ A small local daemon that any browser can be pointed at. It listens on loopback 
 `127.0.0.1:7654` for the HTTP proxy and `127.0.0.1:7653` for the control API. Two ports, not
 one, so that the control API can be firewalled or disabled without disabling resolution.
 
-The proxy holds the verified registry index in memory, so a `.webx` lookup is a local B-tree
+The proxy holds the verified registry index in memory, so a `.vayu` lookup is a local B-tree
 read — no network round trip and no query leaves the machine. An optional browser extension
-may register the WebX TLDs directly so users need not set a system proxy; the extension is a
+may register the VayuWeb TLDs directly so users need not set a system proxy; the extension is a
 convenience, never a separate source of truth.
 
 ## Surface 2 — Desktop Client
@@ -105,7 +105,7 @@ private capability.
 | `client/` | Tauri 2.x desktop application: UI, keychain-backed key management, proof-of-work worker, site publishing. |
 | `scripts/` | Build, reproducible-release and test-network scripts. No production logic. |
 | `docs/` | This file and its siblings, including `docs/spec/` for the normative specifications. |
-| `constitution/` | The Constitution and the WXIP process documents. Governance text, not code. |
+| `constitution/` | The Constitution and the VWIP process documents. Governance text, not code. |
 
 Code in `registry/`, `proxy/` and `client/` is MIT licensed. The Constitution text is
 dedicated to the public domain.
@@ -162,15 +162,15 @@ owner key ──sign──> record{seq=n+1, records:{ipns, cid}} ──> log ─
 
 ## Data Flow — Resolve a Name
 
-1. The browser sends `GET http://example.webx/` to the proxy on 127.0.0.1:7654.
+1. The browser sends `GET http://example.vayu/` to the proxy on 127.0.0.1:7654.
 2. The proxy splits the host into label and TLD and rejects anything failing the grammar
    before any lookup.
 3. The proxy reads `name.tld` from the local verified Hyperbee index. No network request is
    made for this step.
-4. If absent, expired, or inside grace or quarantine, the proxy returns a WebX status page
+4. If absent, expired, or inside grace or quarantine, the proxy returns a VayuWeb status page
    with a 404 or 410. It MUST NOT fall back to DNS or any clearnet resolver.
 5. The proxy resolves the `ipns` entry to a CID and fetches through Helia. An `alias` entry is
-   followed to another WebX name, at most three hops, to bound loops.
+   followed to another VayuWeb name, at most three hops, to bound loops.
 6. Content is streamed back. The proxy caches the IPNS-to-CID mapping for 300 seconds — cheap
    page loads, updates visible within five minutes — and caches immutable CID content by
    content hash with no expiry.
@@ -204,7 +204,7 @@ browser, the DHT, or the peer it fetched content from. Fetched content is valida
 the CID before being served, so a lying content peer is detected rather than believed.
 
 The browser trusts the proxy on loopback, which is the weakest link in the chain: anything
-with local user privileges can bind or hijack that port. WebX does not solve local compromise
+with local user privileges can bind or hijack that port. VayuWeb does not solve local compromise
 and does not pretend to. The control API on 7653 SHALL require a token generated at first run
 and stored with user-only permissions, which raises the bar without eliminating the risk.
 
@@ -244,12 +244,12 @@ LAN SHOULD find each other by local discovery and skip bootstrap entirely.
 
 The limitation is real: a user who accepts the shipped list on first run trusts those
 operators for reachability at that moment. They cannot forge records, but they can observe
-that a new node appeared and can refuse to introduce it. WebX reduces this to a first-run
+that a new node appeared and can refuse to introduce it. VayuWeb reduces this to a first-run
 window and makes it replaceable; it does not eliminate it.
 
 ## Versioning and Wire Compatibility
 
-The swarm topic derives from a protocol string carrying a major version, `webx/1`. A breaking
+The swarm topic derives from a protocol string carrying a major version, `vayuweb/1`. A breaking
 change means a new topic and a new network, deliberately, so incompatible peers never
 half-talk to each other.
 
@@ -257,15 +257,15 @@ Records carry a `version` field. Peers MUST accept records at their own major ve
 ignore unknown fields rather than rejecting the record, and MUST NOT re-serialise a record
 they did not author — canonical bytes are preserved verbatim so signatures stay verifiable
 across implementations with different field sets. Unknown `records` entry types are stored and
-replicated but not acted upon. The major version changes only by a ratified WXIP, per
+replicated but not acted upon. The major version changes only by a ratified VWIP, per
 [docs/GOVERNANCE.md](GOVERNANCE.md); no implementation, including the reference one, may ship
 a wire change ahead of ratification.
 
 ## What Each Component Must NOT Do
 
-The resolver MUST NOT fetch from the clearnet on a WebX lookup. Not as a fallback, not for a
-"did you mean", not for telemetry. A failed WebX resolution is an error page; leaking the name
-to DNS would hand every lookup to the infrastructure WebX exists to route around. It MUST NOT
+The resolver MUST NOT fetch from the clearnet on a VayuWeb lookup. Not as a fallback, not for a
+"did you mean", not for telemetry. A failed VayuWeb resolution is an error page; leaking the name
+to DNS would hand every lookup to the infrastructure VayuWeb exists to route around. It MUST NOT
 log queries by default and MUST NOT contact any author-operated service.
 
 The client MUST NOT embed a default pinning service. Not a preferred one, not a free tier, not
@@ -284,7 +284,7 @@ disputes. Any patch introducing a special-cased key violates
 
 Full replication bounds the design at roughly a million names on ordinary hardware; beyond
 that, light-client proofs are needed and no scheme is specified. IDN support is deferred:
-launch is ASCII-only, and a homograph policy MUST arrive as a WXIP before any non-ASCII label
+launch is ASCII-only, and a homograph policy MUST arrive as a VWIP before any non-ASCII label
 is accepted. Availability is not guaranteed, only resolution.
 
 ## Status

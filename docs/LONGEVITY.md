@@ -1,4 +1,4 @@
-# WebX Longevity Review
+# VayuWeb Longevity Review
 
 The Constitution is written for a hundred years. This document asks the engineering question that
 follows: **what in the technical design will break long before then, and what has been done about
@@ -15,7 +15,7 @@ wrong rather than by how right it looks today.
 A design is future-proof to the extent that a change of substrate, primitive, format or
 maintainer can happen **without invalidating a single existing name**. Names are the asset. Code
 is replaceable, the network is replaceable, the organisation is replaceable — but a person's name
-must survive all of it, or WebX has recreated the thing it exists to replace.
+must survive all of it, or VayuWeb has recreated the thing it exists to replace.
 
 Every section below is measured against that one test.
 
@@ -189,4 +189,4 @@ Predictions recorded now so that being wrong later is visible rather than deniab
 - [Cryptographic agility and post-quantum migration](spec/CRYPTO-AGILITY.md)
 - [Registry specification](spec/REGISTRY.md)
 - [Roadmap](ROADMAP.md) — what would make us stop and rethink
-- [The WebX Constitution](../constitution/CONSTITUTION.md) — Articles 28, 47, 49, 55, 56, 58
+- [The VayuWeb Constitution](../constitution/CONSTITUTION.md) — Articles 28, 47, 49, 55, 56, 58

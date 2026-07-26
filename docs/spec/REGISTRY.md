@@ -1,6 +1,6 @@
-# WebX Registry Specification
+# VayuWeb Registry Specification
 
-This document specifies the WebX registry: the append-only log that holds name ownership, the
+This document specifies the VayuWeb registry: the append-only log that holds name ownership, the
 index over it, the record format, the signed bytes, the six operations, and the rules by which
 every peer independently reaches the same answer. Nothing here has been implemented.
 
@@ -12,7 +12,7 @@ Label grammar lives in [docs/spec/NAMES.md](NAMES.md), difficulty derivation in
 
 The registry answers two questions: is this signature valid, and is this name free. It is not a
 trademark court, and an implementation that adds a privileged writer, an admin key or a seizure
-path is not a WebX registry.
+path is not a VayuWeb registry.
 
 ## The Log
 
@@ -71,7 +71,7 @@ default 3600, advisory):
 | `ipns` | text | IPNS name as a base36 `libp2p-key` CIDv1, 1-128 bytes. |
 | `cid` | bstr | Binary CIDv1, 1-64 bytes; rendered base32 in JSON. |
 | `txt` | text | 1-255 bytes, UTF-8, no control characters below U+0020. |
-| `alias` | text | `label.tld` naming another WebX name; resolvers MUST follow at most 3 hops and MUST fail on a cycle. |
+| `alias` | text | `label.tld` naming another VayuWeb name; resolvers MUST follow at most 3 hops and MUST fail on a cycle. |
 
 At most one `alias` per record, and an `alias` MUST NOT coexist with another entry type, because
 a name is either a pointer or a destination. Unknown `type` values are stored and replicated
@@ -91,13 +91,13 @@ have several defensible JSON spellings and exactly one CBOR spelling, and becaus
 are native, so keys, hashes and signatures never round-trip through text.
 
 ```text
-signing_input = "WebX-Registry-Record-v1" || 0x00 || det_cbor(core)
-record_hash   = BLAKE2b-256("WebX-Registry-Hash-v1" || 0x00 || det_cbor(full))
+signing_input = "VayuWeb-Registry-Record-v1" || 0x00 || det_cbor(core)
+record_hash   = BLAKE2b-256("VayuWeb-Registry-Hash-v1" || 0x00 || det_cbor(full))
 ```
 
 `core` is the record map with `sig` and `coSig` removed; `full` is the complete map including
 them. Each prefix is the literal ASCII string (23 and 21 bytes) followed by one `0x00`, so a
-registry-record signature can never be replayed over another WebX structure and can never be
+registry-record signature can never be replayed over another VayuWeb structure and can never be
 read as a hash preimage; every other signed structure SHALL use a distinct prefix. BLAKE2b-256
 is chosen because Hypercore already uses it, so a node needs one hash primitive.
 
@@ -205,7 +205,7 @@ and a substitution breaks `prevHash`.
 
 Replay of an accepted record fails because `seq` is no longer next; replay into a different name,
 TLD or protocol version fails because all three are inside the signing input; replay into another
-WebX structure fails on the domain separation prefix. A duplicate arrival is not an error — a
+VayuWeb structure fails on the domain separation prefix. A duplicate arrival is not an error — a
 peer receiving a record it already holds MUST drop it silently, and only a different record at
 the same `seq` is a conflict.
 
@@ -239,7 +239,7 @@ verify(rec, bytes, state):
   if len(rec.records) > 32:                   reject TOO_MANY_RECORDS
   if not entries_ok(rec.records):             reject BAD_RECORD_ENTRY
 
-  input = "WebX-Registry-Record-v1" || 0x00 || det_cbor(strip(rec, sig, coSig))
+  input = "VayuWeb-Registry-Record-v1" || 0x00 || det_cbor(strip(rec, sig, coSig))
   prev  = state.current(rec.name, rec.tld)     // may be absent
 
   if rec.op == REGISTER:
@@ -294,7 +294,7 @@ grammar and by fixed-width integers):
 The TLD comes first and the label follows, reversing how a human writes `name.tld`, for three
 reasons: difficulty depends on a TLD's registration rate over the trailing 30 days, and a TLD
 prefix makes that one bounded range scan instead of a full-tree walk; a TLD ratified later by
-WXIP occupies a fresh disjoint range, so no existing key moves; and auditing one TLD becomes a
+VWIP occupies a fresh disjoint range, so no existing key moves; and auditing one TLD becomes a
 contiguous read. The expiry queue is keyed by big-endian `notAfter`, so names expiring before a
 given instant form a prefix range and a node advances grace and quarantine without a full scan.
 
@@ -303,7 +303,7 @@ given instant form a prefix range and a node advances grace and quarantine witho
 The log is never truncated: truncation would invalidate the merkle tree that makes entries
 self-authenticating and destroy the history that lets a newcomer verify ownership from first
 principles. Storage therefore grows monotonically. There is no pruning scheme at launch; adding
-one requires a WXIP and is left here as an open problem.
+one requires a VWIP and is left here as an open problem.
 
 Every 10,000 entries a node SHALL compute a checkpoint: `{logLength, treeRoot, indexRoot,
 liveNames}`. Anyone can derive it from the same log, so it is not an authority and carries no
@@ -326,7 +326,7 @@ nothing here solves it.
 
 ## Epochs
 
-The Constitution and WXIP-0000 both schedule changes against an *activation epoch*, and both
+The Constitution and VWIP-0000 both schedule changes against an *activation epoch*, and both
 treat "Epoch" as a defined unit. This section defines it.
 
 An **Epoch** is a numbered interval of the registry's life, not of the calendar. Epoch 0 begins
@@ -350,7 +350,7 @@ Consequences, all normative:
 - The current epoch number is **derived from the log**, identically by every peer, and is never
   taken from a peer's own clock or from any announcement.
 - A Standards Track activation epoch MUST be at least **two epochs** beyond the epoch in which
-  the WXIP reached Accepted — roughly sixty days minimum — so that deployment has time to
+  the VWIP reached Accepted — roughly sixty days minimum — so that deployment has time to
   propagate before behaviour changes. Article 47.3 forbids a silent breaking change; this is the
   interval that makes the prohibition operable.
 - A peer that has not yet reached the activation epoch MUST continue to apply the previous rules.
@@ -369,19 +369,19 @@ A serialised record SHALL be at most 4096 bytes, the `records` array SHALL hold 
 entries, and no entry value exceeds 512 bytes. At 4 KiB per record, one million names averaging
 four records each is roughly 16 GiB of log — large, but within reach of a volunteer peer, which
 is the premise of full replication. A verifier MUST reject an oversized record rather than
-truncate it, and raising either number requires a ratified WXIP, per
-[docs/spec/WXIP-0000.md](WXIP-0000.md).
+truncate it, and raising either number requires a ratified VWIP, per
+[docs/spec/VWIP-0000.md](VWIP-0000.md).
 
 ## Worked Example
 
-A registration of `atlas.webx` as JSON, byte strings in unpadded base64url.
+A registration of `atlas.vayu` as JSON, byte strings in unpadded base64url.
 
 ```json
 {
   "version": 1,
   "op": "REGISTER",
   "name": "atlas",
-  "tld": "webx",
+  "tld": "vayu",
   "ownerKey": "1cO7GV1wCsncBtdw9y6Bo4X8sZg5YfRIQMhlWcVohks",
   "seq": 0,
   "notBefore": 1782518400,
@@ -389,7 +389,7 @@ A registration of `atlas.webx` as JSON, byte strings in unpadded base64url.
   "records": [
     { "type": "peer", "value": "YQ4UiKrrd_gkoNTZeEHTPGt-aIZPPLp-WghM6NjNr2U", "ttl": 3600 },
     { "type": "ipns", "value": "k51qzi5uqu5dkkciu33khkzbcmxtyhn376i1e83tya8kuy7z9euedzyr5nhoew" },
-    { "type": "txt", "value": "v=webx1; contact=atlas@example.invalid" }
+    { "type": "txt", "value": "v=vayuweb1; contact=atlas@example.invalid" }
   ],
   "powProof": {
     "alg": "argon2id",
@@ -413,13 +413,13 @@ above, an unchanged `notAfter`, and `powProof: null`.
 Full replication bounds this design at roughly a million names on ordinary hardware. Light
 clients can verify a name but not its freshness. The tie-break is grindable in the undecidable
 case. `REVOKE` destroys rather than recovers. IDN labels are out of scope until a homograph
-policy is ratified as a WXIP.
+policy is ratified as a VWIP.
 
 ## Status
 
 Status: Draft — not yet implemented. This specification describes the pre-implementation design:
 no registry code exists, no network is running, and every constant here is subject to change by
-the WXIP process before a first release.
+the VWIP process before a first release.
 
 ## See also
 

@@ -1,6 +1,6 @@
-# WebX Cost Model
+# VayuWeb Cost Model
 
-What WebX costs, who pays it, and why there is no money anywhere in the protocol.
+What VayuWeb costs, who pays it, and why there is no money anywhere in the protocol.
 
 **Status:** Draft against the pre-implementation design. Figures are engineering estimates from
 stated parameters, not measurements — nothing has been built or benchmarked.
@@ -18,14 +18,14 @@ price oracle, a fee market, a dispute path, and a class of participants whose in
 price rather than the protocol. Each of those is engineering that has to be built, secured and
 maintained forever, and every one of them ends up billed back to the user.
 
-WebX removes them by never having them. Cost lands where the resource is: CPU at registration,
+VayuWeb removes them by never having them. Cost lands where the resource is: CPU at registration,
 disk and bandwidth at hosting. Neither is invoiced, because there is nobody to invoice.
 
 ## 1. The comparison
 
 A modest personal or small-organisation site, run properly, for one year.
 
-| | Clearnet | WebX |
+| | Clearnet | VayuWeb |
 |---|---|---|
 | Name | 10–15/yr, renewable, revocable by the registrar | Seconds of CPU |
 | Hosting | 60–300/yr for a VPS or managed host | Own disk, or a peer's |
@@ -35,7 +35,7 @@ A modest personal or small-organisation site, run properly, for one year.
 | **Money per year** | **~75–200, indefinitely** | **Zero, at every step** |
 | **Renewal risk** | Lapse, chargeback, or registrar policy loses the name | Renewal is a signature plus fresh proof-of-work |
 
-The claim is narrow and worth stating precisely: **WebX costs no money.** It does not cost no
+The claim is narrow and worth stating precisely: **VayuWeb costs no money.** It does not cost no
 resources. Section 5 is the honest counterpart.
 
 ## 2. Registration cost
@@ -67,7 +67,7 @@ The largest real resource cost in the system, and the one with the most engineer
 Naive redundancy is full replication: three copies for durability means **3× the storage** of the
 original. Erasure coding achieves comparable or better durability at a fraction of that.
 
-A design study for WebX recommends **Reed–Solomon RS(k=16, n=27)** over GF(2⁸), applied per
+A design study for VayuWeb recommends **Reed–Solomon RS(k=16, n=27)** over GF(2⁸), applied per
 stripe of the site's content DAG. Any 16 of the 27 shards reconstruct the data.
 
 ```text
@@ -97,7 +97,7 @@ publisher who contributes nothing and knows nobody has no claim on anyone's disk
 
 ## 4. Resolution costs nothing, and buys privacy for free
 
-WebX resolves a name against the **local** registry replica. No peer is contacted, so no peer
+VayuWeb resolves a name against the **local** registry replica. No peer is contacted, so no peer
 learns what was looked up.
 
 This deserves to be a stated guarantee rather than an implementation detail, because it is
@@ -107,7 +107,7 @@ simultaneously the cheapest and the strongest privacy property in the system:
   entire data industry.
 - A Tor onion lookup still reveals the blinded descriptor identifier to a hidden-service
   directory node.
-- A WebX lookup reveals nothing to anybody, because it never leaves the machine.
+- A VayuWeb lookup reveals nothing to anybody, because it never leaves the machine.
 
 It costs one local index read, and it requires no anonymity network, no relays, no cover traffic
 and no latency budget. **The cheapest privacy in the design is the privacy that comes from not
@@ -117,7 +117,7 @@ The limit is honest and worth recording now: this holds while the registry repli
 reader's device. At roughly 300 bytes per record, one million names is about 300 MB plus index —
 comfortable. Ten million is about 3 GB — not comfortable on a phone. Beyond that a light client
 must ask somebody, and keeping *that* query private needs Private Information Retrieval, which is
-a future WXIP and not a launch commitment.
+a future VWIP and not a launch commitment.
 
 ## 5. What is not free
 
@@ -175,4 +175,4 @@ pricing promise it cannot be revised by whoever is running things in ten years.
 - [Proof-of-work](PROOF-OF-WORK.md) — the registration cost, specified
 - [Hosting](HOSTING.md) — where the bytes live
 - [Publishing](PUBLISHING.md) — the time cost, minimised
-- [The WebX Constitution](../../constitution/CONSTITUTION.md) — Articles 7, 9, 21
+- [The VayuWeb Constitution](../../constitution/CONSTITUTION.md) — Articles 7, 9, 21

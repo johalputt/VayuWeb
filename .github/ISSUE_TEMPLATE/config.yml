@@ -1,11 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security or governance-capture report
-    url: https://github.com/johalputt/WebX/blob/main/SECURITY.md
+    url: https://github.com/johalputt/VayuWeb/blob/main/SECURITY.md
     about: Do not open a public issue. A flaw in the specification is a real vulnerability — follow the security policy.
   - name: Propose a protocol, policy or governance change
-    url: https://github.com/johalputt/WebX/blob/main/docs/spec/WXIP-0000.md
-    about: Anything that changes behaviour, wire format, policy or governance goes through the WXIP process.
+    url: https://github.com/johalputt/VayuWeb/blob/main/docs/spec/VWIP-0000.md
+    about: Anything that changes behaviour, wire format, policy or governance goes through the VWIP process.
   - name: Read the Constitution first
-    url: https://github.com/johalputt/WebX/blob/main/constitution/CONSTITUTION.md
+    url: https://github.com/johalputt/VayuWeb/blob/main/constitution/CONSTITUTION.md
     about: The founding charter governs everything else in this repository, including the issue tracker.

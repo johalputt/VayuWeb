@@ -1,8 +1,8 @@
-# WebX Launch Catalogue
+# VayuWeb Launch Catalogue
 
-**1260 extensions**, grouped by what people actually register them for.
+**1267 extensions**, grouped by what people actually register them for.
 
-This is a starting point, not a boundary. The WebX namespace is **elastic**: anyone may
+This is a starting point, not a boundary. The VayuWeb namespace is **elastic**: anyone may
 propose a new extension at any time, it costs proof-of-work rather than a fee, and the
 valid set is derived from the registry log rather than hard-coded in any client. See
 [NAMESPACE.md](NAMESPACE.md) for the creation process and
@@ -14,19 +14,33 @@ no client may present otherwise.
 
 ## Rules every entry satisfies
 
-- **Two to twelve characters.** Two-letter extensions are permitted: WebX defines its
+- **Two to twelve characters.** Two-letter extensions are permitted: VayuWeb defines its
   own namespace, and a two-letter string is a string. The clearnet has treated `.io`,
   `.ai` and `.me` as generic for two decades. What is forbidden is a country *name*
-  such as `.india` — that reads as a claim rather than a word, and WebX cannot
+  such as `.india` — that reads as a claim rather than a word, and VayuWeb cannot
   adjudicate who represents a nation. See NAMESPACE.md section 5.3.
-- **No echo of a well-known ICANN generic domain.** A `webx://` name that looks like a
-  clearnet one teaches readers that WebX names mean nothing.
+- **No echo of a well-known ICANN generic domain.** A `vayu://` name that looks like a
+  clearnet one teaches readers that VayuWeb names mean nothing.
 - **Lowercase ASCII**, pronounceable, and meaning something.
 
 **Status:** Draft — not yet implemented. No extension is registrable until the protocol
 exists and each has completed the 180-day dormancy period required by Article 35.
 
 ---
+
+## Founding extensions
+
+*7 extensions*
+
+| Extension | Who registers it |
+|---|---|
+| `.dao` | Collectively governed organisations publishing their rules |
+| `.decent` | Decentralisation as subject matter: research, tooling, commentary |
+| `.free` | Projects whose defining claim is that they cost nothing to use |
+| `.indie` | Independent creators, studios and small publishers |
+| `.open` | Open standards, open data and open-by-default projects |
+| `.sov` | Self-governing projects and sovereignty-focused publishing |
+| `.vayu` | The protocol's own namespace; general-purpose, the default suggestion |
 
 ## Two letters
 

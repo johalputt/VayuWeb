@@ -24,7 +24,7 @@ secrets.json
 !.env.example
 corestore/
 .hypercore/
-.webx/
+.vayu/
 ipfs-repo/
 
 # Editors and OS

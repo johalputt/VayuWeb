@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Overclaiming is a bug and a serious one. If a document makes WebX sound more private,
+        Overclaiming is a bug and a serious one. If a document makes VayuWeb sound more private,
         more available, or more censorship-proof than it is, report it here.
   - type: input
     id: file

@@ -1,8 +1,8 @@
-# WebX: A Parallel Web
+# VayuWeb: A Parallel Web
 
 ## Abstract
 
-WebX is a specification for a peer-to-peer naming and hosting protocol — a parallel
+VayuWeb is a specification for a peer-to-peer naming and hosting protocol — a parallel
 web that needs no ICANN, no certificate authority, no hosting company and no single
 point of control. Names are registered in an append-only, signed log that is fully
 replicated between peers. Content is addressed by cryptographic hash and served by
@@ -10,10 +10,10 @@ whoever chooses to serve it. Resolution happens on the user's own machine, behin
 loopback proxy that any browser can be pointed at. Ownership of a name is possession
 of an Ed25519 private key and nothing else. Scarcity is enforced by a memory-hard
 proof-of-work paid to nobody, rather than by an annual fee paid to an intermediary
-who can therefore be leaned on. Change is ratified through the WebX Constitution and
-the WXIP process.
+who can therefore be leaned on. Change is ratified through the VayuWeb Constitution and
+the VWIP process.
 
-This paper states the problem WebX addresses, the design chosen, the reasoning behind
+This paper states the problem VayuWeb addresses, the design chosen, the reasoning behind
 the costliest trade-offs, and — at comparable length — what the design does not do.
 Nothing described here is running: no network, no registered name, no user, no
 download. Every requirement is in the normative future voice because it describes a
@@ -75,7 +75,7 @@ these organisations behave badly; it is that the architecture makes the question
 their behaviour decisive, when it should be irrelevant.
 
 The shape of every one of these failures is the same: a party who is not the
-publisher and not the reader holds a switch in the middle. WebX is an attempt to
+publisher and not the reader holds a switch in the middle. VayuWeb is an attempt to
 build a naming and hosting path with no such switch — not by asking the operators to
 behave, but by removing the position from the design.
 
@@ -102,15 +102,15 @@ Goals, in priority order. Where two conflict, the earlier wins.
 
 Non-goals, stated as flatly as the goals.
 
-WebX is **not an anonymity system**. It carries no mixnet, no cover traffic and no
+VayuWeb is **not an anonymity system**. It carries no mixnet, no cover traffic and no
 onion routing, and it does not attempt to hide who is reading what from a network
-observer. WebX is **not a payment system**: there is no token, no coin, no fee, no
-treasury and no built-in market for pinning. WebX does **not replace TLS or DNS on
+observer. VayuWeb is **not a payment system**: there is no token, no coin, no fee, no
+treasury and no built-in market for pinning. VayuWeb does **not replace TLS or DNS on
 the clearnet**; it runs alongside them and interoperates with neither's trust roots.
-WebX is **not a trademark or dispute forum** — see the doctrine in section 5. WebX
+VayuWeb is **not a trademark or dispute forum** — see the doctrine in section 5. VayuWeb
 does **not attempt global consensus on transaction ordering**, and it does not
 provide a smart-contract environment, a general-purpose ledger, or a store of value.
-Finally, WebX does not promise availability: see section 8.
+Finally, VayuWeb does not promise availability: see section 8.
 
 ## 3. System overview
 
@@ -155,15 +155,15 @@ The resolution path, end to end:
 
 ```text
   browser
-     |  http://example.webx/   (proxy set to 127.0.0.1:7654)
+     |  http://example.vayu/   (proxy set to 127.0.0.1:7654)
      v
   +---------------------------+
-  |  local WebX resolver      |
+  |  local VayuWeb resolver      |
   |  127.0.0.1:7654 (proxy)   |
   |  127.0.0.1:7653 (control) |
   +---------------------------+
      |  1. parse + NFC-normalise label, check grammar
-     |  2. look up "example.webx" in the local Hyperbee index
+     |  2. look up "example.vayu" in the local Hyperbee index
      v
   +---------------------------+        replicated over Hyperswarm / HyperDHT
   |  registry (Hypercore log) |  <---->  peers ... peers ... peers
@@ -190,7 +190,7 @@ The functional requirement is narrow: prove that a name belongs to a key, in a w
 anybody can check, and make it impossible to rewrite that history quietly. That is a
 job for an authenticated append-only log with a Merkle structure. It is not a job for
 a blockchain, because a blockchain buys one additional property — global agreement on
-the total order of unrelated events — at a price WebX declines to pay.
+the total order of unrelated events — at a price VayuWeb declines to pay.
 
 That price is concrete. Global ordering needs a mechanism to choose between competing
 histories; every such mechanism yet deployed needs a scarce resource (hashpower,
@@ -199,11 +199,11 @@ allocation, which creates a party with a balance sheet and an interest in protoc
 changes. Fees follow, then fee markets, then a governance fight over who receives the
 fees. A naming system needs none of this. Names are not fungible, are not traded
 against one another for block space, and almost never interact: an operation on
-`alice.webx` has no bearing on one on `bob.p2p`. Ordering is needed only *per name*,
+`alice.vayu` has no bearing on one on `bob.p2p`. Ordering is needed only *per name*,
 and there it is supplied by the monotonic `seq` plus `prevHash` — a hash chain the
 owner extends and anybody can verify.
 
-So WebX is a log: entries are self-authenticating, the structure is append-only and
+So VayuWeb is a log: entries are self-authenticating, the structure is append-only and
 tamper-evident, and validity is a pure function of the entry and the history preceding
 it. There are no miners, validators, tokens, fees or block rewards. A peer's job is to
 replicate and to reject invalid entries, and neither requires being paid.
@@ -250,7 +250,7 @@ order — so every fee-based naming system reproduces the chokepoint it was buil
 remove, one layer down. Payment rails add their own censorship: processors already
 decline categories of lawful commerce, and a sanctioned registrant cannot pay at all.
 
-WebX charges in computation instead. Registration and each renewal require a
+VayuWeb charges in computation instead. Registration and each renewal require a
 memory-hard, Argon2id-based proof-of-work, whose difficulty is a function of the label
 length and of the TLD's registration rate over the trailing 30 days. Memory-hardness is
 chosen so that a commodity laptop and a rack of specialised hardware are within the
@@ -267,7 +267,7 @@ The work is paid to nobody. It is burned. **There is deliberately no treasury.**
 fund accumulates, so there is no fund to capture, tax, sue, freeze or fight over, and
 no faction whose income depends on a particular protocol outcome. Development is
 funded, if at all, outside the protocol by whoever wants the protocol to exist. This
-is a real cost: WebX has no mechanism to pay for its own maintenance, its own security
+is a real cost: VayuWeb has no mechanism to pay for its own maintenance, its own security
 audits or its own infrastructure, and an unfunded protocol can simply stall. That
 outcome is judged preferable to a funded one whose funding becomes the thing worth
 capturing.
@@ -283,9 +283,9 @@ is valid and whether the name is free.
 
 ## 6. Governance
 
-WebX is governed by the WebX Constitution, which fixes the properties that MUST NOT be
+VayuWeb is governed by the VayuWeb Constitution, which fixes the properties that MUST NOT be
 traded away — no privileged key, no revocation of a name by anybody but its owner, no
-mandatory phone-home, no token — and by the WXIP process, through which new TLDs and
+mandatory phone-home, no token — and by the VWIP process, through which new TLDs and
 protocol changes are proposed publicly, reviewed, and ratified by peers who signal
 adoption by running the code. Code is MIT licensed; the Constitution text is dedicated
 to the public domain, so that a fork inherits the rules without asking. Long-term
@@ -293,7 +293,7 @@ development lives on Radicle, with GitHub as a temporary public mirror, so that 
 project's own home is not a chokepoint of the kind section 1 describes. See
 [constitution/CONSTITUTION.md](../constitution/CONSTITUTION.md),
 [docs/GOVERNANCE.md](GOVERNANCE.md) and
-[docs/spec/WXIP-0000.md](spec/WXIP-0000.md).
+[docs/spec/VWIP-0000.md](spec/VWIP-0000.md).
 
 ## 7. Threat summary
 
@@ -303,18 +303,18 @@ compute; a network adversary who blocks the DHT bootstrap or the swarm's traffic
 patterns; an attacker who steals or coerces an owner's Ed25519 private key, against
 which the protocol has no remedy at all, because possession of the key *is* ownership;
 a homograph or confusable-name attacker, which is why launch is ASCII-only and an
-IDN policy is deferred to a future WXIP; and an attacker who publishes malicious
+IDN policy is deferred to a future VWIP; and an attacker who publishes malicious
 content under a legitimately held name, which naming cannot address. Each is analysed,
 with mitigations and with the cases where there are none, in
 [docs/THREAT-MODEL.md](THREAT-MODEL.md).
 
-## 8. What WebX is NOT
+## 8. What VayuWeb is NOT
 
-**It does not make you anonymous.** Running a WebX peer means participating in a DHT
+**It does not make you anonymous.** Running a VayuWeb peer means participating in a DHT
 and a swarm. Your IP address is visible to peers you connect to, and your traffic
 pattern is visible to your ISP. Publishing a site and announcing yourself as a provider
 for its CID links your address to that content. Anyone who needs anonymity needs a
-transport that provides it, and must combine WebX with one; WebX does not ship one and
+transport that provides it, and must combine VayuWeb with one; VayuWeb does not ship one and
 does not pretend otherwise.
 
 **It does not guarantee availability.** Content lives where somebody keeps it. If the
@@ -333,15 +333,15 @@ that the linkage, once made, cannot be undone.
 
 **It does not stop a state from blocking your traffic.** A network operator can block
 the DHT bootstrap, throttle the swarm, fingerprint the protocol or cut the connection
-entirely. WebX removes the intermediaries who could be ordered to take a site down; it
+entirely. VayuWeb removes the intermediaries who could be ordered to take a site down; it
 does not remove the ISP that carries your packets. Censorship-resistance at the naming
 layer is not censorship-resistance at the transport layer, and conflating the two would
 be dishonest.
 
-**It does not replace TLS on the clearnet.** WebX names are not certified by any CA and
-will not appear valid to a browser's clearnet trust logic. Authenticity within WebX
+**It does not replace TLS on the clearnet.** VayuWeb names are not certified by any CA and
+will not appear valid to a browser's clearnet trust logic. Authenticity within VayuWeb
 comes from the owner's signature and from content addressing, not from a certificate.
-Nothing here improves the security of an ordinary `https://` site, and a WebX name
+Nothing here improves the security of an ordinary `https://` site, and a VayuWeb name
 cannot be used to secure one.
 
 **It does not resolve disputes, recover lost keys, or reverse mistakes.** There is no
@@ -349,18 +349,18 @@ support desk. Lose the key and the name is gone until it expires.
 
 ## 9. Status and roadmap
 
-WebX is at the specification and charter stage. There is no implementation, no running
+VayuWeb is at the specification and charter stage. There is no implementation, no running
 network, no registered name, no user, and no release to download. Every number in this
 paper — the 1-year term, the 60-day renewal window, the 30-day grace period followed by
 a 30-day quarantine before a name returns to the open pool, the loopback ports, the
 label grammar, the twelve launch TLDs — is a design decision recorded in the
-specification set and open to revision by WXIP until the first implementation freezes
+specification set and open to revision by VWIP until the first implementation freezes
 it. The sequencing of that work, from reference registry to resolver to client, is in
 [docs/ROADMAP.md](ROADMAP.md). Readers who want the mechanism rather than the argument
 should start with [docs/ARCHITECTURE.md](ARCHITECTURE.md).
 
 Status: Draft — not yet implemented. This document describes a pre-implementation
-design; no component of WebX exists as running software.
+design; no component of VayuWeb exists as running software.
 
 See also:
 

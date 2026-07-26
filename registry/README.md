@@ -1,4 +1,4 @@
-# registry/ — the WebX name registry
+# registry/ — the VayuWeb name registry
 
 **Not yet implemented.** This directory will hold the peer-to-peer registry: a Hypercore
 append-only log with a Hyperbee index over it, holding every signed name record.

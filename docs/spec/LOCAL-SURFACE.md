@@ -1,13 +1,13 @@
-# WebX Local Attack Surface Specification
+# VayuWeb Local Attack Surface Specification
 
 The resolver runs on the reader's own machine and listens for connections. That makes it
 reachable by every page in every tab, including hostile clearnet pages the reader never
-associated with WebX. This document specifies how those listeners are hardened.
+associated with VayuWeb. This document specifies how those listeners are hardened.
 
 The key words MUST, MUST NOT, SHALL, SHALL NOT, SHOULD, SHOULD NOT and MAY are to be interpreted
 as described in RFC 2119.
 
-**Status:** Draft — not yet implemented. Proposed formally by [WXIP-0001](WXIP-0001.md).
+**Status:** Draft — not yet implemented. Proposed formally by [VWIP-0001](VWIP-0001.md).
 
 ## 1. The control API is not a TCP listener
 
@@ -60,18 +60,18 @@ therefore hardened directly.
 
 The proxy MUST accept only two request shapes and reject everything else:
 
-- **absolute-form** request URIs whose host is a WebX-TLD host, or
-- **origin-form** requests whose `Host` header is a WebX-TLD host.
+- **absolute-form** request URIs whose host is a VayuWeb-TLD host, or
+- **origin-form** requests whose `Host` header is a VayuWeb-TLD host.
 
 Any other `Host` — an IP literal, `localhost`, `127.0.0.1`, a clearnet name, an empty value, or a
 value with a port — MUST be rejected before routing. This is the DNS-rebinding defence: an
 attacker who rebinds a hostname they control to `127.0.0.1` still arrives carrying their own
-`Host`, which is not a WebX name, and is refused.
+`Host`, which is not a VayuWeb name, and is refused.
 
 ### 2.2 `CONNECT`
 
 The proxy SHOULD NOT implement `CONNECT` at all. Where it is implemented for compatibility, it
-MUST refuse every destination that is not a WebX name, and MUST refuse loopback, link-local,
+MUST refuse every destination that is not a VayuWeb name, and MUST refuse loopback, link-local,
 multicast and RFC 1918 destinations unconditionally. A proxy that will `CONNECT` anywhere is an
 open relay and an SSRF pivot into the reader's own network.
 
@@ -83,18 +83,18 @@ service, which is the exact thing this specification is preventing.
 
 ### 2.4 Identifying headers
 
-The `X-WebX-Name`, `X-WebX-Seq`, `X-WebX-CID`, `X-WebX-Source`, `X-WebX-Resolved-From` and
-`X-WebX-Stale` diagnostic headers MUST be **off by default**, available only when explicitly
+The `X-VayuWeb-Name`, `X-VayuWeb-Seq`, `X-VayuWeb-CID`, `X-VayuWeb-Source`, `X-VayuWeb-Resolved-From` and
+`X-VayuWeb-Stale` diagnostic headers MUST be **off by default**, available only when explicitly
 enabled through the control API.
 
-As specified previously they brand every response as WebX, which is the most consequential
-fingerprint the system emits: it lets any page that can elicit a response determine that WebX is
-installed. For a reader in a hostile jurisdiction, "this person runs WebX" may be the only fact an
+As specified previously they brand every response as VayuWeb, which is the most consequential
+fingerprint the system emits: it lets any page that can elicit a response determine that VayuWeb is
+installed. For a reader in a hostile jurisdiction, "this person runs VayuWeb" may be the only fact an
 adversary needs. Diagnostics that reveal the tool's presence are not diagnostics, they are
 disclosure.
 
 The same reasoning applies to error bodies: a refusal MUST NOT be distinguishable from an ordinary
-connection failure in a way that confirms WebX is running.
+connection failure in a way that confirms VayuWeb is running.
 
 ## 3. Naming and cache integrity
 
@@ -150,7 +150,7 @@ configuration raises the cost of a blind scan. It does not eliminate detection, 
 specification MUST NOT claim it does.
 
 **5.2 Token theft by a same-user local process.** Any process running as the reader can read a
-`0600` file owned by that reader. This is an operating-system boundary, not one WebX can enforce.
+`0600` file owned by that reader. This is an operating-system boundary, not one VayuWeb can enforce.
 Mitigated by keeping the token in the platform keystore where one is available, and by
 regenerating it per run in Private Mode.
 
@@ -161,9 +161,9 @@ regenerating it per run in Private Mode.
 1. The control API is not reachable over TCP on any address. A connection attempt to any port
    finds no control listener.
 2. `fetch` from a page to the control socket fails at the transport layer, not at authentication.
-3. A request to the proxy bearing a non-WebX `Host` is rejected before routing.
+3. A request to the proxy bearing a non-VayuWeb `Host` is rejected before routing.
 4. `Access-Control-Allow-Private-Network` never appears on any response.
-5. `X-WebX-*` headers are absent unless explicitly enabled.
+5. `X-VayuWeb-*` headers are absent unless explicitly enabled.
 6. An endless stream of invalid names does not grow resident memory without bound.
 7. Two spellings of one name produce one cache entry.
 8. A request with `Upgrade` to the control API returns 400.

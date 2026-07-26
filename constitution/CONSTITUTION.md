@@ -1,16 +1,16 @@
-# The WebX Constitution
+# The VayuWeb Constitution
 
-**The founding charter of the WebX protocol.**
+**The founding charter of the VayuWeb protocol.**
 
 | | |
 |---|---|
 | **Version** | 1.0 |
 | **Ratified** | 26 July 2026 |
-| **In force** | From the moment of first publication in the WebX repository |
+| **In force** | From the moment of first publication in the VayuWeb repository |
 | **Structure** | Six Titles, sixty Articles |
 | **Status of the protocol** | Not implemented. This charter governs a system that has not yet been built. |
 | **Licence of this text** | Public domain (Creative Commons CC0 1.0 Universal), to the fullest extent permitted by law |
-| **Canonical copy** | The `constitution/` directory of the WebX repository, mirrored on Radicle |
+| **Canonical copy** | The `constitution/` directory of the VayuWeb repository, mirrored on Radicle |
 
 This charter was written before the code, deliberately. A naming system inherits whatever
 politics it was built with, and no project in the history of this field has successfully
@@ -33,14 +33,14 @@ governments, and they are now exercised routinely: a registrar suspends, a resol
 authority revokes, a host removes, a network decides a publisher is not worth the trouble. None
 of this requires malice. It requires only that the power exist and that someone ask.
 
-WebX exists because that power should not exist in a form anyone can be asked for. Not because
+VayuWeb exists because that power should not exist in a form anyone can be asked for. Not because
 its current holders are wicked — most are not — but because a right that depends on the
 continued goodwill of an intermediary is a privilege wearing a better coat. The remedy is not to
 find kinder intermediaries. It is to build a system in which the request has nowhere to land: no
 root to seize, no register to compel, no key that unlocks another person's name, no office that
 could grant a favour even if it wanted to.
 
-This charter therefore spends most of its length on refusals. WebX will not issue a token. It
+This charter therefore spends most of its length on refusals. VayuWeb will not issue a token. It
 will not hold a treasury. It will not create a body with the authority to decide who deserves a
 name. It will not adjudicate trademarks, truth, or merit. It will not build a mechanism to
 remove a name, because a mechanism that can rescue you is a mechanism that can be turned against
@@ -48,7 +48,7 @@ you, and over a century it always is. What cannot be done under pressure is wort
 is merely promised, so wherever this document could have chosen a policy it has tried instead to
 choose an impossibility.
 
-It is equally a document of admissions. WebX cannot make anyone anonymous. It cannot promise
+It is equally a document of admissions. VayuWeb cannot make anyone anonymous. It cannot promise
 that a page will still load tomorrow. It cannot forget what an append-only log already carries,
 nor compel a stranger to discard bytes they have lawfully copied. It cannot stop a state from
 severing a cable or compelling a person. A charter that overclaims does not survive its first
@@ -84,7 +84,7 @@ everything, including any amendment that purports to reach them.
 
 **Numbers are deliberate.** Every threshold, period and quorum in this document was chosen
 rather than inherited, and the reason is stated in the clause that sets it. Disagreeing with a
-number is a legitimate basis for a WXIP; treating it as arbitrary is not.
+number is a legitimate basis for a VWIP; treating it as arbitrary is not.
 
 ## Table of Titles
 
@@ -103,19 +103,19 @@ The full list of Articles appears at the head of each Title.
 
 ## Title I — Foundations, Doctrine and the Entrenched Core
 
-*What WebX is, the words that make its rules decidable, and the commitments no process here may undo.*
+*What VayuWeb is, the words that make its rules decidable, and the commitments no process here may undo.*
 
 ### Article 1. Name, Nature, Non-Incorporation and the Canonical Text
 
-1.1 WebX is a protocol, a specification and a namespace. It is not a company, a product, a
+1.1 VayuWeb is a protocol, a specification and a namespace. It is not a company, a product, a
 service, an asset or a legal person.
 
-1.2 WebX SHALL have no seat, domicile, registered office, treasury, account, employees or
+1.2 VayuWeb SHALL have no seat, domicile, registered office, treasury, account, employees or
 officers, and no procedure in this Constitution SHALL create any of them.
 
-1.3 No claim of ownership over WebX has any effect on conformance. An assertion that any
+1.3 No claim of ownership over VayuWeb has any effect on conformance. An assertion that any
 entity — company, foundation, association, collective, trust, estate, or any successor form
-of organisation not yet invented — "is" WebX, owns it, controls it, or speaks for it SHALL
+of organisation not yet invented — "is" VayuWeb, owns it, controls it, or speaks for it SHALL
 be void on its face, and conformance SHALL continue to be determined only by the tests
 stated in this Constitution.
 
@@ -126,7 +126,7 @@ anyone. The protocol MUST NOT be.
 entity SHALL hold anything load-bearing for registration, renewal, transfer, resolution,
 publication or node participation (Arts. 4, 59).
 
-1.6 The name "WebX" is not a controlled asset and confers no authority. A party asserting
+1.6 The name "VayuWeb" is not a controlled asset and confers no authority. A party asserting
 exclusive rights in the name, in any jurisdiction and by any instrument, thereby acquires no
 power over any Name, Record, Node, Implementation or Reader. Should the name become
 encumbered, participants MAY carry these rules forward under a different name without
@@ -165,7 +165,7 @@ translated Article never creates an obligation absent from the canonical text, a
 translation MUST NOT be cited as authority against it.
 
 1.13 Charter-stage disclosure. Nothing in this Constitution asserts the present existence of
-running infrastructure. WebX is specified here, not shipped. Every operative sentence is
+running infrastructure. VayuWeb is specified here, not shipped. Every operative sentence is
 written in the normative future.
 
 1.14 All project material — specification, site, client copy, release notes, presentations —
@@ -333,12 +333,12 @@ permission that others must respect beyond their own conduct.
 by an Ordinary Participant running unmodified software — MUST be written as a Recommendation
 and labelled as such, so that no reader mistakes a wish for a guarantee.
 
-3.7 Precedence, highest first: this Constitution; Final WXIPs; published Annexes; the
+3.7 Precedence, highest first: this Constitution; Final VWIPs; published Annexes; the
 published conformance suite; implementation documentation. Where a lower instrument
 conflicts with a higher one, the higher governs and the lower is void to the extent of the
 conflict.
 
-3.8 Draft WXIPs are informative. They bind nobody, determine no conformance question, and
+3.8 Draft VWIPs are informative. They bind nobody, determine no conformance question, and
 confer no expectation that they will advance.
 
 3.9 A reference implementation never outranks a specification. Where they disagree, the
@@ -350,7 +350,7 @@ specification governs and the implementation is defective.
 operator, and against any party asserting authority over them.
 
 3.12 No power is implied. A capacity not expressly granted by this Constitution or by a
-Final WXIP does not exist, and MUST NOT be inferred from silence, custom, convenience,
+Final VWIP does not exist, and MUST NOT be inferred from silence, custom, convenience,
 precedent, emergency or operational necessity.
 
 3.13 Where two readings remain open after 3.11 and 3.12, the reading that leaves the smaller
@@ -396,7 +396,7 @@ however briefly and however justified, is void.
 
 ### Article 4. The No-Chokepoint Invariant
 
-4.1 This Article states the load-bearing structural rule of WebX, from which most of Title
+4.1 This Article states the load-bearing structural rule of VayuWeb, from which most of Title
 II follows.
 
 4.2 No function of the protocol SHALL require the cooperation, availability or permission of
@@ -440,7 +440,7 @@ a requirement wearing a softer word.
 
 4.11 A conformant client MUST be able to complete first-run bootstrap from peer information
 supplied entirely by the user, with every shipped source disabled, and MUST NOT require for
-that purpose any account, any payment, any naming system outside WebX, or any service
+that purpose any account, any payment, any naming system outside VayuWeb, or any service
 reachable only from a particular jurisdiction.
 
 4.12 The invariant applies to its own audit. No clause of this Constitution requires a named
@@ -471,12 +471,12 @@ operating without asking permission.
 
 5.4 A proposed guarantee that fails 5.3 MUST be demoted to a Recommendation under Article 3.6 rather than adopted as an obligation.
 
-5.5 Every WXIP MUST carry an impossibility-and-capture analysis answering, in writing and in
+5.5 Every VWIP MUST carry an impossibility-and-capture analysis answering, in writing and in
 terms a reader can check: what new capability does this confer; on whom; what new dependency
 does it create; who gains power if it is adopted; and why can that capability not be removed
 from the design.
 
-5.6 A WXIP that leaves any of the five questions unanswered MUST NOT advance beyond Draft,
+5.6 A VWIP that leaves any of the five questions unanswered MUST NOT advance beyond Draft,
 regardless of support. Any participant MAY identify the unanswered question by citing it.
 Advancement while a question stands unanswered is void under Article 8, not merely
 irregular.
@@ -504,7 +504,7 @@ policy shield, and MUST be redesigned toward a mechanism any participant can run
 6.1 Ownership of a Name vests in a keypair. It does not vest in an account, an identity, a
 person, or a record of a person.
 
-6.2 WebX SHALL NOT define an account. No Article, WXIP or implementation MAY introduce one
+6.2 VayuWeb SHALL NOT define an account. No Article, VWIP or implementation MAY introduce one
 as a condition of registration, resolution or publication.
 
 6.3 Ownership MUST NOT depend on identity, nationality, incorporation, payment, reputation,
@@ -554,7 +554,7 @@ guaranteed is narrower and real: no one else's key will do.
 
 ### Article 7. No Token, No Treasury, No Protocol Fee
 
-7.1 WebX SHALL NOT have a native token, coin, share, unit of account, staking mechanism, fee
+7.1 VayuWeb SHALL NOT have a native token, coin, share, unit of account, staking mechanism, fee
 market, rent, escrow, bonded deposit redeemable to any party, or protocol-level treasury of
 any kind, under any name.
 
@@ -584,7 +584,7 @@ governance weight; priority resolution; preferential propagation; default placem
 shipped client; or namespace advantage of any kind.
 
 7.8 Funding of people and infrastructure is permitted and expected, and SHALL always be
-external to the protocol. Funds flow to people and to code, never to WebX, so that defunding
+external to the protocol. Funds flow to people and to code, never to VayuWeb, so that defunding
 a project cannot defund the protocol.
 
 7.9 Funded work MUST be published under the same licence as the rest of the specification
@@ -673,7 +673,7 @@ and the network still will not.
 ### Article 9. The Entrenched Core
 
 9.1 The clauses listed in 9.2 to 9.16 are entrenched. No procedure in this Constitution —
-amendment, repeal, WXIP, claim of emergency, vote, consensus, custom or reinterpretation —
+amendment, repeal, VWIP, claim of emergency, vote, consensus, custom or reinterpretation —
 MAY amend, repeal, narrow, suspend, condition or render inoperable any of them. Each is
 stated by its substance so that entrenchment survives renumbering, redrafting or the loss of
 any Article it points to; the cross-references are for convenience only.
@@ -737,7 +737,7 @@ evidence of capture.
 9.21 The response to 9.20 does not depend on any body, process or quorum, because a defence
 that requires a functioning institution fails exactly when it is needed. Article 59 states
 the ordinary route. Where no such process exists, functions, or can be convened, any
-participant MAY treat a conformant fork as the continuation of WebX, and conformant clients
+participant MAY treat a conformant fork as the continuation of VayuWeb, and conformant clients
 MAY follow it, with no further formality and no one's approval.
 
 9.22 A procedurally perfect vote does not cure substantive voidness. Unanimity does not cure
@@ -750,7 +750,7 @@ physically stop a determined majority from writing different software and persua
 to run it.
 
 9.24 What entrenchment does instead is twofold. First, it declares that a network violating
-any clause in 9.2 to 9.16 is not WebX, whatever it calls itself, whoever maintains it and
+any clause in 9.2 to 9.16 is not VayuWeb, whatever it calls itself, whoever maintains it and
 however many users it holds. Second, it converts capture from an ambiguous slide into a
 legible, pre-agreed event: the release of the name, the state and the users to a conformant
 fork (Arts. 17, 18, 58).
@@ -804,7 +804,7 @@ beyond it; every other correspondent is an external service.
 10.5.e a uniform resource limit applied under clause 10.6.
 
 These five grounds are exhaustive. No sixth ground SHALL be introduced by implementation,
-convention, WXIP or amendment.
+convention, VWIP or amendment.
 
 10.6 A resource limit under clause 10.5.e MUST be a published numeric rate or size limit,
 MUST be applied identically to every submitting party without regard to key, name, TLD or
@@ -817,7 +817,7 @@ a resource limit but a refusal on a prohibited ground, and violates this Article
 submitting party with the ground named, and MUST be reproducible offline by that party from
 public data alone.
 
-10.8 Reserved names are forbidden. No implementation, no WXIP and no amendment SHALL
+10.8 Reserved names are forbidden. No implementation, no VWIP and no amendment SHALL
 withhold a string, a pattern or a length class from registration for later allocation by
 anyone, including any editor, steward, working group, funder or successor body of this
 Constitution. Structural limits imposed by the canonical encoding of Article 30 MUST be
@@ -1106,7 +1106,7 @@ unable to join; or if a client reports a name as unregistered on the basis of a 
 
 ### Article 16. The Right to Interoperate and to Implement Independently
 
-16.1 Anyone SHALL be able to write an independent implementation of WebX from the published
+16.1 Anyone SHALL be able to write an independent implementation of VayuWeb from the published
 specification alone, without licence, fee, permission, certification, registration, notice or
 relationship with any party.
 
@@ -1194,7 +1194,7 @@ published format; if a client attached to a non-default network fails to say so 
 ordinary interface; or if any licence, agreement or funding condition in force over
 contributors contains a term restricting forking.
 
-17.6 This Article states the principle the whole document is built to support. WebX governs
+17.6 This Article states the principle the whole document is built to support. VayuWeb governs
 by the consent of those who run it, and consent is meaningless without an exit that is
 practised, documented and undramatic. The right to leave is what makes the right to stay
 mean something.
@@ -1222,9 +1222,9 @@ subscription, an unlock code, or a running service the user does not control. It
 rate-limited, throttled, queued or metered.
 
 18.3 The export format is the canonical record form of Article 30, in every case and without
-alternative, so that exit, snapshot and fork share one representation. A Final WXIP under
+alternative, so that exit, snapshot and fork share one representation. A Final VWIP under
 Article 44 MAY specify the container that carries those records; it MUST NOT substitute a
-different record form. Where no such WXIP is in force, the canonical record form stands alone
+different record form. Where no such VWIP is in force, the canonical record form stands alone
 and export remains fully defined. Separate export paths tend to be worse maintained and
 quietly break; there SHALL be only the one, exercised constantly by ordinary operation.
 
@@ -1283,7 +1283,7 @@ parties the registrant will never identify.
 19.6.c No protocol mechanism can compel a third party to delete bytes they already hold, and
 this Constitution will not pretend otherwise.
 
-19.7 WebX therefore guarantees the cessation of authorised publication. It does not guarantee
+19.7 VayuWeb therefore guarantees the cessation of authorised publication. It does not guarantee
 erasure, and no implementation or document SHALL state or imply that it does.
 
 19.8 Implementations and documentation MUST state the distinction in clause 19.7 at the point
@@ -1308,8 +1308,8 @@ registered, records already accepted, or tenure already accrued.
 records created at or after that epoch. Records are evaluated under the rule version in force
 at their own epoch, permanently.
 
-20.3 An activation epoch MUST be stated in the WXIP itself and MUST be strictly in the future
-at the moment the WXIP reaches Final status, by no less than 15,552,000 seconds (180 days).
+20.3 An activation epoch MUST be stated in the VWIP itself and MUST be strictly in the future
+at the moment the VWIP reaches Final status, by no less than 15,552,000 seconds (180 days).
 Six months is the minimum interval in which an unpaid volunteer maintaining an independent
 implementation can read, implement, test and ship a change without abandoning the rest of
 their life.
@@ -1353,13 +1353,13 @@ transformation requiring no action whatsoever from a holder who may by then be d
 imprisoned, offline or simply uninterested. No rule of this protocol SHALL be the reason such
 a name stops resolving. Whether any peer is still willing to serve it is a matter of Article 23, not a promise made here.
 
-20.10 Any such transformation MUST be published as a Final WXIP, MUST be independently
+20.10 Any such transformation MUST be published as a Final VWIP, MUST be independently
 computable from the record chain and the published rules alone, and MUST NOT depend on the
 survival of any organisation, archive, service or key other than the holder's own.
 
 20.11 **Conformance Test.** An implementation or process violates this Article if any
 implementation applies a rule version to a record whose epoch precedes that rule's activation
-epoch; if any WXIP reaches Final status without an activation epoch strictly in the future by
+epoch; if any VWIP reaches Final status without an activation epoch strictly in the future by
 at least 15,552,000 seconds; if any verification path refuses a record solely because its
 signature suite has been superseded; or if any migration requires an affirmative act by a
 holder in order for an existing name to keep resolving, outside the single exception of
@@ -1371,27 +1371,27 @@ clause 20.8.
 
 ## Title III — Limits, Non-Guarantees and Honest Disclosure
 
-*What WebX cannot do, stated plainly, kept current by a process that survives its custodians, and binding on everyone who speaks in its name.*
+*What VayuWeb cannot do, stated plainly, kept current by a process that survives its custodians, and binding on everyone who speaks in its name.*
 
 ### Article 21. The Duty of Honest Claiming
 
-21.1 In this Title, a *WebX document* is any statement issued under the WebX name in any
+21.1 In this Title, a *VayuWeb document* is any statement issued under the VayuWeb name in any
 medium now existing or later devised, including specifications, implementations and the text
 they display, release notes, sites, manuals, talks, interviews, filings and promotional
 material. *The Project* means whoever, at a given moment, publishes or maintains anything
-under the WebX name. Where no such person or body exists, Article 28 governs and every duty in
+under the VayuWeb name. Where no such person or body exists, Article 28 governs and every duty in
 this Title remains in force.
 
-21.2 A WebX document MUST NOT claim a capability beyond those this Constitution establishes.
+21.2 A VayuWeb document MUST NOT claim a capability beyond those this Constitution establishes.
 
-21.3 A WebX document MUST NOT omit a limit stated in this Title where that limit is material.
+21.3 A VayuWeb document MUST NOT omit a limit stated in this Title where that limit is material.
 A limit is material if, stated, it would bear on any of the following: the risk of losing a
 name; the risk of exposing the identity, location or associations of a publisher or a reader;
 the risk of content becoming unretrievable; the cost of avoiding any of these; or the
 availability of an alternative the reader could choose instead. Materiality is decided by that
 test alone and MUST NOT be decided by the author's estimate of how likely the harm is.
 
-21.4 The following claims MUST NOT be made about WebX, in these or equivalent words, in any
+21.4 The following claims MUST NOT be made about VayuWeb, in these or equivalent words, in any
 language:
 
 21.4.a "anonymous";
@@ -1434,7 +1434,7 @@ network observes plenty.
 
 21.7 Overclaiming is a conformance violation. It MUST be reportable through the channel
 established in Article 50; where no such channel is operative, a report published in any public
-venue the Project uses, or addressed to any person then publishing under the WebX name, is a
+venue the Project uses, or addressed to any person then publishing under the VayuWeb name, is a
 valid report and starts the clocks in 21.8. Reports MUST be triaged on the same timeline as a
 security defect and disclosed on the same terms. A false safety claim is a safety defect: it
 causes people to take risks they would not otherwise take, and the harm lands on the person who
@@ -1449,17 +1449,17 @@ only protect the reluctance to correct it.
 
 21.9 If the text is neither corrected nor withdrawn within the period set by 21.8, the claim is
 void, the document is non-conformant, and the document MUST NOT continue to be distributed
-under the WebX name until corrected. Any participant MAY publish the report, MAY publish the
+under the VayuWeb name until corrected. Any participant MAY publish the report, MAY publish the
 correction, and MAY distribute a corrected copy; no permission is required for any of these.
 
 21.10 The Project MUST publish and maintain two documents: a threat model, and a statement of
-what WebX does not provide. Each MUST carry the date it was last reviewed. A WebX document MUST
+what VayuWeb does not provide. Each MUST carry the date it was last reviewed. A VayuWeb document MUST
 NOT claim protection beyond what those two documents support, and a claim in conflict with them
 is void rather than a reason to weaken them.
 
 21.11 If either document required by 21.10 is absent, unreachable, or bears a review date more
 than twelve months old, it MUST be treated as absent. While either is treated as absent, no
-WebX document may make any resistance, privacy or durability claim at all; the plain limits of
+VayuWeb document may make any resistance, privacy or durability claim at all; the plain limits of
 this Title may still be stated, since stating a limit can mislead no one.
 
 21.12 Where a posture can be derived mechanically from the running configuration, a derived
@@ -1476,7 +1476,7 @@ remains binding, and any amendment purporting to authorise a forbidden claim is 
 22.1 This Article generalises the honesty clause of Article 19 to every record the protocol
 keeps.
 
-22.2 WebX guarantees the following, and these MAY be described without qualification:
+22.2 VayuWeb guarantees the following, and these MAY be described without qualification:
 
 22.2.a a registrant MAY cease publishing at any time;
 
@@ -1492,7 +1492,7 @@ material exists or the signature scheme is broken;
 22.2.e the answer a peer gives under a name is the latest signed intent that peer has received,
 and an earlier signed record never supersedes a later one.
 
-22.3 WebX does not guarantee, and no WebX document may claim, any of the following:
+22.3 VayuWeb does not guarantee, and no VayuWeb document may claim, any of the following:
 
 22.3.a erasure of registry history, which is append-only by design;
 
@@ -1581,12 +1581,12 @@ requires its own cooperation, its continued operation, or its consent is not con
 a site nobody replicates is a site that will disappear. Durable availability is a social and
 economic problem that the protocol assists with and does not solve.
 
-23.9 A WebX document MUST NOT describe content as stored, hosted, backed up or preserved by
-WebX. WebX addresses content; people keep it.
+23.9 A VayuWeb document MUST NOT describe content as stored, hosted, backed up or preserved by
+VayuWeb. VayuWeb addresses content; people keep it.
 
 ### Article 24. Anonymity Is Not Guaranteed
 
-24.1 WebX is not an anonymity network. It MUST NOT be described as one, recommended as one, or
+24.1 VayuWeb is not an anonymity network. It MUST NOT be described as one, recommended as one, or
 compared favourably to one.
 
 24.2 The following exposures are inherent to the design as specified, and MUST be named
@@ -1608,7 +1608,7 @@ key, as stated in Article 22;
 24.2.g a compromised device ends every protection described here, and no protocol measure
 survives it.
 
-24.3 What WebX does provide, and MAY be stated: no accounts; no identity requirement at any
+24.3 What VayuWeb does provide, and MAY be stated: no accounts; no identity requirement at any
 layer; no stable client identifier emitted by conformant software; no query logging by
 conformant software; and no protocol primitive by which a publisher can compel a reader to
 identify themselves.
@@ -1618,7 +1618,7 @@ checks that reveal which names are resolved or which content is requested. Any s
 MUST be off unless the user has turned it on, MUST be described before it is turned on, and
 MUST NOT be a condition of receiving corrections or updates.
 
-24.5 A user requiring network-level anonymity MUST be directed to compose WebX with a dedicated
+24.5 A user requiring network-level anonymity MUST be directed to compose VayuWeb with a dedicated
 anonymity transport. Documentation making that recommendation MUST state, in the same passage,
 that such composition has leaks of its own, that the composition is not specified by this
 Project, and that it MUST NOT be advertised as a solved problem.
@@ -1639,7 +1639,7 @@ result.
 
 25.1 The registry records who signed first. It does not know who deserves a name.
 
-25.2 WebX has no view on trademarks, impersonation, defamation, fraud, likeness, priority of
+25.2 VayuWeb has no view on trademarks, impersonation, defamation, fraud, likeness, priority of
 use, or good faith, and no mechanism by which it could form one. It SHALL NOT acquire such a
 mechanism, because a body able to decide who deserves a name is a body able to take one.
 
@@ -1688,7 +1688,7 @@ developers, pinning services, bridge operators and hosting providers, and this C
 changes none of that.
 
 26.2 This Constitution provides no shield, no defence, no immunity and no indemnity. The
-Project MUST NOT tell anyone that using WebX makes any conduct lawful, and MUST NOT publish
+Project MUST NOT tell anyone that using VayuWeb makes any conduct lawful, and MUST NOT publish
 legal advice.
 
 26.3 The Project MUST NOT design a feature that is targeted at a specific proceeding, a
@@ -1698,7 +1698,7 @@ features engineered against one named target are not. This Constitution takes no
 whether any particular legal system, order or proceeding is just; it constrains only what the
 Project builds in the name of everyone.
 
-26.4 WebX SHALL NOT seek accreditation, delegation, contract, licence or recognition from any
+26.4 VayuWeb SHALL NOT seek accreditation, delegation, contract, licence or recognition from any
 body claiming central authority over naming, from any registry operator or registrar, or from
 any government, and SHALL NOT create any body capable of granting, withholding or revoking
 names at the instruction of any of them. This prohibition attaches to the function, not to the
@@ -1731,7 +1731,7 @@ proposal that creates such a dependency is void under Title I.
 the Project MUST perform and publish a check demonstrating that registration, resolution,
 publication and node participation still succeed when every artefact, host and credential held
 by the Project is treated as unavailable. If the check has not been published within thirteen
-months, every WebX document making a compulsion-resistance claim MUST carry a notice that the
+months, every VayuWeb document making a compulsion-resistance claim MUST carry a notice that the
 claim is untested, until the check is published.
 
 26.9 A participant who is compelled by legal process MAY comply, MAY disclose whatever they may
@@ -1751,17 +1751,17 @@ on the Project's behalf.
 ### Article 27. The Register of Named Failure Modes
 
 27.1 The Project MUST maintain a public, enumerated Register of Named Failure Modes describing
-the ways in which WebX can fail. Each entry MUST carry a stable identifier, the date it was
+the ways in which VayuWeb can fail. Each entry MUST carry a stable identifier, the date it was
 opened, a description of the failure mode, and its current mitigation or a plain statement that
 there is none.
 
-27.2 The Register is maintained through the WXIP process of Title V. Entries are added, revised
-and closed by WXIP, and no entry may be removed because it is unflattering, obsolete-looking or
+27.2 The Register is maintained through the VWIP process of Title V. Entries are added, revised
+and closed by VWIP, and no entry may be removed because it is unflattering, obsolete-looking or
 inconvenient. An entry may be closed only when the mechanism that produced the failure mode no
 longer exists in the protocol, and a closure MUST record why, together with the condition whose
 recurrence would reopen the entry.
 
-27.3 Where the WXIP process is inoperative, entries MUST still be added by any participant
+27.3 Where the VWIP process is inoperative, entries MUST still be added by any participant
 maintaining the Register, and additions made in that period MUST be marked as provisional
 rather than withheld. An inoperative process is never a reason for a known failure mode to go
 unrecorded.
@@ -1797,12 +1797,12 @@ decay unattended;
 27.4.l the obsolescence of any cryptographic primitive the protocol depends on, and the
 migration problem that follows for records already signed.
 
-27.5 Any WXIP that creates a new failure mode, or worsens one already listed, MUST say so in its
+27.5 Any VWIP that creates a new failure mode, or worsens one already listed, MUST say so in its
 capture analysis and MUST propose the corresponding Register entry or amendment in the same
-proposal. A WXIP that omits a foreseeable Register impact MUST be returned rather than rejected,
+proposal. A VWIP that omits a foreseeable Register impact MUST be returned rather than rejected,
 and MAY be resubmitted once corrected.
 
-27.6 Any WXIP that mitigates a listed failure mode MUST update that entry, and MUST NOT
+27.6 Any VWIP that mitigates a listed failure mode MUST update that entry, and MUST NOT
 describe the mitigation as elimination unless the entry is being closed under 27.2.
 
 27.7 The Register MUST be reviewed at least once every twelve months, alongside the
@@ -1815,7 +1815,7 @@ merely asserted during the period, and MUST NOT carry forward a prior period's a
 re-testing.
 
 27.9 If thirteen months elapse without a published review, the Register MUST be marked lapsed at
-its head, and every WebX document making a resistance or durability claim MUST carry that lapse
+its head, and every VayuWeb document making a resistance or durability claim MUST carry that lapse
 notice until a review is published. A lapse suspends claims; it never suspends the limits stated
 in this Title.
 
@@ -1845,13 +1845,13 @@ to perform it.
 its absence MUST NOT be read as an assurance. Silence never converts a non-guarantee into a
 guarantee.
 
-28.5 Anyone who distributes, forks or republishes under the WebX name assumes the duties of this
+28.5 Anyone who distributes, forks or republishes under the VayuWeb name assumes the duties of this
 Title in full. Anyone unwilling to assume them MUST publish under a different name, as provided
 in Title VI. The name and the duties travel together.
 
 28.6 Where twenty-four months pass with no published review under Article 27.7 and no
 acknowledged report under Article 21.8, the software and specification MUST NOT be presented as
-maintained, and any WebX document published thereafter MUST carry a notice that maintenance has
+maintained, and any VayuWeb document published thereafter MUST carry a notice that maintenance has
 lapsed and that the limits in this Title remain fully in force.
 
 28.7 This Article is entrenched on the same terms as Article 21.13 and MUST NOT be amended to
@@ -1919,7 +1919,7 @@ resolution by decision is void, and records admitted under it MUST be rejected.
 
 ### Article 30. Acquisition Doctrine: First Valid Signature Wins
 
-30.1 The whole of WebX's allocation policy is one rule: a name belongs to the first record that
+30.1 The whole of VayuWeb's allocation policy is one rule: a name belongs to the first record that
 is well formed, validly signed, sufficiently worked under Article 31, and not preceded by a
 live claim on that name.
 
@@ -1972,7 +1972,7 @@ exception.
 difficulty their claim will require. A protocol that cannot tell you the price before you pay
 it is a protocol with a discretion hidden in it.
 
-31.4 Difficulty MAY be adjusted only by a ratified WXIP carrying a future activation epoch
+31.4 Difficulty MAY be adjusted only by a ratified VWIP carrying a future activation epoch
 under Article 20, and never retroactively against work already performed.
 
 31.5 Difficulty SHALL scale superlinearly in the number of live names held per ownership key
@@ -2053,7 +2053,7 @@ bulk-registration primitive or "for sale" record type. No such faculty is within
 record set of Article 29.4.
 
 33.3 Parties MAY trade names privately by any means they like, and the protocol has no view
-about it. The protocol simply SHALL NOT help. The distinction is deliberate: WebX declines to
+about it. The protocol simply SHALL NOT help. The distinction is deliberate: VayuWeb declines to
 build the machinery, and declines to pretend it can prevent the conduct.
 
 33.4 A TRANSFER record SHALL take effect only after a mandatory settlement delay of fourteen
@@ -2066,7 +2066,7 @@ flipping slow. It also means no transfer is instant, that legitimate urgent tran
 delayed, and that a party who notices on day fifteen has no remedy at all.
 
 33.6 The protocol MUST NOT adopt any feature whose principal effect is to increase the
-liquidity of names. The capture analysis required of every WXIP MUST answer this question
+liquidity of names. The capture analysis required of every VWIP MUST answer this question
 explicitly and in terms: does this proposal make names easier to buy, sell, price, bundle or
 collateralise, and if so, why is that not disqualifying?
 
@@ -2112,7 +2112,7 @@ MUST display the contest to the user rather than silently resolving it in the in
 contested name MUST fail visibly rather than resolve wrongly. No human tie-breaker exists at
 any point in this procedure.
 
-34.8 This construction is the only approximation of account recovery that WebX permits, for one
+34.8 This construction is the only approximation of account recovery that VayuWeb permits, for one
 reason: it is authorised in advance by the holder, on terms the holder chose, and it creates no
 standing capability held by anyone else. A capability that exists can be compelled; a
 capability that only the holder ever created cannot be demanded from a party that never had it.
@@ -2121,7 +2121,7 @@ capability that only the holder ever created cannot be demanded from a party tha
 
 ### Article 35. The Namespace: TLD Equality, Creation, Freeze and Non-Removal
 
-35.1 The initial top-level domains are: .webx, .vayu, .p2p, .free, .decent, .libre, .sov, .dao,
+35.1 The initial top-level domains are: .vayu, .vayu, .p2p, .free, .decent, .libre, .sov, .dao,
 .indie, .open, .news and .blog.
 
 35.2 TLDs are flat, equal and non-hierarchical. No TLD confers status, priority, trust,
@@ -2143,8 +2143,8 @@ legitimate one, because that decision is adjudication (Art. 36).
 MUST remain valid in year one hundred. No profile revision may retroactively invalidate a live
 name, and a proposal that would do so is inadmissible.
 
-35.6 A new TLD comes into being only by a ratified Naming-category WXIP, which MUST contain:
-rationale; a collision review against existing WebX TLDs and against legacy DNS strings likely
+35.6 A new TLD comes into being only by a ratified Naming-category VWIP, which MUST contain:
+rationale; a collision review against existing VayuWeb TLDs and against legacy DNS strings likely
 to confuse users; a public objection window of not less than ninety days; and a mandatory
 dormancy period of not less than one hundred and eighty days between ratification and
 availability.
@@ -2172,11 +2172,11 @@ open for not less than five years. No name is ever migrated on a registrant's be
 
 36.1 The default is absolute and comes first: a name is altered only by its own key.
 
-36.2 WebX SHALL NOT operate, recognise, fund, staff, host or cooperate with any dispute
+36.2 VayuWeb SHALL NOT operate, recognise, fund, staff, host or cooperate with any dispute
 resolution body, UDRP analogue, arbitration panel with binding effect on names, abuse desk,
 trusted-notifier programme or takedown surface having power over names.
 
-36.3 A WXIP proposing to create such a body is inadmissible. The governance process has no
+36.3 A VWIP proposing to create such a body is inadmissible. The governance process has no
 competence to create it, and the proposal is therefore out of scope rather than merely
 unpopular or premature. A chair, maintainer or editor MUST refuse it at intake, and ratifying
 it would be void under Article 9.
@@ -2186,7 +2186,7 @@ governed by making such a process practically unreachable rather than theoretica
 so that nobody is tempted to improvise one informally in an emergency. Any such process MUST
 satisfy every one of the following:
 
-36.4.a It MUST be defined in advance by a ratified WXIP and MUST NOT be invocable
+36.4.a It MUST be defined in advance by a ratified VWIP and MUST NOT be invocable
 retroactively against conduct or records preceding its activation epoch.
 
 36.4.b It MUST give public written notice in the log, for a minimum period scaled to severity
@@ -2199,7 +2199,7 @@ fee or membership.
 from the log alone.
 
 36.4.e It MUST be time-boxed and self-expiring, with a maximum duration stated in the
-authorising WXIP and never exceeding one hundred and eighty days.
+authorising VWIP and never exceeding one hundred and eighty days.
 
 36.4.f It MUST NOT transfer a name to any party, under any circumstances, for any reason.
 
@@ -2323,11 +2323,11 @@ procedural role is a clerkship with a term.*
 
 ### Article 39. There Is No Governing Body
 
-39.1 WebX SHALL have no council, board, assembly, foundation, membership roll, elected
+39.1 VayuWeb SHALL have no council, board, assembly, foundation, membership roll, elected
 officer, core team with authority, or seat of any kind. No such body is created by this
 Constitution.
 
-39.2 No WXIP MAY create such a body. A proposal that does so is inadmissible under
+39.2 No VWIP MAY create such a body. A proposal that does so is inadmissible under
 Article 41 and MUST be closed as out of scope.
 
 39.3 Decisions SHALL be made by rough consensus among those who participate, and bind no
@@ -2350,7 +2350,7 @@ settled before publication.
 channel and no off-record consensus.
 
 39.8 Discussion held in private has no procedural effect. A decision taken in private is
-void under Article 8, and a WXIP transition resting on one MUST be reverted to its prior
+void under Article 8, and a VWIP transition resting on one MUST be reverted to its prior
 state on discovery.
 
 39.9 Participants MAY confer privately; they MUST NOT thereby decide. Any private
@@ -2367,7 +2367,7 @@ no living contact. To that end it SHALL carry its own format documentation, a pl
 rendering of every document, and an index that does not depend on any running service.
 
 39.12 Once the namespace is capable of carrying it, the archive SHALL be mirrored inside
-WebX itself, so that the record of the protocol does not depend on the infrastructure the
+VayuWeb itself, so that the record of the protocol does not depend on the infrastructure the
 protocol exists to replace.
 
 39.13 This Article is entrenched under Article 9 and MUST NOT be amended by any route.
@@ -2426,20 +2426,20 @@ manufacture apparent support, and this Constitution does not claim otherwise.
 40.12 The real defence is Article 45: a Sybil swarm may win an argument and still cannot
 make any operator run the code.
 
-### Article 41. Scope and Exclusivity of the WXIP Process
+### Article 41. Scope and Exclusivity of the VWIP Process
 
-41.1 Every normative change SHALL occur only through a WebX Improvement Proposal (WXIP).
+41.1 Every normative change SHALL occur only through a VayuWeb Improvement Proposal (VWIP).
 This includes wire behaviour, record types, validation rules, work policy, tenure terms,
 TLD lifecycle, the primitives Annex, the conformance suite, and this Constitution.
 
-41.2 A change not published as a WXIP is not part of WebX, regardless of who shipped it,
+41.2 A change not published as a VWIP is not part of VayuWeb, regardless of who shipped it,
 how widely it spread, or how long it went unnoticed. Wide deployment of an unpublished
-change creates an obligation to document it as a WXIP, not a licence to skip the process.
+change creates an obligation to document it as a VWIP, not a licence to skip the process.
 
-41.3 WXIP categories are: Core, Registry, Naming, Interop, Security, Process,
+41.3 VWIP categories are: Core, Registry, Naming, Interop, Security, Process,
 Informational, and Constitutional Amendment.
 
-41.4 No WXIP MAY address the following subject matter, which is jurisdictionally excluded
+41.4 No VWIP MAY address the following subject matter, which is jurisdictionally excluded
 rather than merely disfavoured:
 
 41.4.a creating any adjudicating body, arbiter, complaints process or takedown surface
@@ -2459,7 +2459,7 @@ key escrow, or any interception, logging or lawful-access facility;
 41.4.f amending an entrenched Article by any route other than the amendment procedure of
 Title VI, which cannot reach entrenched Articles at all (Art. 58).
 
-41.5 A WXIP falling within 41.4 is inadmissible. Editors MUST close it as out of scope,
+41.5 A VWIP falling within 41.4 is inadmissible. Editors MUST close it as out of scope,
 with written reasons and a citation to the excluded head, and MUST NOT advance it to
 Review.
 
@@ -2475,16 +2475,16 @@ would be desirable.
 Repackaging the same excluded power under a new name is itself inadmissible, and editors
 SHALL record the relationship between the filings.
 
-41.9 Anyone MAY author a WXIP. Authorship confers no privilege, no standing, no priority
+41.9 Anyone MAY author a VWIP. Authorship confers no privilege, no standing, no priority
 and no ownership of the resulting text.
 
 41.10 Authors MAY act pseudonymously. No process step MAY require, verify or publish an
 author's legal identity, employer or location.
 
-41.11 Editors MUST NOT decline a WXIP on grounds of the author's identity, reputation,
+41.11 Editors MUST NOT decline a VWIP on grounds of the author's identity, reputation,
 affiliation, prior conduct, or the perceived quality of the idea.
 
-### Article 42. The WXIP Lifecycle, Mandatory Sections and Minimum Durations
+### Article 42. The VWIP Lifecycle, Mandatory Sections and Minimum Durations
 
 42.1 The lifecycle is: Draft → Review → Accepted → Implemented → Final → Deprecated →
 Retired.
@@ -2493,10 +2493,10 @@ Retired.
 the author only; and Dormant, entered automatically after 365 days without substantive
 activity.
 
-42.3 A Dormant WXIP MAY be reopened by anyone, including a person other than its author.
-No WXIP in any state SHALL ever be deleted.
+42.3 A Dormant VWIP MAY be reopened by anyone, including a person other than its author.
+No VWIP in any state SHALL ever be deleted.
 
-42.4 A WXIP MUST NOT advance beyond Draft unless it contains all of the following
+42.4 A VWIP MUST NOT advance beyond Draft unless it contains all of the following
 sections:
 
 42.4.a abstract;
@@ -2533,18 +2533,18 @@ remedied by deploying a fix and documenting it, never by shortening review.
 
 42.7 Every state transition MUST be recorded publicly, with its date and the evidence
 that justified it. An unrecorded transition has not occurred, and implementations SHOULD
-treat the WXIP as remaining in its last recorded state.
+treat the VWIP as remaining in its last recorded state.
 
 42.8 No transition MAY be made by assertion, by silence, or by an editor's discretion
 except as Article 49 expressly permits.
 
-42.9 Any WXIP touching a Title II right MUST ship an executable Conformance Test for that
+42.9 Any VWIP touching a Title II right MUST ship an executable Conformance Test for that
 right before leaving Review.
 
-42.10 Any WXIP touching wire behaviour MUST ship test vectors before leaving Review
+42.10 Any VWIP touching wire behaviour MUST ship test vectors before leaving Review
 (Art. 44).
 
-42.11 A WXIP that has been Rejected MAY be refiled with new substance. The refiling MUST
+42.11 A VWIP that has been Rejected MAY be refiled with new substance. The refiling MUST
 cite the prior rejection and state what changed.
 
 ### Article 43. Rough Consensus, the Objection Register and the Limits of Blocking
@@ -2567,7 +2567,7 @@ prohibited.
 be treated as spent for the purpose of blocking, and remains in the record.
 
 43.6 Every unresolved objection SHALL be entered permanently in a public Objection
-Register attached to the WXIP, together with the reasoning by which it was overruled and
+Register attached to the VWIP, together with the reasoning by which it was overruled and
 the name or pseudonym of the person who recorded that reasoning.
 
 43.7 The Objection Register converts rough consensus from a euphemism for discretion into
@@ -2584,7 +2584,7 @@ are not entitled to is a veto exercised by repetition.
 determination of consensus is a finding of fact about the record.
 
 43.11 Any determination MAY be challenged on the record by any person with standing under
-Article 40. A sustained challenge returns the WXIP to Review and restarts its minimum
+Article 40. A sustained challenge returns the VWIP to Review and restarts its minimum
 duration.
 
 43.12 This Article is to be read against Article 49. Neither an indefinite veto nor
@@ -2593,7 +2593,7 @@ rule are the two mechanisms that hold each other in check.
 
 ### Article 44. Running Code, Two Independent Implementations and the Conformance Suite
 
-44.1 No WXIP SHALL reach Final without running code.
+44.1 No VWIP SHALL reach Final without running code.
 
 44.2 The minimum is two independent, interoperating implementations, written by parties
 with no common employer, funder or controlling entity, each passing the published test
@@ -2606,11 +2606,11 @@ single-vendor protocol and MUST NOT advance, however elegant its specification.
 
 44.5 Where an implementation and the specification disagree, the specification governs
 and the implementation is defective. Where the specification is genuinely ambiguous, the
-remedy is a clarifying WXIP, never deference to whichever code is most widely run.
+remedy is a clarifying VWIP, never deference to whichever code is most widely run.
 
 44.6 Specification text MUST be sufficient to build a conformant client without reading
 any implementation's source. Failure of this property is a defect in the specification
-and grounds for returning the WXIP to Review.
+and grounds for returning the VWIP to Review.
 
 44.7 The conformance suite SHALL be public, runnable entirely offline, forkable without
 permission, and versioned alongside the specification.
@@ -2643,7 +2643,7 @@ implementing.
 45.1 No process, editor, author, constituency or majority MAY declare a change to be in
 force.
 
-45.2 A WXIP becomes Final only when independent measurement shows it voluntarily deployed
+45.2 A VWIP becomes Final only when independent measurement shows it voluntarily deployed
 by not less than 60 percent of observed resolvers and not less than 60 percent of
 observed registry replicas, operated by not fewer than 20 unaffiliated parties, sustained
 across an observation period of not less than 180 days.
@@ -2675,7 +2675,7 @@ authorship and even implementations; it cannot compel adoption by sovereign oper
 45.9 The corollary is stated honestly: a change that every participant agrees is correct,
 and that nobody deploys, has not happened.
 
-45.10 In that case the WXIP SHALL be recorded as Accepted but not Final, with the
+45.10 In that case the VWIP SHALL be recorded as Accepted but not Final, with the
 measurement that shows non-adoption. The process MUST NOT paper over the outcome by
 declaring it Final anyway, and MUST NOT pressure operators to deploy it.
 
@@ -2690,8 +2690,8 @@ record state transitions, maintain the archive, and publish the record.
 46.2 Editors have no merit veto, no casting vote, and no authority over names, registry
 state, resolution, conformance results, or other people's software.
 
-46.3 Refusal to publish a WXIP is appealable on the record and MUST be answered within
-30 days. A WXIP deadlocked among editors goes to extended review, never to an editor's
+46.3 Refusal to publish a VWIP is appealable on the record and MUST be answered within
+30 days. A VWIP deadlocked among editors goes to extended review, never to an editor's
 decision.
 
 46.4 Editorship SHALL be held by a rotating panel of not fewer than three persons. It
@@ -2701,7 +2701,7 @@ transitions are suspended until it is refilled.
 46.5 Terms SHALL be fixed at two years and staggered so that no more than one seat turns
 over in any eight-month period, with a limit of two consecutive terms.
 
-46.6 An editor MUST recuse from any WXIP in which they, their employer or their funder
+46.6 An editor MUST recuse from any VWIP in which they, their employer or their funder
 has an interest. Every recusal SHALL be entered in a public recusal register.
 
 46.7 No single employer, funder, or commonly controlled group MAY hold more than one
@@ -2716,7 +2716,7 @@ and no explanation SHALL be required of them.
 publish anyone's legal identity, and a demand to do so is itself procedural abuse.
 
 46.10 Editors MAY be removed for procedural abuse — falsifying the record, suppressing an
-objection, transiting a WXIP without evidence, or breaching recusal — by a documented
+objection, transiting a VWIP without evidence, or breaching recusal — by a documented
 determination of the four constituencies under Article 40.
 
 46.11 The Bus-Factor Rule: no role, signing key, credential, account, domain or
@@ -2745,7 +2745,7 @@ sponsorship, and no probation.
 negotiation later has already broken its first users.
 
 47.2 Peers MUST negotiate capabilities rather than assume them. Feature identifiers MUST
-be explicit, registered in the WXIP record, and never reused for a different meaning.
+be explicit, registered in the VWIP record, and never reused for a different meaning.
 
 47.3 There SHALL be no silent breaking change. Any change that would cause an older
 conformant peer to misinterpret a message, rather than to reject it cleanly, MUST be
@@ -2759,8 +2759,8 @@ broken.
 47.5 An implementation that discards unknown fields is defective, and the defect is
 severe because its damage appears only later and elsewhere.
 
-47.6 Every WXIP MUST state an activation epoch strictly in the future, not less than 180
-days after the WXIP reaches Accepted, so that operators have a planning horizon.
+47.6 Every VWIP MUST state an activation epoch strictly in the future, not less than 180
+days after the VWIP reaches Accepted, so that operators have a planning horizon.
 
 47.7 Implementations MUST apply the rule version in force at a record's own epoch, not
 the latest rule they know. A record valid when signed remains valid (Art. 20).
@@ -2820,15 +2820,15 @@ its original duration, with published reasons.
 permanent by inattention, and permanent scaffolding is how a clean protocol becomes
 unimplementable by newcomers.
 
-48.10 Superseded work retires with dignity. A Retired WXIP remains published in full,
+48.10 Superseded work retires with dignity. A Retired VWIP remains published in full,
 with its specification, its test vectors and its Objection Register intact.
 
-48.11 No WXIP, objection, dissent or state transition SHALL be deleted, redacted or
+48.11 No VWIP, objection, dissent or state transition SHALL be deleted, redacted or
 rewritten. Deleting the history of a decision destroys the ability to review it, and a
 protocol that cannot be reviewed cannot be trusted by anyone who was not present.
 
-48.12 A Retired WXIP MAY be superseded but MUST NOT be contradicted silently. The
-superseding WXIP MUST cite it and state what changed and why.
+48.12 A Retired VWIP MAY be superseded but MUST NOT be contradicted silently. The
+superseding VWIP MUST cite it and state what changed and why.
 
 ### Article 49. Anti-Ossification Duties
 
@@ -2849,14 +2849,14 @@ being unused, which is how a protocol becomes unchangeable while every implement
 remains individually correct.
 
 49.5 No feature holds permanent mandatory-to-support status. Every mandatory feature
-SHALL be reaffirmed by WXIP every five years, on evidence that it is still needed;
+SHALL be reaffirmed by VWIP every five years, on evidence that it is still needed;
 reaffirmation is ordinary and expected, and failure to reaffirm moves the feature to
 optional, never to removed.
 
 49.6 Every optional extension carries a five-year expiry unless renewed by published
 evidence of actual use from independent measurement (Art. 38).
 
-49.7 The silence rule, to prevent paralysis: a WXIP MAY advance from Review to Accepted
+49.7 The silence rule, to prevent paralysis: a VWIP MAY advance from Review to Accepted
 without further consensus determination where all of the following hold —
 
 49.7.a it has received no substantive objection under Article 43 for 180 continuous days;
@@ -2884,7 +2884,7 @@ exercise was too gentle.
 49.12 Ossification and churn are opposite diseases. Article 48 treats churn by slowing
 removal and guaranteeing a horizon; this Article treats ossification by exercising the
 joints and by permitting uncontested work to move. Where the two pull against each other,
-the resolution is a WXIP, argued in public, with its reasoning recorded.
+the resolution is a VWIP, argued in public, with its reasoning recorded.
 
 ---
 
@@ -3056,7 +3056,7 @@ hold no authority over the specification, the history or the releases.
 account, organisation or namespace SHALL be a nuisance requiring a link update, and MUST NOT
 be an emergency.
 
-53.3 The full commit history, issue record, specification archive, WXIP archive, test vectors
+53.3 The full commit history, issue record, specification archive, VWIP archive, test vectors
 and release artefacts MUST be reconstructible from at least 3 independent, differently hosted
 copies, of which at least 1 is offline and physically separated.
 
@@ -3088,7 +3088,7 @@ Article 56.
 
 53.7 The auditable test, stated so that a stranger can apply it without assistance: if every
 centralised mirror vanished today, could a new contributor obtain the full specification, the
-full WXIP archive, verifiable releases, and the registry state? If the answer is no, that is a
+full VWIP archive, verifiable releases, and the registry state? If the answer is no, that is a
 defect to be fixed, not a risk to be accepted.
 
 ### Article 54. Marks, Network Identity and the Escrowed Release
@@ -3192,7 +3192,7 @@ halt resolution, registration, renewal, replication or publishing, and no protoc
 MAY be made conditional on a governance body being constituted.
 
 56.2 Dormancy is established by any of: failure to constitute an editorial panel for 12
-consecutive months; absence of any WXIP transition for 24 consecutive months; or
+consecutive months; absence of any VWIP transition for 24 consecutive months; or
 unreachability of a majority of role holders for 12 consecutive months.
 
 56.3 Dormancy is an honourable state and SHALL NOT be treated as failure. Apathy is the normal
@@ -3210,7 +3210,7 @@ any normative change, or spend beyond a published cap.
 ordinary participation resumes.
 
 56.5 Revival by strangers. After 36 consecutive months of total dormancy, any group of not
-fewer than 7 participants MAY reconstitute editorship and continue the WXIP archive by
+fewer than 7 participants MAY reconstitute editorship and continue the VWIP archive by
 published procedure, following an open call with a notice period of not less than 90 days.
 
 56.5.a The revival procedure MUST be executable using only this Constitution, the archived
@@ -3225,7 +3225,7 @@ archive, mirror the registry state in durable, content-addressed and offline for
 migration paths to the successor, and release everything irrevocably to the commons. There are
 no assets to distribute, because there never were any (Art. 24).
 
-56.7 No majority, maintainer set, custodian, court or successor SHALL be able to declare WebX
+56.7 No majority, maintainer set, custodian, court or successor SHALL be able to declare VayuWeb
 ended for those who continue to run it. Dissolution binds only those who choose it, and the
 software of everyone else continues to resolve.
 
@@ -3256,7 +3256,7 @@ Article 9.
 
 57.5 Every emergency change carries an automatic sunset of not more than 180 days from
 adoption. It expires by operation of this Constitution, without action, vote or notice, unless
-ratified through the ordinary WXIP procedure before the sunset date. An expired change SHALL
+ratified through the ordinary VWIP procedure before the sunset date. An expired change SHALL
 be removed from conformant clients.
 
 57.6 Emergency powers MUST NOT be invoked twice consecutively for the same matter. A defect
@@ -3277,7 +3277,7 @@ what those Articles forbid.
 
 ### Article 58. Amendment, Entrenchment and the Decennial Review
 
-58.1 Amendment proceeds only by a Constitutional Amendment WXIP, and requires all of the
+58.1 Amendment proceeds only by a Constitutional Amendment VWIP, and requires all of the
 following:
 
 58.1.a publication of the full replacement text, together with a rights-impact analysis under
@@ -3372,14 +3372,14 @@ made conditional by any procedure in this Constitution.
 ### Article 60. Ratification, Commencement and Transitional Provisions
 
 60.1 Ratification means that those who adopt this Constitution bind their own software, their
-own conduct and their own claims to the WebX name. It binds nobody else, and there is no
+own conduct and their own claims to the VayuWeb name. It binds nobody else, and there is no
 authority that ratifies on anyone's behalf.
 
 60.2 Ratification is not membership, confers no office, creates no entity, and may be withdrawn
 by anyone at any time by ceasing to claim conformance.
 
 60.3 The Constitution enters into force on the publication of the anchored canonical text
-under Article 1, together with the first published conformance suite and the first WXIP
+under Article 1, together with the first published conformance suite and the first VWIP
 archive.
 
 60.4 It governs from that moment even though no code yet runs. Writing it first is the point:

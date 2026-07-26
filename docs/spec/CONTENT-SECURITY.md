@@ -1,6 +1,6 @@
-# WebX Content Security Specification
+# VayuWeb Content Security Specification
 
-The normative browser-security profile the WebX resolver enforces on every page it serves: the
+The normative browser-security profile the VayuWeb resolver enforces on every page it serves: the
 Content-Security-Policy, the accompanying response headers, the request headers stripped on the
 way out, the response headers stripped on the way in, and — just as important — the channels no
 header can close and what closes them instead.
@@ -13,7 +13,7 @@ read two different policies and both believe they conform.
 The key words MUST, MUST NOT, SHALL, SHALL NOT, SHOULD, SHOULD NOT and MAY are to be interpreted
 as described in RFC 2119.
 
-**Status:** Draft — not yet implemented. Proposed formally by [WXIP-0001](WXIP-0001.md).
+**Status:** Draft — not yet implemented. Proposed formally by [VWIP-0001](VWIP-0001.md).
 
 ## 0. The governing principle
 
@@ -36,17 +36,17 @@ This inverts the usual priority order, and two consequences follow:
    fingerprinting vector from harmless to critical. That is why the refusals in this document are
    not tunable.
 
-A second principle governs the values WebX does control:
+A second principle governs the values VayuWeb does control:
 
 > **Uniform beats random.** A spoofed value helps only if every install emits the same one. A
 > per-user "randomise my fingerprint" toggle *shrinks* the anonymity set by making its user
-> unique. WebX therefore pins shared constants — one User-Agent, one window size, `TZ=UTC`, one
+> unique. VayuWeb therefore pins shared constants — one User-Agent, one window size, `TZ=UTC`, one
 > `Accept-Language` — and offers no randomisation setting at all.
 
 ## 1. The insecure-context reality
 
-**WebX pages are served from origins like `http://example.webx`, which are not secure contexts.**
-Loopback is treated as potentially trustworthy, but the *origin the browser derives* is the WebX
+**VayuWeb pages are served from origins like `http://example.vayu`, which are not secure contexts.**
+Loopback is treated as potentially trustworthy, but the *origin the browser derives* is the VayuWeb
 name over plain HTTP, and that is not.
 
 This is the single most consequential fact about this profile, it cuts both ways, and every
@@ -62,11 +62,11 @@ implementer must understand it before reading anything below.
 | `Clear-Site-Data` | **Ignored on insecure origins.** Any design that relies on it to clear storage is relying on nothing. |
 
 `window.name` deserves its own line rather than a footnote to COOP. Because COOP is inert, it
-**survives navigation between WebX names** and is a live cross-name correlation channel that no
+**survives navigation between VayuWeb names** and is a live cross-name correlation channel that no
 header closes. The owner of that problem is the client: the webview MUST set `window.name = ''`
 on every cross-name navigation, and the conformance suite asserts it (section 6, test 9).
 
-These headers are still sent, because they cost nothing and become active if WebX ever gains a
+These headers are still sent, because they cost nothing and become active if VayuWeb ever gains a
 secure-context scheme. They MUST NOT appear in any claim about what the profile currently
 guarantees.
 
@@ -78,9 +78,9 @@ guarantees.
 - `queryLocalFonts`, `getScreenDetails`, WebUSB, WebHID, Web Serial, Web Bluetooth, geolocation
   and the storage-access API are all secure-context gated and therefore unavailable.
 
-This accidental protection is load-bearing. It follows that **WebX MUST NOT register a custom
-scheme as trustworthy, MUST NOT ship a browser policy that adds WebX origins to a
-treat-as-secure allowlist, and MUST NOT serve WebX names over HTTPS from the local proxy.** Doing
+This accidental protection is load-bearing. It follows that **VayuWeb MUST NOT register a custom
+scheme as trustworthy, MUST NOT ship a browser policy that adds VayuWeb origins to a
+treat-as-secure allowlist, and MUST NOT serve VayuWeb names over HTTPS from the local proxy.** Doing
 any of those would re-enable service workers and the whole secure-context API surface in a single
 step. Article 4's no-chokepoint invariant is not the only invariant worth writing down.
 
@@ -117,7 +117,7 @@ Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'
 | `frame-src` | `'none'` | No iframes. Note `about:blank` and `srcdoc` frames are exempt from this directive in shipping browsers, but they inherit the parent's policy, so nothing escapes. |
 | `object-src` | `'none'` | Legacy execution surface, no legitimate use. |
 | `frame-ancestors` | `'none'` | Removes clickjacking and cross-origin framing side channels. |
-| `form-action` | `'self'` | **Not `'none'`.** `'none'` breaks any WebX site with a search box while closing nothing extra — third-party form exfiltration is already blocked by restricting the value to `'self'`. Enforced across redirects. |
+| `form-action` | `'self'` | **Not `'none'`.** `'none'` breaks any VayuWeb site with a search box while closing nothing extra — third-party form exfiltration is already blocked by restricting the value to `'self'`. Enforced across redirects. |
 | `base-uri` | `'none'` | Stops an injected `<base>` re-pointing every relative URL. |
 | `webrtc` | `'block'` | CSP Level 3. Blocks `RTCPeerConnection` construction. **Chromium-only at present** — see section 5.1, this is a partial control, not a solved problem. |
 | `require-trusted-types-for` | `'script'` | Closes DOM-XSS sinks at the platform level rather than by code review. |
@@ -134,7 +134,7 @@ otherwise is misleading:
 | `require-trusted-types-for` / `trusted-types` | Chromium and recent Firefox. WebKit does not enforce, and does so **silently** — an author testing only in Safari will believe their page is protected when it is not. |
 | `worker-src` | Widely supported, but engines differ on whether it or `script-src` governs worklets. Both are `'self'` or stricter here, so the ambiguity cannot open a hole. |
 
-The profile is therefore **strongest in the WebX client's own webview**, where the engine is
+The profile is therefore **strongest in the VayuWeb client's own webview**, where the engine is
 known and the client controls it. In a third-party browser the guarantees are engine-conditional,
 and the client MUST say which ones are not in force rather than presenting one uniform claim.
 
@@ -150,7 +150,7 @@ and the client MUST say which ones are not in force rather than presenting one u
 - **`sandbox`** — considered and rejected, but not for the obvious reason. Omitting
   `allow-top-navigation` is the *only* CSP lever over navigation exfiltration (section 5.2), which
   is a real argument for it. It is rejected because it would also block ordinary user-clicked
-  links between WebX names, breaking the web-like behaviour the project exists to preserve, and
+  links between VayuWeb names, breaking the web-like behaviour the project exists to preserve, and
   because the full-proxy requirement closes the same channel without that cost. If the full-proxy
   requirement is ever relaxed, `sandbox` MUST be reconsidered in the same change.
 
@@ -160,10 +160,10 @@ and the client MUST say which ones are not in force rather than presenting one u
 |---|---|
 | Inline `<style>`, `style=` attributes | None. Move to a stylesheet in the same CID. |
 | Inline `<script>`, event-handler attributes | None. Move to a script file in the same CID. |
-| WebAssembly | Per-site `webx-wasm` declaration adds `'wasm-unsafe-eval'` **for that site only**, surfaced in the UI. |
+| WebAssembly | Per-site `vayu-wasm` declaration adds `'wasm-unsafe-eval'` **for that site only**, surfaced in the UI. |
 | Frameworks writing HTML strings to the DOM | Per-site named Trusted Types policy, same scoping and disclosure. |
 | `data:` images, inline SVG sprites | None. Must become files. |
-| Web Workers | None in v1. `worker-src 'none'` is absolute; revisit only by WXIP. |
+| Web Workers | None in v1. `worker-src 'none'` is absolute; revisit only by VWIP. |
 
 Every relaxation is **per-site, never global**, and **visible to the reader**. A widening the
 reader cannot see is a widening that will be abused. No configuration file, control-API setting or
@@ -210,11 +210,11 @@ than trusting the policy alone. Defence in depth here is not optional; it is cor
 |---|---|---|
 | `X-Content-Type-Options` | `nosniff` | No MIME sniffing; a misdeclared type is an error, not a guess. |
 | `X-Frame-Options` | `DENY` | Redundant beside `frame-ancestors 'none'` on modern engines; retained for older ones. |
-| `X-DNS-Prefetch-Control` | `off` | Speculative DNS is **not covered by CSP**. Without this, `<link rel="dns-prefetch">` produces a clearnet DNS query — exactly the leak WebX exists to prevent. Note it does not stop `preconnect`'s TCP handshake in all versions; section 4.3 strips the markup as well. |
+| `X-DNS-Prefetch-Control` | `off` | Speculative DNS is **not covered by CSP**. Without this, `<link rel="dns-prefetch">` produces a clearnet DNS query — exactly the leak VayuWeb exists to prevent. Note it does not stop `preconnect`'s TCP handshake in all versions; section 4.3 strips the markup as well. |
 | `Cache-Control` | `no-store` | **Removes the HTTP disk cache only.** It does not reach the media cache, the favicon database or the thumbnail store, each of which is a separate artefact closed only by the ephemeral profile in [PRIVACY.md](PRIVACY.md). It also forfeits the offline benefit of content addressing — a genuine trade, made in favour of leaving no trail. |
 | `Cross-Origin-Opener-Policy` | `same-origin` | **Inert today** (section 1). Sent for the future. |
 | `Cross-Origin-Embedder-Policy` | `require-corp` | **Inert today.** Its inertness is fortunate: activation would grant `SharedArrayBuffer` and high-resolution timers. |
-| `Cross-Origin-Resource-Policy` | `same-origin` | Active regardless of secure context. Blocks cross-origin size and timing probes against WebX content. |
+| `Cross-Origin-Resource-Policy` | `same-origin` | Active regardless of secure context. Blocks cross-origin size and timing probes against VayuWeb content. |
 | `Origin-Agent-Cluster` | `?1` | **Inert today.** Sent for the future. |
 
 ## 4. Header and markup hygiene at the proxy
@@ -266,7 +266,7 @@ A security document that lists only its wins is a marketing document.
 can open a peer connection and learn the reader's real IP through ICE gathering. WebRTC uses raw
 UDP and **ignores the HTTP proxy entirely**, so full-proxy mode does not contain it either.
 
-*Control:* the WebX desktop client MUST ship with WebRTC compiled out or disabled in its webview.
+*Control:* the VayuWeb desktop client MUST ship with WebRTC compiled out or disabled in its webview.
 For a third-party browser the resolver cannot enforce it, and the client MUST warn plainly rather
 than imply protection it does not have. This is the most serious residual in the browser layer.
 
@@ -282,7 +282,7 @@ browser is a browser with a hole in it.
 MUST match on strings only — `dnsDomainIs`, `shExpMatch`, host-suffix comparison — and MUST NOT
 call `dnsResolve`, `isResolvable`, `isInNet` or `myIpAddress`, every one of which performs a DNS
 lookup or network probe while deciding how to route. It MUST NOT contain a `DIRECT` fallback for
-WebX names.
+VayuWeb names.
 
 **5.4 Fingerprinting the platform cannot gate.** Canvas, WebGL, Web Audio DSP, font metrics via
 `getBoundingClientRect`, `navigator` core properties, `devicePixelRatio`, `colorDepth`, the CSS
@@ -295,7 +295,7 @@ egress is open; the primary defence is that the fingerprint has nowhere to go.
 
 **5.5 The browser's own behaviour.** Omnibox search suggestions, Safe Browsing lookups,
 translation offers, update checks and **extensions** — every one is a clearnet request the
-resolver never sees, and an extension can read every WebX page with CSP and proxy both intact.
+resolver never sees, and an extension can read every VayuWeb page with CSP and proxy both intact.
 
 *Control:* Private Mode requires the client's own webview or a locked browser profile with
 telemetry, suggestions and extensions disabled. With a third-party browser this cannot be
@@ -321,17 +321,17 @@ Each is an executable test asserting on **observed behaviour**, not configuratio
 2. A site-supplied CSP is discarded, never merged.
 3. **Zero-egress, in the client webview.** Load a page containing one of every construct in
    section 4.3 under a socket monitor scoped to the whole network namespace, not to the browser
-   process. The observed connection set contains only WebX peers. Any other socket **fails the
+   process. The observed connection set contains only VayuWeb peers. Any other socket **fails the
    build**.
 4. **Zero-egress, third-party browser matrix.** The same test across Firefox, Chromium and WebKit.
-   Run for **disclosure**, recorded and published — and it MUST NOT gate the build, because WebX
+   Run for **disclosure**, recorded and published — and it MUST NOT gate the build, because VayuWeb
    does not control those engines and a test that can be broken by someone else's release is not
    a gate, it is a tripwire. Pretending otherwise would make the suite dishonest.
 5. Two installs on different machines emit byte-identical outbound request headers.
 6. Every relaxation in 2.3 is per-site and surfaced in the UI.
 7. `serviceWorker.register()` rejects.
 8. The PAC file contains none of the forbidden functions (static check).
-9. `window.name` is empty after a navigation between two WebX names.
+9. `window.name` is empty after a navigation between two VayuWeb names.
 10. The whole-DAG snapshot is fetched and verified before any path is served, and a `peer` record
     is refused as a content source unless it can be snapshot-verified — a live peer source would
     otherwise reintroduce the path-selection oracle that 5.6 exists to close.
@@ -344,6 +344,6 @@ the wire vectors, so a rights guarantee and a correctness guarantee fail the sam
 
 - [Privacy and zero-trail specification](PRIVACY.md)
 - [Resolution specification](RESOLUTION.md)
-- [WXIP-0001](WXIP-0001.md)
+- [VWIP-0001](VWIP-0001.md)
 - [Threat model](../THREAT-MODEL.md)
-- [The WebX Constitution](../../constitution/CONSTITUTION.md) — Articles 13, 14, 24
+- [The VayuWeb Constitution](../../constitution/CONSTITUTION.md) — Articles 13, 14, 24

@@ -1,6 +1,6 @@
-# WebX Cryptographic Agility and Post-Quantum Migration
+# VayuWeb Cryptographic Agility and Post-Quantum Migration
 
-Every cryptographic primitive WebX uses today will be broken, deprecated, or embarrassing within
+Every cryptographic primitive VayuWeb uses today will be broken, deprecated, or embarrassing within
 the lifetime this protocol is designed for. A naming system whose ownership proof is a signature
 must therefore be able to change its signature scheme **without losing a single name**, and it
 must be able to do so under time pressure, decades after the people who designed it have stopped
@@ -20,14 +20,14 @@ as described in RFC 2119.
 > **No primitive is named in the protocol. Only suites are, and every signed object carries the
 > identifier of the suite that produced it.**
 
-There is no "the WebX signature algorithm". There is a `suite` field, a registry of suites, and a
+There is no "the VayuWeb signature algorithm". There is a `suite` field, a registry of suites, and a
 rule for moving between them. An implementation that hard-codes Ed25519 anywhere outside the
 suite-1 module is defective, and the conformance suite is written to catch it.
 
 ## 2. Threat, stated precisely
 
 The usual framing — "harvest now, decrypt later" — **does not apply here**, and repeating it would
-be sloppy. WebX signatures protect integrity and authorship, not confidentiality. There is no
+be sloppy. VayuWeb signatures protect integrity and authorship, not confidentiality. There is no
 ciphertext to harvest; the registry is public by design.
 
 The real risks are different and worth naming exactly:
@@ -53,7 +53,7 @@ retains 128 bits). The CID layer is comparatively future-proof; the signature la
 
 ## 3. Suite registry
 
-Every signed object carries a `suite` field: a small unsigned integer, assigned only by WXIP,
+Every signed object carries a `suite` field: a small unsigned integer, assigned only by VWIP,
 never reused, never renumbered.
 
 | Suite | Signature | Hash | Status | Notes |
@@ -65,7 +65,7 @@ never reused, never renumbered.
 
 3.1 Suites 2, 3 and 4 are **reserved, not active**. They are specified now so that the record
 format, the verification path and the conformance vectors can accommodate them from day one. A
-reserved suite is activated by WXIP with an activation epoch, per Constitution Article 47.
+reserved suite is activated by VWIP with an activation epoch, per Constitution Article 47.
 
 3.2 **Size is the migration's real cost, and it is not small.** An Ed25519 public key is 32 bytes
 and a signature 64. ML-DSA-65 is roughly 1,952 and 3,309. SLH-DSA-SHAKE-128s is 32 and about
@@ -91,7 +91,7 @@ signature, treat the record as unsigned, or accept it provisionally.
 prefix, so that a signature made under one suite cannot be replayed as another:
 
 ```text
-signing input = "webx-record-v1" || uint8(suite) || canonical_cbor(record_without_sig)
+signing input = "vayuweb-record-v1" || uint8(suite) || canonical_cbor(record_without_sig)
 ```
 
 4.4 For hybrid suite 2, **both** component signatures MUST verify. Accepting either alone would
@@ -113,7 +113,7 @@ from downgrading a suite-3 name back to a scheme they can forge.
 ### 5.2 The three phases
 
 **Phase A — Dual-capability.** Every implementation learns to verify the target suite before any
-name uses it. Activation of the suite for *signing* is a separate, later WXIP. Verify-before-sign
+name uses it. Activation of the suite for *signing* is a separate, later VWIP. Verify-before-sign
 is not a courtesy; a network where some nodes cannot verify new records partitions the registry.
 
 **Phase B — Hybrid, opt-in then default.** Names move to suite 2. Security holds if *either*
@@ -135,9 +135,9 @@ The honest problem. Many holders will not act, and their names will still be sec
 scheme.
 
 - A resolver MUST surface a name's suite and warn where it is deprecated.
-- Renewal (one year, per [NAMES.md](NAMES.md)) is a natural forcing point: a WXIP MAY require the
+- Renewal (one year, per [NAMES.md](NAMES.md)) is a natural forcing point: a VWIP MAY require the
   target suite at renewal, giving every active holder at most twelve months to comply.
-- WebX MUST NOT auto-migrate a name. Rotating someone's key without their signature means a party
+- VayuWeb MUST NOT auto-migrate a name. Rotating someone's key without their signature means a party
   other than the holder can change ownership, which Constitution Article 11 forbids and which
   would be a far worse outcome than a stale suite.
 - A name whose holder is gone will lapse on its own schedule. That is the designed behaviour and
@@ -177,7 +177,7 @@ Article 4, and would additionally become the arbiter of history.
 **7.1 Hashes.** CIDs are multihash-encoded, so hash agility is already structural. Implementations
 MUST NOT assume SHA-256 and MUST carry the algorithm from the CID rather than inferring it.
 
-**7.2 Proof-of-work.** Argon2id parameters change only by WXIP, and **old proofs MUST remain
+**7.2 Proof-of-work.** Argon2id parameters change only by VWIP, and **old proofs MUST remain
 verifiable forever** — see [PROOF-OF-WORK.md](PROOF-OF-WORK.md). A parameter change is not a
 suite change and does not invalidate history.
 
@@ -187,7 +187,7 @@ storage backend is replaceable without touching the record format.
 **7.4 Transport.** Hypercore, Hyperswarm and IPFS are young, and at least one of them will not
 survive a century. The registry's **semantics** — a signed, append-only, verifiable sequence of
 records — are what the specification defines; the substrate is an implementation choice behind an
-interface. A WXIP replacing the substrate must preserve the semantics and the historical record,
+interface. A VWIP replacing the substrate must preserve the semantics and the historical record,
 and must not require a single name to be re-registered.
 
 ## 8. Conformance
@@ -202,7 +202,7 @@ and must not require a single name to be re-registered.
 
 ## 9. What this does not claim
 
-- It does not claim WebX is quantum-resistant today. Suite 1 is not, and suites 2 to 4 are
+- It does not claim VayuWeb is quantum-resistant today. Suite 1 is not, and suites 2 to 4 are
   reserved rather than active.
 - It does not predict when a cryptographically relevant quantum computer will exist. The design
   assumes only that one eventually might, which is sufficient to justify the mechanism.
@@ -215,4 +215,4 @@ and must not require a single name to be re-registered.
 - [Registry specification](REGISTRY.md) — the record format that carries `suite`
 - [Naming and TLD policy](NAMES.md) — renewal as the migration forcing point
 - [Longevity review](../LONGEVITY.md) — the non-cryptographic future-proofing
-- [The WebX Constitution](../../constitution/CONSTITUTION.md) — Articles 11, 34, 47, 57
+- [The VayuWeb Constitution](../../constitution/CONSTITUTION.md) — Articles 11, 34, 47, 57

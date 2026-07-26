@@ -1,6 +1,6 @@
-# WebX Namespace Specification
+# VayuWeb Namespace Specification
 
-How WebX gets a broad namespace, why breadth is safe here and dangerous on the clearnet, and how
+How VayuWeb gets a broad namespace, why breadth is safe here and dangerous on the clearnet, and how
 new extensions are created without a fee, an application round, or an authority.
 
 The key words MUST, MUST NOT, SHALL, SHALL NOT, SHOULD, SHOULD NOT and MAY are to be interpreted
@@ -20,7 +20,7 @@ That price is not a technical necessity. It is the cost of an authority: evaluat
 objection procedures, contractual compliance and the organisation that runs them. It means the
 namespace is shaped by who could afford to apply.
 
-On WebX, creating an extension costs **a proposal and proof-of-work**. No fee, no application
+On VayuWeb, creating an extension costs **a proposal and proof-of-work**. No fee, no application
 round, no authority, no corporate applicant. The namespace can therefore be as broad as the
 people using it want it to be, and it can keep growing after launch without anybody's permission.
 
@@ -28,7 +28,7 @@ This is the single clearest example of the project's thesis: the chokepoint was 
 
 ## 2. The namespace is elastic, not a list
 
-WebX does **not** ship a fixed set of extensions.
+VayuWeb does **not** ship a fixed set of extensions.
 
 2.1 A **launch catalogue** of curated extensions exists so that a new user has good choices
 immediately, organised by category. It is a starting point, not a boundary.
@@ -52,7 +52,7 @@ Broad namespaces have a bad reputation, earned honestly: ICANN's gTLD expansion 
 extensions to stop somebody else passing off as them. More extensions meant more cost for the
 same protection.
 
-Four properties change that arithmetic on WebX, and they are design decisions rather than luck:
+Four properties change that arithmetic on VayuWeb, and they are design decisions rather than luck:
 
 **3.1 Cost scales with breadth, for the squatter.** Registration requires memory-hard
 proof-of-work. Taking one label across 500 extensions costs 500 times the work, and renewal
@@ -65,10 +65,10 @@ squatter's business model on the clearnet is resale; here there is no exchange, 
 escrow and no price discovery. Names are for use.
 
 **3.3 There is no advertising or search economy to capture.** Clearnet squatting monetises
-through parked-page advertising and search traffic. WebX has neither.
+through parked-page advertising and search traffic. VayuWeb has neither.
 
 **3.4 Identity is a key, not a string.** This is the deepest one. On the clearnet, controlling
-`brand.example` largely *is* controlling the identity. On WebX, a name resolves to a record signed
+`brand.example` largely *is* controlling the identity. On VayuWeb, a name resolves to a record signed
 by a specific keypair, and clients follow keys. A squatter holding a lookalike label cannot
 produce a signature from the key readers already follow.
 
@@ -87,11 +87,11 @@ reservation list.
 with hardware will take labels, and a reader who has never seen a publisher before cannot tell a
 lookalike from the original. Section 3.4 protects returning readers, not first-time ones.
 Constitution Article 36 refuses to make the registry a trademark court and that refusal stands —
-WebX declines to adjudicate rather than pretending it has solved the problem.
+VayuWeb declines to adjudicate rather than pretending it has solved the problem.
 
 ## 4. Creating an extension
 
-4.1 A new extension requires a ratified Naming-category WXIP, per Constitution Article 35.6 and
+4.1 A new extension requires a ratified Naming-category VWIP, per Constitution Article 35.6 and
 [NAMES.md](NAMES.md). Ratification requires, over a 30-day voting period, at least a two-thirds
 majority, followed by a dormancy period of not less than 180 days between ratification and first
 registration.
@@ -115,7 +115,7 @@ proposing hundreds speculatively is expensive while proposing one is not.
 floor to avoid the ISO 3166 country-code space. That reasoning does not survive examination and
 is withdrawn.
 
-WebX defines its own namespace. ISO 3166 is a useful shared reference, not an authority WebX
+VayuWeb defines its own namespace. ISO 3166 is a useful shared reference, not an authority VayuWeb
 recognises, and declining to use two-letter strings would mean ceding namespace design to a body
 the project exists to route around. The confusion argument is also empirically weak: the clearnet
 has already spent two decades treating `.io`, `.ai`, `.co`, `.me`, `.tv` and `.fm` as generic
@@ -123,13 +123,13 @@ strings, and essentially nobody believes `.io` sites originate in the British In
 Territory. A two-letter string is a string. `in` is an English preposition, `io` is
 input/output, `me` is a pronoun.
 
-The scheme settles any residual ambiguity: `webx://shop.io` and `https://shop.io` are visibly
+The scheme settles any residual ambiguity: `vayu://shop.io` and `https://shop.io` are visibly
 different systems, and [URI-SCHEME.md](URI-SCHEME.md) section 4.4 already requires clients to
 display the full authority without elision.
 
 5.2 An extension MUST NOT duplicate a well-known ICANN generic top-level domain. This rule
-survives, and for a different reason than 5.1 did: `webx://example.com` unrelated to
-`https://example.com` teaches readers that WebX names cannot be trusted to mean anything. A
+survives, and for a different reason than 5.1 did: `vayu://example.com` unrelated to
+`https://example.com` teaches readers that VayuWeb names cannot be trusted to mean anything. A
 parallel web should be recognisably parallel, not a confusing echo of the most familiar strings
 on the clearnet.
 
@@ -138,7 +138,7 @@ created as extensions.** This is the rule that carries the weight 5.1 was wrongl
 and the distinction is between a string and a claim.
 
 `.in` is a two-letter string with an ordinary English meaning, and registering it asserts nothing
-about India. `.india` or `.bharat` reads as representing a nation, and WebX cannot adjudicate who
+about India. `.india` or `.bharat` reads as representing a nation, and VayuWeb cannot adjudicate who
 does. Creating a namespace that implies it can invites exactly the political pressure the project
 exists to avoid.
 
@@ -150,7 +150,7 @@ case explicit.
 ## 6. Retirement
 
 Retiring an extension is harder than creating one, deliberately. Per [NAMES.md](NAMES.md), it
-requires a ratified WXIP and a minimum 24-month sunset with mandatory alias records, so that
+requires a ratified VWIP and a minimum 24-month sunset with mandatory alias records, so that
 nobody who built an identity on it is stranded. Constitution Article 35 additionally forbids
 removal that would strand holders.
 
@@ -171,4 +171,4 @@ retire one, and the bar is set to reflect that.
 - [Naming and TLD policy](NAMES.md) — label grammar and lifecycle
 - [Cost model](COST.md) — why registration carries no fee
 - [Registry](REGISTRY.md) — how extension records are stored
-- [The WebX Constitution](../../constitution/CONSTITUTION.md) — Articles 33, 35, 36
+- [The VayuWeb Constitution](../../constitution/CONSTITUTION.md) — Articles 33, 35, 36

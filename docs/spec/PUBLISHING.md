@@ -1,6 +1,6 @@
-# WebX Publishing and Authoring Specification
+# VayuWeb Publishing and Authoring Specification
 
-How a person puts a site on WebX, and how the strict content-security profile is made survivable
+How a person puts a site on VayuWeb, and how the strict content-security profile is made survivable
 for people who are not security engineers.
 
 The key words MUST, MUST NOT, SHALL, SHALL NOT, SHOULD, SHOULD NOT and MAY are to be interpreted
@@ -17,14 +17,14 @@ strict profile that tells the author exactly what will not render, before they s
 author ten minutes once and costs the reader nothing ever.
 
 This is the whole difference between a security control that survives and one that gets a
-reputation for breaking things. WebX therefore front-loads every failure into a checker the author
+reputation for breaking things. VayuWeb therefore front-loads every failure into a checker the author
 runs, and the checker's output is written for someone who does not know what a
 Content-Security-Policy is.
 
 ## 1. Publishing a site
 
 ```text
-webx publish ./my-site --name example.webx
+vayu publish ./my-site --name example.vayu
 ```
 
 The normative sequence:
@@ -46,7 +46,7 @@ account with anybody at any step.
 
 ## 2. The site manifest
 
-An optional `.webx/manifest.json` inside the published tree, covered by the root CID and therefore
+An optional `.vayu/manifest.json` inside the published tree, covered by the root CID and therefore
 signed along with everything else. It cannot be tampered with independently of the content.
 
 ```json
@@ -105,24 +105,24 @@ A site with client-side routing 404s on every deep link unless a fallback exists
 match the resolver SHALL serve `notFound` with HTTP 404 if present; otherwise, if `fallback` is
 declared, serve it with HTTP 200 so the site's own router can handle the path.
 
-## 3. `webx doctor`
+## 3. `vayu doctor`
 
-The publish-time checker. It runs automatically as step 1 of `webx publish` and can be run alone.
+The publish-time checker. It runs automatically as step 1 of `vayu publish` and can be run alone.
 
 ```text
-$ webx doctor ./my-site
+$ vayu doctor ./my-site
 
   ✗  index.html:42   inline <style> not declared in manifest
-     WebX blocks inline styles unless they are declared, because an
+     VayuWeb blocks inline styles unless they are declared, because an
      undeclared one is indistinguishable from an injected one.
-     Fix: run `webx doctor --fix`, or move the styles to a .css file.
+     Fix: run `vayu doctor --fix`, or move the styles to a .css file.
 
   ✗  about.html:8    <img src="https://cdn.example.com/logo.png">
-     Remote images do not load on WebX. Every request to another server
+     Remote images do not load on VayuWeb. Every request to another server
      tells that server who is reading your page.
      Fix: save the file into your site folder and link it relatively.
 
-  ⚠  index.html:15   <a href="https://example.com"> leaves WebX
+  ⚠  index.html:15   <a href="https://example.com"> leaves VayuWeb
      This works, but the reader gets a warning. That is intended.
 
   2 errors, 1 warning.
@@ -157,7 +157,7 @@ worse than no checker, because it converts a clear failure into a mystery.
 **Update:** republish. A new CID, a new signed record, `seq` incremented. Readers see the new
 version the next time they resolve.
 
-**Unpublish:** withdraw the pointer and unpin locally. This stops WebX serving it. It does not
+**Unpublish:** withdraw the pointer and unpin locally. This stops VayuWeb serving it. It does not
 reach copies others already hold — see [PRIVACY.md](PRIVACY.md) and Constitution Article 19. The
 client MUST state this plainly at the moment of unpublishing rather than in documentation nobody
 reads.
@@ -177,8 +177,8 @@ does have to do:
 
 ## 6. Conformance
 
-1. `webx publish` on a tree that fails `webx doctor` does not write a record.
-2. Every `webx doctor` diagnostic carries a file, a line, a reason and a fix.
+1. `vayu publish` on a tree that fails `vayu doctor` does not write a record.
+2. Every `vayu doctor` diagnostic carries a file, a line, a reason and a fix.
 3. Inline digests are computed from verified content; a manifest digest with no matching element
    is discarded.
 4. The declared inline exception never widens the source list for remote or `data:` resources.

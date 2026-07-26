@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the WebX brand asset set from the original artwork.
+"""Build the VayuWeb brand asset set from the original artwork.
 
 The source files are black-line artwork on a white canvas. This turns them into trimmed,
 transparent PNGs in two ink colours -- near-black for light backgrounds, near-white for dark
@@ -110,19 +110,19 @@ def emit(alpha, name, widths, square=False, pad_ratio=0.04):
             print(f"{os.path.basename(path):32s} {out.width}x{out.height}")
 
 
-# ── primary artwork (1254px): spider mark above the webX wordmark ──────────
-lum = load_flat(os.path.join(SRC, "webx-logo-source.jpg"))
+# ── primary artwork (1254px): spider mark above the VayuWeb wordmark ──────────
+lum = load_flat(os.path.join(SRC, "vayuweb-logo-source.jpg"))
 alpha = alpha_from(lum)
 
 MARK_END = 795       # midpoint of the blank band between mark and wordmark
-emit(alpha, "webx-logo", [1024, 512, 256])
-emit(alpha[:MARK_END], "webx-mark", [1024, 512, 256, 180, 32], square=True, pad_ratio=0.06)
-emit(alpha[MARK_END:], "webx-wordmark", [1024, 512, 256])
+emit(alpha, "vayuweb-logo", [1024, 512, 256])
+emit(alpha[:MARK_END], "vayuweb-mark", [1024, 512, 256, 180, 32], square=True, pad_ratio=0.06)
+emit(alpha[MARK_END:], "vayuweb-wordmark", [1024, 512, 256])
 
 # ── alternate artwork (500px): finer line weight, integrated wordmark ──────
-lum2 = load_flat(os.path.join(SRC, "webx-logo-alt-source.png"))
+lum2 = load_flat(os.path.join(SRC, "vayuweb-logo-alt-source.png"))
 alpha2 = alpha_from(lum2)
-emit(alpha2, "webx-logo-alt", [500, 256])
+emit(alpha2, "vayuweb-logo-alt", [500, 256])
 
 # ── favicons: the mark centred on a square, both themes ────────────────────
 box = trim(alpha[:MARK_END], pad_ratio=0.10, square=True)
@@ -132,6 +132,6 @@ for ink, suffix in ((INK_LIGHT, ""), (INK_DARK, "-dark")):
         if size > src.width:
             continue
         icon = shrink(src, size, size)
-        path = os.path.join(OUT, f"webx-favicon-{size}{suffix}.png")
+        path = os.path.join(OUT, f"vayuweb-favicon-{size}{suffix}.png")
         icon.save(path, optimize=True)
         print(f"{os.path.basename(path):32s} {size}x{size}")

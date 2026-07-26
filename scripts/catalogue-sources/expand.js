@@ -1,6 +1,6 @@
 export const meta = {
-  name: 'webx-namespace-expand',
-  description: 'Expand the WebX extension catalogue past 1000 across 22 further categories',
+  name: 'vayuweb-namespace-expand',
+  description: 'Expand the VayuWeb extension catalogue past 1000 across 22 further categories',
   phases: [{ title: 'Expand', detail: '22 category experts, each avoiding the existing 409' }],
 }
 
@@ -53,7 +53,7 @@ const CATS = [
   ],
   [
     "finance",
-    "Money, economics and cooperative finance: budgeting, accounting, mutual aid funds, credit unions, insurance, economics research, financial literacy. Avoid anything implying WebX sells or brokers anything."
+    "Money, economics and cooperative finance: budgeting, accounting, mutual aid funds, credit unions, insurance, economics research, financial literacy. Avoid anything implying VayuWeb sells or brokers anything."
   ],
   [
     "fashion",
@@ -98,8 +98,8 @@ const CATS = [
 ]
 
 const RULES = `
-=== WebX extensions (TLDs) ===
-WebX is a peer-to-peer parallel web addressed webx://name.ext, its own namespace, independent of
+=== VayuWeb extensions (TLDs) ===
+VayuWeb is a peer-to-peer parallel web addressed vayu://name.ext, its own namespace, independent of
 ICANN. Extensions cost proof-of-work rather than a fee, so the namespace can be broad.
 
 === HARD RULES for every string ===
@@ -117,7 +117,7 @@ ICANN. Extensions cost proof-of-work rather than a fee, so the namespace can be 
    kitchen recipes restaurant golf tennis football soccer racing fishing ski surf camp band
    theater show events party dance auction reviews faith bible
 3. MUST NOT be a country NAME or government identifier (no india, bharat, france, usa, britain,
-   nippon). A two-letter string is fine; a country name is a claim WebX cannot make.
+   nippon). A two-letter string is fine; a country name is a claim VayuWeb cannot make.
 4. MUST NOT be a live trademark of a major company.
 5. MUST NOT appear in the EXCLUSION LIST below.
 6. Pronounceable, memorable, and meaning something. No random syllables.

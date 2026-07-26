@@ -9,7 +9,7 @@ Rules enforced here rather than trusted from the generator:
   - never a well-known ICANN gTLD
   - no duplicates across categories (first category to claim it keeps it)
 
-Two-letter extensions are permitted and curated by hand below. WebX defines its own
+Two-letter extensions are permitted and curated by hand below. VayuWeb defines its own
 namespace, and ISO 3166 is a shared reference rather than an authority here. What is
 forbidden is a country NAME -- see NAMESPACE.md section 5.3.
 """
@@ -20,7 +20,7 @@ import sys
 OUT = sys.argv[-1]
 JOURNALS = sys.argv[1:-1]
 
-# Well-known ICANN generic top-level domains WebX must not echo. Not exhaustive --
+# Well-known ICANN generic top-level domains VayuWeb must not echo. Not exhaustive --
 # it is the set a reader would plausibly confuse with the clearnet.
 GTLD = {
     "com", "net", "org", "info", "biz", "xyz", "top", "site", "online", "club", "shop", "app",
@@ -50,7 +50,7 @@ ok = re.compile(r"^[a-z]{2,12}$")
 
 # Two-letter extensions, curated by hand rather than generated.
 #
-# WebX defines its own namespace; ISO 3166 is a shared reference, not an authority
+# VayuWeb defines its own namespace; ISO 3166 is a shared reference, not an authority
 # here. Each entry below is included for its ordinary meaning as a string, never as
 # a country reference -- see NAMESPACE.md section 5.3, which forbids country NAMES
 # (.india, .bharat) precisely because those read as a claim rather than a word.
@@ -120,9 +120,37 @@ TWO_LETTER = [
     ("wp", "Wallpapers, whitepapers and working papers"),
 ]
 
+# The protocol's founding extensions. They carry meaning specific to VayuWeb
+# itself and are claimed before anything else so their descriptions survive.
+# They hold no privileged status -- Constitution Article 35 requires every
+# extension to be equal, and no client may present one as more official.
+#
+# Two of the original twelve are absent on purpose: .news and .blog are live
+# ICANN generic domains, and .webx went with the rename.
+FOUNDING = [
+    ("vayu", "The protocol's own namespace; general-purpose, the default suggestion"),
+    ("p2p", "Peer-to-peer software, protocols and node operators"),
+    ("free", "Projects whose defining claim is that they cost nothing to use"),
+    ("decent", "Decentralisation as subject matter: research, tooling, commentary"),
+    ("sov", "Self-governing projects and sovereignty-focused publishing"),
+    ("dao", "Collectively governed organisations publishing their rules"),
+    ("indie", "Independent creators, studios and small publishers"),
+    ("open", "Open standards, open data and open-by-default projects"),
+]
+
 seen, rejected, cats = {}, [], []
 
-# The hand-curated two-letter set is claimed first, so a generated duplicate
+founding = []
+for ext, purpose in FOUNDING:
+    if ext in GTLD or not ok.match(ext):
+        rejected.append((ext, "founding rejected"))
+        continue
+    seen[ext] = "founding"
+    founding.append((ext, purpose))
+if founding:
+    cats.append(("founding", sorted(founding)))
+
+# The hand-curated two-letter set is claimed next, so a generated duplicate
 # defers to it rather than the other way round.
 two = []
 for ext, purpose in TWO_LETTER:
@@ -161,6 +189,7 @@ for line in lines:
         cats.append((key, sorted(kept)))
 
 TITLES = {
+    "founding": "Founding extensions",
     "two-letter": "Two letters",
     "professions": "Trades and professions",
     "industry": "Industry and sectors",
@@ -198,9 +227,9 @@ TITLES = {
 
 with open(OUT, "w", encoding="utf-8") as fh:
     w = fh.write
-    w("# WebX Launch Catalogue\n\n")
+    w("# VayuWeb Launch Catalogue\n\n")
     w(f"**{len(seen)} extensions**, grouped by what people actually register them for.\n\n")
-    w("This is a starting point, not a boundary. The WebX namespace is **elastic**: anyone may\n"
+    w("This is a starting point, not a boundary. The VayuWeb namespace is **elastic**: anyone may\n"
       "propose a new extension at any time, it costs proof-of-work rather than a fee, and the\n"
       "valid set is derived from the registry log rather than hard-coded in any client. See\n"
       "[NAMESPACE.md](NAMESPACE.md) for the creation process and\n"
@@ -209,13 +238,13 @@ with open(OUT, "w", encoding="utf-8") as fh:
       "extension that is more official than another — Constitution Article 35 requires it and\n"
       "no client may present otherwise.\n\n")
     w("## Rules every entry satisfies\n\n")
-    w("- **Two to twelve characters.** Two-letter extensions are permitted: WebX defines its\n"
+    w("- **Two to twelve characters.** Two-letter extensions are permitted: VayuWeb defines its\n"
       "  own namespace, and a two-letter string is a string. The clearnet has treated `.io`,\n"
       "  `.ai` and `.me` as generic for two decades. What is forbidden is a country *name*\n"
-      "  such as `.india` — that reads as a claim rather than a word, and WebX cannot\n"
+      "  such as `.india` — that reads as a claim rather than a word, and VayuWeb cannot\n"
       "  adjudicate who represents a nation. See NAMESPACE.md section 5.3.\n")
-    w("- **No echo of a well-known ICANN generic domain.** A `webx://` name that looks like a\n"
-      "  clearnet one teaches readers that WebX names mean nothing.\n")
+    w("- **No echo of a well-known ICANN generic domain.** A `vayu://` name that looks like a\n"
+      "  clearnet one teaches readers that VayuWeb names mean nothing.\n")
     w("- **Lowercase ASCII**, pronounceable, and meaning something.\n\n")
     w("**Status:** Draft — not yet implemented. No extension is registrable until the protocol\n"
       "exists and each has completed the 180-day dormancy period required by Article 35.\n\n")

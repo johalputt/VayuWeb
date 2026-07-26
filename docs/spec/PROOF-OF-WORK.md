@@ -1,8 +1,8 @@
-# WebX Proof-of-Work Specification
+# VayuWeb Proof-of-Work Specification
 
 Status: Draft — not yet implemented.
 
-This document specifies the anti-squatting proof-of-work (PoW) that a WebX registry
+This document specifies the anti-squatting proof-of-work (PoW) that a VayuWeb registry
 operation MUST carry. It defines the construction, the difficulty function, the
 verification rule, the renewal rule, and the process by which parameters change. Record
 structure and log semantics are owned by [REGISTRY.md](REGISTRY.md); label grammar is owned
@@ -10,7 +10,7 @@ by [NAMES.md](NAMES.md). This document does not restate either.
 
 ## Goal
 
-WebX has no registrar, no invoice, no token and no treasury. There is therefore no price
+VayuWeb has no registrar, no invoice, no token and no treasury. There is therefore no price
 signal to make hoarding ten thousand names unattractive. The PoW exists to supply that
 signal in the only currency a permissionless network can charge without a payment rail:
 wall-clock compute that is burned and paid to nobody.
@@ -64,7 +64,7 @@ bytes and `bits` is the declared difficulty as an unsigned integer.
 Salt derivation binds the proof to exactly one record:
 
 ```text
-preimage = "webx-pow-v1" || canonical(record without sig and without powProof.nonce)
+preimage = "vayuweb-pow-v1" || canonical(record without sig and without powProof.nonce)
 salt     = SHA-256(preimage)[0..16]        // first 16 bytes
 tag      = Argon2id(password = nonce, salt = salt, m, t, p, taglen = 32)
 ```
@@ -199,8 +199,8 @@ previous term cannot be reused. Renewal windows, grace and quarantine are specif
 ## Parameter Updates
 
 Every value in this document — the Argon2id parameters, the length schedule, the rate
-formula, the window, the epoch and the ceiling — is fixed except by a ratified WXIP under
-[WXIP-0000.md](WXIP-0000.md). No peer, client or TLD steward may adjust difficulty
+formula, the window, the epoch and the ceiling — is fixed except by a ratified VWIP under
+[VWIP-0000.md](VWIP-0000.md). No peer, client or TLD steward may adjust difficulty
 unilaterally, and there is no operator with authority to do so.
 
 A parameter change SHALL be introduced as a new algorithm identifier, activated at a stated
@@ -208,7 +208,7 @@ log height rather than a wall-clock time, so that activation is unambiguous duri
 replication. Implementations MUST retain every historical parameter set and every historical
 difficulty schedule indefinitely: a record accepted under the rules in force at its height
 remains valid forever, and a peer that cannot verify old proofs cannot verify the log. Old
-proofs MUST NOT be re-verified against new parameters, and a WXIP that would invalidate
+proofs MUST NOT be re-verified against new parameters, and a VWIP that would invalidate
 previously accepted records MUST be rejected as out of scope.
 
 ## Limits
@@ -232,17 +232,17 @@ generating keys, which is free.
 The real defences are structural, not computational. Names are cheap to abandon: a hoarded
 name expires after one year, and its holder must pay fresh work every year to keep it, so a
 portfolio decays unless it is continuously funded. The namespace is plural: twelve launch
-TLDs mean a squatter cannot corner "the" name for anything, and the WXIP process can ratify
+TLDs mean a squatter cannot corner "the" name for anything, and the VWIP process can ratify
 more. And the resolution layer is not scarce — nothing about holding a name grants
 attention, links or traffic. A more complete accounting of what this defends against and
 what it does not is in [THREAT-MODEL.md](../THREAT-MODEL.md).
 
-Status: Draft against the pre-implementation WebX design. No implementation exists; every
-parameter here is subject to revision by WXIP before the first release.
+Status: Draft against the pre-implementation VayuWeb design. No implementation exists; every
+parameter here is subject to revision by VWIP before the first release.
 
 See also:
 
 - [REGISTRY.md](REGISTRY.md)
 - [NAMES.md](NAMES.md)
-- [WXIP-0000.md](WXIP-0000.md)
+- [VWIP-0000.md](VWIP-0000.md)
 - [THREAT-MODEL.md](../THREAT-MODEL.md)

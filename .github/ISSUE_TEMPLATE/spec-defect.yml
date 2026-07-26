@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        WebX is pre-implementation, so specification defects are the highest-value bug class
+        VayuWeb is pre-implementation, so specification defects are the highest-value bug class
         in the project. Be concrete: point at the clause.
   - type: input
     id: document

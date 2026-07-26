@@ -1,6 +1,6 @@
-# Contributing to WebX
+# Contributing to VayuWeb
 
-WebX is at the specification stage. There is no implementation yet, which changes what a
+VayuWeb is at the specification stage. There is no implementation yet, which changes what a
 useful contribution looks like.
 
 **Right now, adversarial review is worth more than code.** Finding the clause in the
@@ -13,7 +13,7 @@ exists, those mistakes cost a hundred times more to fix.
 
 1. Read the [Constitution](constitution/CONSTITUTION.md). It governs everything else, including
    this file.
-2. Read [WXIP-0000](docs/spec/WXIP-0000.md). It defines how changes are proposed and accepted.
+2. Read [VWIP-0000](docs/spec/VWIP-0000.md). It defines how changes are proposed and accepted.
 3. Read the [Threat Model](docs/THREAT-MODEL.md) and try to add to it.
 
 ## What we want
@@ -46,11 +46,11 @@ exists, those mistakes cost a hundred times more to fix.
 open a pull request directly.
 
 **Anything that changes behaviour, wire format, policy or governance** — open a
-[WXIP](docs/spec/WXIP-0000.md). The process exists so that a decision has an author, a
+[VWIP](docs/spec/VWIP-0000.md). The process exists so that a decision has an author, a
 rationale, a recorded objection set, and a permanent archive. Skipping it makes the project's
-history unauditable, which is the failure mode WebX exists to fix.
+history unauditable, which is the failure mode VayuWeb exists to fix.
 
-Every WXIP MUST include a Security and Privacy Considerations section, and it MUST NOT say
+Every VWIP MUST include a Security and Privacy Considerations section, and it MUST NOT say
 "none". If a change genuinely has no security consequence, explain why — that explanation is
 the reviewable artefact.
 
@@ -59,7 +59,7 @@ the reviewable artefact.
 - One logical change per pull request. A branch that fixes a typo and redefines the grace
   period is two pull requests.
 - Explain the *why* in the description. The diff already shows the *what*.
-- Link the WXIP if one applies.
+- Link the VWIP if one applies.
 - Documents must pass the markdown lint that runs in CI. Fenced blocks need a language tag,
   files start with a single H1, and a wrapped line must never begin with `*` or `+` — a linter
   reads that as a list bullet.
@@ -69,7 +69,7 @@ the reviewable artefact.
 ## Commit and review conventions
 
 - Commit messages: a short imperative subject line, then a body explaining the reasoning when
-  it is not obvious. Reference the WXIP number where one exists.
+  it is not obvious. Reference the VWIP number where one exists.
 - Review is on the merits. A sustained technical objection must be answered on its substance;
   it can be overruled, but it cannot be ignored, and the answer goes in the archive.
 - Volume is not consensus. Neither is seniority.
@@ -92,6 +92,6 @@ fork can carry it.
 ## A note on where this lives
 
 Long-term development moves to **Radicle**. GitHub is a temporary public mirror, kept because
-it is where people currently are — which is precisely the dependency WebX exists to end. When
+it is where people currently are — which is precisely the dependency VayuWeb exists to end. When
 the migration happens it will be announced in this repository, and the GitHub mirror will stay
 readable.

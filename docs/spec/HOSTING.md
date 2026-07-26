@@ -1,6 +1,6 @@
-# WebX Hosting and Publishing Specification
+# VayuWeb Hosting and Publishing Specification
 
-This document specifies how a WebX site is packaged, addressed, published,
+This document specifies how a VayuWeb site is packaged, addressed, published,
 pinned, replaced and withdrawn. It owns the content layer: everything between a
 directory on an author's disk and a CID a resolver can verify.
 
@@ -19,7 +19,7 @@ record as specified in [REGISTRY.md](REGISTRY.md). Record encoding, signing and
 replication belong to that document and are not repeated here. How a resolver
 consumes the result is specified in [RESOLUTION.md](RESOLUTION.md).
 
-WebX hosting is static. There is no origin server, no request-time execution,
+VayuWeb hosting is static. There is no origin server, no request-time execution,
 no server-side templating and no database behind a name. A site is a fixed set
 of bytes; anything dynamic runs in the visitor's browser against those bytes.
 This is a deliberate limit, not an omission awaiting a feature: a name that
@@ -41,7 +41,7 @@ file intended to be served. Symbolic links MUST NOT be followed; a publisher
 SHALL either dereference them at build time or refuse the import, since a
 followed link can silently pull a private key into a public CID.
 
-A publisher MAY include a manifest at `.webx/manifest.json` carrying `title`,
+A publisher MAY include a manifest at `.vayu/manifest.json` carrying `title`,
 `description`, `entry` (default `index.html`) and `generator`. The manifest is
 advisory. A resolver MUST render a site that has none, and MUST NOT trust the
 manifest over the actual tree.
@@ -74,7 +74,7 @@ CID is then the hash of the file itself, which makes verification explainable
 to a user and removes a wrapper block per leaf.
 
 The multihash is sha2-256 rather than the BLAKE2b-256 used for registry record
-hashes. The divergence is intentional: registry hashing is internal to WebX and
+hashes. The divergence is intentional: registry hashing is internal to VayuWeb and
 free to pick the faster function, while content hashing must interoperate with
 the existing IPFS network, where sha2-256 is what other nodes and gateways
 expect.
@@ -136,7 +136,7 @@ specified in [RESOLUTION.md](RESOLUTION.md) and is not restated here.
 
 ## Availability
 
-WebX guarantees name resolution. It does not guarantee that a site loads.
+VayuWeb guarantees name resolution. It does not guarantee that a site loads.
 
 Content survives only while at least one peer holds and serves the blocks. If
 the owner's node is offline and no other peer pinned the content, the name
@@ -203,7 +203,7 @@ rotate it.
 ## What makes a site renderable
 
 A site is renderable when a resolver can serve it with no network access beyond
-the WebX peer set. Concretely:
+the VayuWeb peer set. Concretely:
 
 - A root `index.html` exists and is valid HTML.
 - Every subresource — scripts, styles, images, fonts, media — resolves inside
@@ -224,7 +224,7 @@ because every visitor verifies the same bytes against the same CID.
 
 Status: Draft — not yet implemented. This specification describes the
 pre-implementation design; no publishing tool exists, no site has been
-published, and every constant here is subject to change through the WXIP
+published, and every constant here is subject to change through the VWIP
 process before a first release.
 
 ## See also
