@@ -84,7 +84,8 @@ for `http://example.webx/` arriving at the proxy.
    `NO_USABLE_RECORD`.
 10. **Pointer resolution.** For `ipns`, resolve the pointer to a CID; on
     failure return 1505 `IPNS_UNRESOLVED`. For `alias`, restart at step 4 with
-    the target against an alias budget of 4; exhaustion returns 1508
+    the target against an alias budget of **3 hops**, counted per original
+    request and matching [REGISTRY.md](REGISTRY.md); exhaustion returns 1508
     `ALIAS_LOOP`.
 11. **Content fetch.** Fetch the CID over IPFS, preferring locally pinned
     blocks, then connected peers, then the DHT. No provider within the 15

@@ -38,7 +38,8 @@ matrix of privacy settings is a matrix of ways to be wrong.
 
 | | **Standard** | **Private** |
 |---|---|---|
-| Third-party requests | None | None |
+| Third-party requests **originated by the resolver** | None | None |
+| Third-party requests **the browser may still make** | **Possible.** The browser is not contained: top-level navigation, WebRTC, omnibox lookups and extensions are outside the resolver's reach. | **Contained**, because full-proxy configuration and the client's own webview are mandatory (section 2.1). |
 | Query logging | None | None |
 | Telemetry | None | None |
 | Egress transport | Direct to the WebX network | Anonymising transport, mandatory |
@@ -118,6 +119,11 @@ be written.
 | **Access log** | **Never written** | **Never written** |
 | **Crash dump / core file** | **Disabled by the process at startup** | **Disabled** |
 | **Telemetry, analytics, update ping** | **Does not exist** | **Does not exist** |
+| IPFS blockstore | On disk, in the same encrypted store as the content cache — it holds the blocks of everything fetched, so it is a reading record and MUST be treated as one | Memory only |
+| IPFS datastore / pin set | On disk. Reader-chosen; see the pin-set row above. | Memory only |
+| IPNS record cache | On disk, encrypted | Memory only |
+| libp2p peerstore | On disk. Reveals who was talked to, not what was read. | Memory only |
+| libp2p PeerID keypair | On disk, mode `0600` | **Regenerated every launch**, so sessions cannot be linked by PeerID |
 
 Four properties of this table are normative and testable:
 
@@ -252,8 +258,19 @@ is the document most likely to be quoted out of context:
 - It does not claim the registry log can be made private. It is public replicated state.
 - It does not claim that content, once fetched by others, can be recalled.
 - It does not claim the browser's own history can be erased by any header the resolver sends.
+- It does not claim Standard Mode contains the browser. Only Private Mode does, and only because
+  it mandates full-proxy configuration and the client's own webview.
+- It does not claim `Cache-Control: no-store` removes every browser-side artefact. It removes the
+  HTTP disk cache; the media cache, favicon database and thumbnail store are separate, and are
+  closed only by the ephemeral profile.
+- It does not claim uniform enforcement across engines. `webrtc 'block'` is Chromium-only and
+  Trusted Types is not implemented everywhere; section 5 of
+  [CONTENT-SECURITY.md](CONTENT-SECURITY.md) carries the per-directive position.
 
-Everything else in this document is closed absolutely, and is testable.
+Every other control in this document is stated with its scope and its residual. Where a control
+is engine-conditional or mode-conditional, that condition is named in the clause itself rather
+than left to a reader to infer — which is what Constitution Article 21 requires, and what makes
+the difference between a specification and a brochure.
 
 ## See also
 

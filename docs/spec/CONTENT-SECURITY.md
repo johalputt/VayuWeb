@@ -61,6 +61,11 @@ implementer must understand it before reading anything below.
 | `Origin-Agent-Cluster` | Ignored. |
 | `Clear-Site-Data` | **Ignored on insecure origins.** Any design that relies on it to clear storage is relying on nothing. |
 
+`window.name` deserves its own line rather than a footnote to COOP. Because COOP is inert, it
+**survives navigation between WebX names** and is a live cross-name correlation channel that no
+header closes. The owner of that problem is the client: the webview MUST set `window.name = ''`
+on every cross-name navigation, and the conformance suite asserts it (section 6, test 9).
+
 These headers are still sent, because they cost nothing and become active if WebX ever gains a
 secure-context scheme. They MUST NOT appear in any claim about what the profile currently
 guarantees.
@@ -117,6 +122,21 @@ Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'
 | `webrtc` | `'block'` | CSP Level 3. Blocks `RTCPeerConnection` construction. **Chromium-only at present** — see section 5.1, this is a partial control, not a solved problem. |
 | `require-trusted-types-for` | `'script'` | Closes DOM-XSS sinks at the platform level rather than by code review. |
 | `trusted-types` | `'none'` | No policy may be created, so the sinks are unreachable rather than merely guarded. Cost and relaxation in 2.3. |
+
+### 2.1a Engine support is not uniform
+
+Three of the directives above are not implemented everywhere, and a profile that implies
+otherwise is misleading:
+
+| Directive | Reality |
+|---|---|
+| `webrtc 'block'` | **Chromium only.** Elsewhere it is ignored entirely and section 5.1 is the whole defence. |
+| `require-trusted-types-for` / `trusted-types` | Chromium and recent Firefox. WebKit does not enforce, and does so **silently** — an author testing only in Safari will believe their page is protected when it is not. |
+| `worker-src` | Widely supported, but engines differ on whether it or `script-src` governs worklets. Both are `'self'` or stricter here, so the ambiguity cannot open a hole. |
+
+The profile is therefore **strongest in the WebX client's own webview**, where the engine is
+known and the client controls it. In a third-party browser the guarantees are engine-conditional,
+and the client MUST say which ones are not in force rather than presenting one uniform claim.
 
 ### 2.2 Directives deliberately absent
 
@@ -191,7 +211,7 @@ than trusting the policy alone. Defence in depth here is not optional; it is cor
 | `X-Content-Type-Options` | `nosniff` | No MIME sniffing; a misdeclared type is an error, not a guess. |
 | `X-Frame-Options` | `DENY` | Redundant beside `frame-ancestors 'none'` on modern engines; retained for older ones. |
 | `X-DNS-Prefetch-Control` | `off` | Speculative DNS is **not covered by CSP**. Without this, `<link rel="dns-prefetch">` produces a clearnet DNS query — exactly the leak WebX exists to prevent. Note it does not stop `preconnect`'s TCP handshake in all versions; section 4.3 strips the markup as well. |
-| `Cache-Control` | `no-store` | No durable browser-side copy. This forfeits the offline benefit of content addressing — a genuine trade, made deliberately in favour of leaving no trail, with the resolver's in-memory cache preserving speed within a session. |
+| `Cache-Control` | `no-store` | **Removes the HTTP disk cache only.** It does not reach the media cache, the favicon database or the thumbnail store, each of which is a separate artefact closed only by the ephemeral profile in [PRIVACY.md](PRIVACY.md). It also forfeits the offline benefit of content addressing — a genuine trade, made in favour of leaving no trail. |
 | `Cross-Origin-Opener-Policy` | `same-origin` | **Inert today** (section 1). Sent for the future. |
 | `Cross-Origin-Embedder-Policy` | `require-corp` | **Inert today.** Its inertness is fortunate: activation would grant `SharedArrayBuffer` and high-resolution timers. |
 | `Cross-Origin-Resource-Policy` | `same-origin` | Active regardless of secure context. Blocks cross-origin size and timing probes against WebX content. |
@@ -299,18 +319,26 @@ Each is an executable test asserting on **observed behaviour**, not configuratio
 
 1. The three canonical values in sections 2 and 3 are emitted byte-identically on every response.
 2. A site-supplied CSP is discarded, never merged.
-3. **Zero-egress:** load a page containing one of every construct in section 4.3 under a socket
-   monitor; the observed connection set contains only WebX peers. Any other socket fails the
-   build.
-4. Two installs on different machines emit byte-identical outbound request headers.
-5. Every relaxation in 2.3 is per-site and surfaced in the UI.
-6. `serviceWorker.register()` rejects.
-7. The PAC file contains none of the forbidden functions (static check).
-8. The whole-DAG snapshot is fetched before any path is served.
+3. **Zero-egress, in the client webview.** Load a page containing one of every construct in
+   section 4.3 under a socket monitor scoped to the whole network namespace, not to the browser
+   process. The observed connection set contains only WebX peers. Any other socket **fails the
+   build**.
+4. **Zero-egress, third-party browser matrix.** The same test across Firefox, Chromium and WebKit.
+   Run for **disclosure**, recorded and published — and it MUST NOT gate the build, because WebX
+   does not control those engines and a test that can be broken by someone else's release is not
+   a gate, it is a tripwire. Pretending otherwise would make the suite dishonest.
+5. Two installs on different machines emit byte-identical outbound request headers.
+6. Every relaxation in 2.3 is per-site and surfaced in the UI.
+7. `serviceWorker.register()` rejects.
+8. The PAC file contains none of the forbidden functions (static check).
+9. `window.name` is empty after a navigation between two WebX names.
+10. The whole-DAG snapshot is fetched and verified before any path is served, and a `peer` record
+    is refused as a content source unless it can be snapshot-verified — a live peer source would
+    otherwise reintroduce the path-selection oracle that 5.6 exists to close.
 
-Test 3 is the one that matters. Constitution Article 14 requires exactly this form of test, and
-Article 44.8 places it in the same conformance run as the wire vectors, so a rights guarantee and
-a correctness guarantee fail the same build.
+Test 3 is the one that matters, and test 4 is the one that keeps test 3 honest. Constitution
+Article 14 requires this form of test, and Article 44.8 places it in the same conformance run as
+the wire vectors, so a rights guarantee and a correctness guarantee fail the same build.
 
 ## See also
 
