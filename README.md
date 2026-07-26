@@ -65,10 +65,13 @@ running alongside, reachable from the same browser, owned by nobody.
 
 ## Core design
 
-- **Multi-TLD registry.** Twelve launch extensions, plural by design so no single namespace
-  becomes the thing worth capturing:
-  `.webx` · `.vayu` · `.p2p` · `.free` · `.decent` · `.libre` · `.sov` · `.dao` · `.indie` ·
-  `.open` · `.news` · `.blog`
+- **An elastic namespace — 349 extensions at launch, and no ceiling.** Creating a top-level
+  domain on the clearnet cost USD 185,000 in the 2012 application round, plus roughly USD 25,000
+  a year, in a window that opens about once a decade. Here it costs a ratified proposal and some
+  CPU, so the namespace can be as broad as the people using it want. See the
+  [catalogue](docs/spec/NAMESPACE-CATALOGUE.md) — from `.folio` and `.zine` to `.dissent`,
+  `.allodial`, `.ghazal` and `.chai`. Every extension is equal; there is no premium tier and
+  nothing is sold.
 
 - **Peer-to-peer registry.** A Hypercore append-only log with a Hyperbee index over it. Every
   record is signed; every peer holds the whole history and verifies it without trusting anyone.
@@ -171,7 +174,10 @@ WebX/
 [Hosting](docs/spec/HOSTING.md) ·
 [Proof-of-Work](docs/spec/PROOF-OF-WORK.md) ·
 [Publishing](docs/spec/PUBLISHING.md) ·
-[Cost model](docs/spec/COST.md)
+[Cost model](docs/spec/COST.md) ·
+[Namespace](docs/spec/NAMESPACE.md) ·
+[Catalogue](docs/spec/NAMESPACE-CATALOGUE.md) ·
+[Services & the Vayu suite](docs/SERVICES.md)
 
 **Security and privacy:**
 [Content security](docs/spec/CONTENT-SECURITY.md) ·

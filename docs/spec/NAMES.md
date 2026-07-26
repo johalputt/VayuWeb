@@ -189,9 +189,25 @@ Further rules:
 
 ## Launch TLDs
 
-Twelve TLDs exist at launch. Each has its own reserved-label set (the common set
-above, plus anything its charter adds) and its own proof-of-work difficulty
-curve, driven by its registration rate over the trailing 30 days.
+**The launch catalogue holds 349 extensions across ten categories.** It is listed in
+[NAMESPACE-CATALOGUE.md](NAMESPACE-CATALOGUE.md), and the reasoning behind a broad
+namespace — why breadth is safe here and expensive on the clearnet — is in
+[NAMESPACE.md](NAMESPACE.md).
+
+The catalogue is a starting point, not a boundary. The namespace is **elastic**:
+anyone may propose a new extension at any time, it costs proof-of-work rather than
+a fee, and no implementation hard-codes the list. Creating a top-level domain on
+the clearnet cost USD 185,000 in the 2012 application round plus roughly USD
+25,000 a year; here it costs a ratified proposal and some CPU.
+
+Each extension has its own reserved-label set (the common set above, plus anything
+its charter adds) and its own proof-of-work difficulty curve, driven by its
+registration rate over the trailing 30 days.
+
+The twelve below are the protocol's founding extensions, described here because
+they carry meaning specific to WebX itself. They hold no privileged status:
+Constitution Article 35 requires every extension to be equal, and no client may
+present one as more official than another.
 
 - `.webx` — the protocol's own namespace; general-purpose, the default suggestion.
 - `.vayu` — general-purpose, for projects in the Vayu ecosystem and its neighbours.
