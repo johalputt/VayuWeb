@@ -21,22 +21,30 @@ and log verification belong to the registry specification.
 
 ## Components
 
-A resolver SHALL expose exactly two network listeners, both on loopback:
+A resolver SHALL expose exactly two listeners, and **only one of them is a
+network listener**:
 
 ```text
-127.0.0.1:7654   HTTP proxy      browser-facing, unauthenticated
-127.0.0.1:7653   control API     tooling-facing, bearer-token authenticated
+127.0.0.1:7654         HTTP proxy    browser-facing, unauthenticated
+<runtime-dir>/webx.sock  control API   tooling-facing, bearer-token authenticated
 ```
 
-Both listeners MUST bind `127.0.0.1` (and `[::1]` where available). A resolver
-MUST NOT bind `0.0.0.0`, `::`, a LAN address or a tunnel interface, and MUST
-refuse to start if configuration requests one. There is no "share my resolver"
-mode: a resolver answering for other hosts becomes an unauthenticated proxy and
-a query-log collector, precisely the shape WebX exists to avoid.
+The proxy MUST bind `127.0.0.1` (and `[::1]` where available). A resolver MUST
+NOT bind `0.0.0.0`, `::`, a LAN address or a tunnel interface, and MUST refuse
+to start if configuration requests one. There is no "share my resolver" mode: a
+resolver answering for other hosts becomes an unauthenticated proxy and a
+query-log collector, precisely the shape WebX exists to avoid.
 
-The ports are separate so browser exposure and privileged control have
-different attack surfaces. Port 7654 never accepts a control operation; port
-7653 never serves site content.
+The control API is served over a **Unix domain socket (or a named pipe on
+Windows)** with mode `0600`, in a directory owned by the user with mode `0700`.
+It MUST NOT listen on TCP, on any address, including loopback — not even opt-in,
+not even for development.
+
+That single decision deletes DNS rebinding, CSRF, `Upgrade` reach and
+browser port-scanning against the privileged surface permanently, because a
+browser cannot address a Unix domain socket by any means. The full reasoning and
+the hardening rules for the proxy that must remain on TCP are specified in
+[LOCAL-SURFACE.md](LOCAL-SURFACE.md), which is normative.
 
 ## Resolution algorithm
 
@@ -212,8 +220,13 @@ Negative caching:
 - `NAME_NOT_FOUND`: 30 seconds — short, because a name may be registered at any
   moment and the log replicates continuously.
 - `NAME_EXPIRED`, `NAME_QUARANTINED`: 60 seconds.
-- `LABEL_INVALID`, `TLD_UNKNOWN`: process lifetime; deterministic, and not
-  changeable without a restart or a ratified WXIP.
+- `LABEL_INVALID`, `TLD_UNKNOWN`: **not cached at all.** Both are decided by a
+  grammar check that is cheaper than a cache lookup, and caching them for the
+  process lifetime — as an earlier draft of this document specified — creates an
+  unbounded, attacker-fillable, never-evicted structure that one hostile page
+  can use to exhaust memory. Every other negative entry lives in a bounded
+  evicting cache with a maximum entry count and a finite TTL; see
+  [LOCAL-SURFACE.md](LOCAL-SURFACE.md) section 3.3.
 - `CONTENT_UNAVAILABLE`, `IPNS_UNRESOLVED`: 10 seconds, so a site coming back
   online recovers quickly.
 - `REGISTRY_UNAVAILABLE`, `CONTENT_INTEGRITY`: never cached.
@@ -222,9 +235,17 @@ When the registry is unreachable the resolver MAY serve a record up to 600
 seconds past its TTL, MUST mark it `X-WebX-Stale: 1`, and MUST NOT serve past
 `notAfter`.
 
-Diagnostic headers on every proxied response: `X-WebX-Name`, `X-WebX-Seq`,
-`X-WebX-CID`, `X-WebX-Source` (`cid`, `ipns`, `peer`), `X-WebX-Resolved-From`
-(`cache`, `registry`) and `X-WebX-Stale`.
+Diagnostic headers — `X-WebX-Name`, `X-WebX-Seq`, `X-WebX-CID`, `X-WebX-Source`
+(`cid`, `ipns`, `peer`), `X-WebX-Resolved-From` (`cache`, `registry`) and
+`X-WebX-Stale` — MUST be **off by default** and enabled only through the control
+API.
+
+Emitted unconditionally they brand every response as WebX, which is the most
+consequential fingerprint the resolver produces: it lets any page that can
+elicit a response determine that WebX is installed. For a reader in a hostile
+jurisdiction that single fact may be all an adversary needs. Diagnostics that
+disclose the tool's presence are disclosure, not diagnostics. See
+[LOCAL-SURFACE.md](LOCAL-SURFACE.md) section 2.4.
 
 ## Privacy requirements
 
@@ -257,31 +278,35 @@ therefore distinct origins with separate cookie jars, storage and permissions,
 requiring nothing of the resolver beyond not rewriting hosts. The resolver MUST
 NOT serve one name's content under another name's host.
 
-The proxy SHALL inject this Content-Security-Policy on every HTML response,
-replacing any CSP the site supplied:
+The proxy SHALL inject the strict content-security profile on every HTML
+response, replacing any policy the site supplied. That profile — the
+Content-Security-Policy, the twelve accompanying response headers, the request
+headers the resolver must never emit, the response headers it must strip, and
+the markup it must neutralise — is specified normatively in
+[CONTENT-SECURITY.md](CONTENT-SECURITY.md) and is **not restated here**. It is
+defined in exactly one place so that it cannot drift; `scripts/check-headers.py`
+enforces that, and CI fails on divergence.
 
-```text
-default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'
-'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src
-'self' blob:; connect-src 'self'; frame-src 'self'; frame-ancestors 'self';
-form-action 'self'; base-uri 'self'; object-src 'none'
-```
+The shape of it: `default-src 'none'` with every resource type enumerated
+explicitly, so a directive nobody remembered to add fails closed. Every source
+is `'self'`, so a page loads only bytes from its own verified CID. Clearnet
+subresources are refused because each one reintroduces a DNS lookup, a
+certificate authority, and a third party learning the visitor's address and
+which WebX page they are reading — three things the protocol exists to remove.
+There is no `'unsafe-inline'`, for styles or anything else, and no CSP
+reporting endpoint, because a report endpoint is an outbound channel that fires
+precisely when something unexpected happens.
 
-Every source is `'self'`, so a page can load only bytes from its own verified
-CID. Clearnet subresources are refused because each one reintroduces a DNS
-lookup, a certificate authority, and a third party learning the visitor's
-address and which WebX page they are reading — three things the protocol exists
-to remove. `'unsafe-inline'` is permitted for styles only, a concession to
-static site generators; never for scripts.
+Four channels are not closable by CSP at all — WebRTC, top-level navigation,
+timing side channels, and a compromised endpoint. CONTENT-SECURITY.md section 4
+names each and specifies what closes it instead; the resolver MUST implement
+those controls, and the client MUST warn where it cannot.
 
-An operator MAY set `allow_cross_name_subresources` through the control API,
-widening `default-src` with a wildcard host source per launch TLD (for example
-`http://*.webx`). No flag widens it to clearnet; that refusal is not tunable.
-
-Additional headers: `Referrer-Policy: no-referrer`,
-`X-Content-Type-Options: nosniff`, `Cross-Origin-Opener-Policy: same-origin`,
-`Cross-Origin-Resource-Policy: same-origin`, and a `Permissions-Policy` denying
-geolocation, camera, microphone, USB and serial.
+A site MAY request one of the two per-site relaxations defined in
+CONTENT-SECURITY.md section 1.3 (WebAssembly, or a named Trusted Types policy).
+Each is scoped to that site alone and MUST be surfaced to the reader. No flag,
+control-API setting or configuration file widens the policy to clearnet, or
+applies a relaxation globally; those refusals are not tunable.
 
 HSTS is never sent: WebX names are served over plaintext loopback HTTP, and an
 HSTS entry would poison the browser's state for that host permanently.

@@ -76,9 +76,20 @@ running alongside, reachable from the same browser, owned by nobody.
 - **IPFS hosting.** Sites are content-addressed and published through IPNS, pinned by their
   owner and by anyone who volunteers. No mandatory pinning service.
 
-- **Local resolution.** A small proxy on loopback makes `.webx` and its siblings work in any
-  browser. The optional extension is a convenience, never a requirement. A WebX lookup never
-  falls through to clearnet DNS, and queries are not logged by default.
+- **Its own scheme.** WebX names are addressed `webx://example.webx/`, never `http://` or
+  `https://`. Those schemes carry a promise about certificate authorities that WebX does not
+  make; WebX makes a different and stronger one — content verified byte for byte against its
+  hash. A security indicator that lies is worse than none.
+
+- **Local resolution.** A small proxy on loopback makes WebX names work in any browser. The
+  optional extension is a convenience, never a requirement. A WebX lookup never falls through to
+  clearnet DNS, and queries are never logged.
+
+- **Security-first by construction.** A deny-by-default content-security profile
+  (`default-src 'none'`, no inline anything, no reporting endpoint), every powerful browser
+  feature denied, the privileged control API on a Unix socket a browser cannot address, and a
+  **Private Mode** that routes all egress through an anonymising transport, keeps every byte in
+  memory, and refuses to start rather than fall back.
 
 - **Cryptographic ownership.** Ed25519 keypairs. Registration, update, transfer and release are
   signed operations. The registry answers exactly two questions — *is this signature valid*
@@ -135,6 +146,7 @@ WebX/
 | [Architecture](docs/ARCHITECTURE.md) | Components, data flow, trust boundaries |
 | [Threat Model](docs/THREAT-MODEL.md) | Adversaries, attacks, mitigations, residual risk |
 | [Governance](docs/GOVERNANCE.md) | How decisions are actually made |
+| [Longevity review](docs/LONGEVITY.md) | What breaks before 2126, and what was done about it |
 | [Roadmap](docs/ROADMAP.md) | Phases, acceptance tests, and what would make us rethink |
 | [FAQ](docs/FAQ.md) | Short answers, including the unwelcome ones |
 | [Glossary](docs/GLOSSARY.md) | Every term used across the specifications |
@@ -142,10 +154,20 @@ WebX/
 **Specifications:**
 [Registry](docs/spec/REGISTRY.md) ·
 [Names & TLDs](docs/spec/NAMES.md) ·
+[`webx://` scheme](docs/spec/URI-SCHEME.md) ·
 [Resolution](docs/spec/RESOLUTION.md) ·
 [Hosting](docs/spec/HOSTING.md) ·
-[Proof-of-Work](docs/spec/PROOF-OF-WORK.md) ·
-[WXIP-0000](docs/spec/WXIP-0000.md)
+[Proof-of-Work](docs/spec/PROOF-OF-WORK.md)
+
+**Security and privacy:**
+[Content security](docs/spec/CONTENT-SECURITY.md) ·
+[Privacy & zero-trail](docs/spec/PRIVACY.md) ·
+[Local attack surface](docs/spec/LOCAL-SURFACE.md) ·
+[Crypto agility & post-quantum](docs/spec/CRYPTO-AGILITY.md)
+
+**Process:**
+[WXIP-0000](docs/spec/WXIP-0000.md) ·
+[WXIP-0001](docs/spec/WXIP-0001.md)
 
 ---
 
