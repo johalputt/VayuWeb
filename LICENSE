@@ -53,21 +53,32 @@ as the Linux kernel does. See [CONTRIBUTING.md](CONTRIBUTING.md).
 **There is no Contributor Licence Agreement and there will never be one.** This is the most
 important sentence in this file.
 
-A CLA concentrates copyright in a single party, and a party holding all the copyright can
-relicense at will. Every well-known rug-pull in open source — projects that went from free
-software to source-available overnight, stranding the communities that built them — was possible
-because a CLA had gathered the rights in one place and one decision was enough.
+A CLA concentrates copyright in a single party. Only a party that holds the copyright can sell
+proprietary licences to a codebase, so a CLA is what makes a commercial dual-licence business
+constructible — the free version under one licence, and paid proprietary terms with a warranty
+and an indemnity for anyone who wants them. Every well-known conversion of a community project
+into a paid product was built on rights a CLA had gathered first.
 
-Without a CLA, copyright stays distributed across every contributor, and relicensing would
-require the agreement of all of them, which becomes impossible almost immediately. That
-impossibility is the protection. It is the same reason the Linux kernel cannot be relicensed, and
-it is the licensing counterpart of the entrenched clauses in Article 9.
+Without a CLA that cannot be built here. Not by a future maintainer, not by an acquirer, and not
+by the author. There is no way to warrant title over code you do not own.
 
-Note what this means for VWIP-0002: even a ratified amendment to Article 16.2 could not
-retroactively relicense existing contributions, because nobody holds the rights to do it. Any
-change of code licence would apply to new contributions, with existing code either dual-licensed
-by its authors' consent or left as it is. **A governance process that could relicense the whole
-corpus by vote would be the capture vector, not the remedy.**
+Be precise about what this does **not** mean, because the usual summary overstates it. It does not
+freeze the outbound licence: MIT permits distributing a derivative work under different terms, so
+a future version of this code could be released under a reciprocal licence without anyone's
+consent. That is what permissive licensing is for, and it is why VWIP-0002 is a policy question
+rather than a legal impossibility. The comparison sometimes drawn to the Linux kernel does not
+carry over — GPL-2.0-only genuinely cannot be sublicensed under other terms, and MIT genuinely
+can.
+
+What no party can ever do is **retract a grant already made**. Every release published under
+these terms stays under them permanently, forkable from its tag whatever this repository does
+afterwards. That guarantee protects anyone who has already relied on this work, and it does not
+depend on anybody's continued goodwill.
+
+So the commitment on top of the licence, which is a promise rather than a legal constraint: any
+change to the outbound licence will be **forward-only, announced before it happens, and put to
+contributors first** even where their agreement is not required. See
+**[VWIP-0002](docs/spec/VWIP-0002.md)**, which is where that argument belongs.
 
 ---
 

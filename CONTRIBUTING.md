@@ -105,12 +105,19 @@ you wrote the contribution or have the right to submit it, and that you understa
 and will be redistributed.
 
 **There is no Contributor Licence Agreement, and there will never be one.** You keep the
-copyright in your own work; it is not assigned to anyone. This matters more than it sounds: a CLA
-concentrates copyright in one party, and a party holding all the copyright can relicense at will.
-Every well-known rug-pull in open source was possible because a CLA had gathered the rights in
-one place. Distributed copyright makes relicensing require everyone's agreement, which becomes
-impossible almost immediately — and that impossibility is the protection. See
-[LICENSE](LICENSE).
+copyright in your own work; it is not assigned to anyone.
+
+What that forecloses is the commercial dual-licence business: only a party holding the copyright
+can sell proprietary terms over a codebase, and every well-known conversion of a community
+project into a paid product was built on rights a CLA had gathered first. That path is closed
+here permanently, to the author as much as to anyone else.
+
+What it does not do is freeze the outbound licence — MIT permits releasing a derivative work
+under different terms, so a future version could carry a reciprocal licence without every
+contributor's consent. The commitment, which is a promise rather than a legal constraint, is that
+any such change would be forward-only, announced in advance, and put to contributors first. What
+nobody can do, ever, is retract a grant already made: every published release stays under the
+terms it shipped with. See [LICENSE](LICENSE) and [VWIP-0002](docs/spec/VWIP-0002.md).
 
 ### What licence your contribution carries
 
