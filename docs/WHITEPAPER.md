@@ -287,7 +287,7 @@ VayuWeb is governed by the VayuWeb Constitution, which fixes the properties that
 traded away — no privileged key, no revocation of a name by anybody but its owner, no
 mandatory phone-home, no token — and by the VWIP process, through which new TLDs and
 protocol changes are proposed publicly, reviewed, and ratified by peers who signal
-adoption by running the code. Code is MIT licensed; the Constitution text is dedicated
+adoption by running the code. Code is MIT licensed; the Constitution and specifications are dedicated
 to the public domain, so that a fork inherits the rules without asking. Long-term
 development lives on Radicle, with GitHub as a temporary public mirror, so that the
 project's own home is not a chokepoint of the kind section 1 describes. See

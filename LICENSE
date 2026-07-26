@@ -1,33 +1,100 @@
-MIT License
+# Licensing
 
-Copyright (c) 2026 Ankush Choudhary Johal and the VayuWeb contributors
+VayuWeb is licensed in two layers, because the charter and the code need different things from
+a licence. Full texts are in [`LICENSES/`](LICENSES).
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+| Layer | What it covers | Licence |
+|---|---|---|
+| **The charter** | `constitution/` | **CC0-1.0** — public domain dedication |
+| **The specifications** | `docs/` | **CC0-1.0** — public domain dedication |
+| **Brand artwork** | `assets/` | **CC0-1.0** — public domain dedication |
+| **Code** | `registry/`, `proxy/`, `client/`, `scripts/` | **MIT** |
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Article 16.2 of the Constitution governs this and is not optional: specifications must be
+published under "permissive or public-domain-equivalent terms", and reference code under "the
+MIT licence or terms no less permissive".
 
 ---
 
-NOTE ON THE CONSTITUTION
+## Why the charter and specifications are public domain
 
-The text of the VayuWeb Constitution (constitution/CONSTITUTION.md) is NOT covered by the
-licence above. It is dedicated to the public domain under Creative Commons CC0 1.0
-Universal, to the fullest extent permitted by law. Any fork, successor or unrelated project
-may copy, adapt or republish it without permission, attribution or condition.
+Anyone must be able to implement VayuWeb without asking permission, without attribution
+obligations, and without a lawyer reading a licence first. Article 16 makes independent
+implementation a right; a licence on the specification would make it a privilege.
 
-This is deliberate. A licence on a founding charter is a leash on a fork, and the right to
-fork is the last check that survives when every other one has failed.
+It matters for forking too. Article 17 guarantees the right to fork the protocol, the registry
+state and the name, and Article 17.2 forbids any anti-fork clause in any licence. A fork must be
+able to carry the charter away intact. **A licence on a founding document is a leash on a fork**,
+and the right to fork is the last check that survives after every other one has failed.
+
+CC0 rather than a permissive licence because even an attribution requirement is a condition, and
+a condition is something a future party could litigate.
+
+## Why the code is MIT
+
+Because Article 16.2 requires it. That is the whole reason, and it is a sufficient one.
+
+There is a live argument that it should not, and it is being made properly rather than by
+editing this file — see **[VWIP-0002](docs/spec/VWIP-0002.md)**, which proposes amending
+Article 16.2 to permit reciprocal licensing of the reference implementation. Until that proposal
+is ratified, this file states what the Constitution presently requires.
+
+If you want to know the argument before reading the proposal: MIT permits a well-capitalised
+operator to take this code, improve it privately, run the improved version as a closed hosted
+service, and contribute nothing back. Reciprocal licensing would require those improvements to
+be published. Whether that trade is worth making is a governance question, not a preference, and
+Article 16 is amendable precisely so it can be argued.
+
+## Contributions: DCO, and no CLA — ever
+
+Contributions are accepted under the **Developer Certificate of Origin**, signed off per commit,
+as the Linux kernel does. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+**There is no Contributor Licence Agreement and there will never be one.** This is the most
+important sentence in this file.
+
+A CLA concentrates copyright in a single party, and a party holding all the copyright can
+relicense at will. Every well-known rug-pull in open source — projects that went from free
+software to source-available overnight, stranding the communities that built them — was possible
+because a CLA had gathered the rights in one place and one decision was enough.
+
+Without a CLA, copyright stays distributed across every contributor, and relicensing would
+require the agreement of all of them, which becomes impossible almost immediately. That
+impossibility is the protection. It is the same reason the Linux kernel cannot be relicensed, and
+it is the licensing counterpart of the entrenched clauses in Article 9.
+
+Note what this means for VWIP-0002: even a ratified amendment to Article 16.2 could not
+retroactively relicense existing contributions, because nobody holds the rights to do it. Any
+change of code licence would apply to new contributions, with existing code either dual-licensed
+by its authors' consent or left as it is. **A governance process that could relicense the whole
+corpus by vote would be the capture vector, not the remedy.**
+
+---
+
+## Copyright
+
+Copyright the VayuWeb contributors.
+
+Copyright is held by each contributor over their own work. It is not assigned to any person or
+entity, deliberately, for the reason given above.
+
+## SPDX summary
+
+```text
+constitution/**              CC0-1.0
+docs/**                      CC0-1.0
+assets/**                    CC0-1.0
+registry/**                  MIT
+proxy/**                     MIT
+client/**                    MIT
+scripts/**                   MIT
+```
+
+Brand artwork is dedicated to the public domain as a matter of *licence*. That is separate from
+trademark: Article 54 governs use of the project's name and marks, and a public-domain image does
+not confer permission to present a fork as though it were VayuWeb.
+
+## Full texts
+
+- [`LICENSES/CC0-1.0.txt`](LICENSES/CC0-1.0.txt)
+- [`LICENSES/MIT.txt`](LICENSES/MIT.txt)

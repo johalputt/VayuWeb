@@ -56,6 +56,31 @@ the registry core; the scheme will be set by a VWIP before then, not improvised 
   later is visible rather than deniable.
 - `scripts/check-headers.py` and a CI job asserting the canonical security header values are
   quoted identically everywhere they appear.
+- **VWIP-0002** (`docs/spec/VWIP-0002.md`) — proposes amending Article 16.2 to permit a
+  reciprocal licence for the reference implementation, so that a well-capitalised operator
+  cannot run a closed, improved derivative as a hosted service and publish none of it. The
+  amendment is drafted to permit rather than require, names no specific licence, tightens the
+  specification requirement to public-domain-equivalent terms, and makes unrestricted forking
+  a condition of any qualifying licence. Ratification could not relicense existing code —
+  see below.
+- `LICENSES/` — the canonical CC0-1.0 and MIT texts, so the terms in force are readable in the
+  repository rather than at a URL that may not resolve in 2126.
+- **Developer Certificate of Origin 1.1** for contributions (`CONTRIBUTING.md`), signed off per
+  commit as the Linux kernel does.
+
+### Changed
+
+- **`LICENSE` restructured into the two layers the project actually has**: CC0-1.0 for the
+  charter, the specifications and the brand artwork; MIT for code. This is what Article 16.2
+  requires, and the file now says so, cites the clause, and records the argument against it
+  rather than acting on it unilaterally.
+- **No Contributor Licence Agreement, stated as a permanent commitment** in both `LICENSE` and
+  `CONTRIBUTING.md`. Copyright stays distributed across every contributor, so relicensing the
+  corpus would require the agreement of all of them and becomes impossible almost immediately.
+  That impossibility is the protection: it is why the Linux kernel cannot be relicensed, and it
+  is the licensing counterpart of the entrenched clauses in Article 9. It also binds the author
+  — a governance process able to relicense the whole corpus by vote would be the capture vector,
+  not the remedy.
 
 ### Notes
 

@@ -85,6 +85,35 @@ short and is enforced against behaviour, not opinions.
 
 ## Licensing of contributions
 
+### Sign off every commit
+
+Contributions are accepted under the **Developer Certificate of Origin 1.1**, the mechanism the
+Linux kernel uses. Add a sign-off line to each commit:
+
+```bash
+git commit -s
+```
+
+which appends:
+
+```text
+Signed-off-by: Your Name <your@email>
+```
+
+By signing off you certify the statements in the [DCO](https://developercertificate.org/): that
+you wrote the contribution or have the right to submit it, and that you understand it is public
+and will be redistributed.
+
+**There is no Contributor Licence Agreement, and there will never be one.** You keep the
+copyright in your own work; it is not assigned to anyone. This matters more than it sounds: a CLA
+concentrates copyright in one party, and a party holding all the copyright can relicense at will.
+Every well-known rug-pull in open source was possible because a CLA had gathered the rights in
+one place. Distributed copyright makes relicensing require everyone's agreement, which becomes
+impossible almost immediately — and that impossibility is the protection. See
+[LICENSE](LICENSE).
+
+### What licence your contribution carries
+
 By contributing code you agree it is released under the [MIT Licence](LICENSE). By contributing
 text to the Constitution you agree it is dedicated to the public domain under CC0, so that any
 fork can carry it.

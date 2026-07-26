@@ -107,7 +107,7 @@ private capability.
 | `docs/` | This file and its siblings, including `docs/spec/` for the normative specifications. |
 | `constitution/` | The Constitution and the VWIP process documents. Governance text, not code. |
 
-Code in `registry/`, `proxy/` and `client/` is MIT licensed. The Constitution text is
+Code in `registry/`, `proxy/` and `client/` is MIT licensed. The Constitution and specifications are
 dedicated to the public domain.
 
 ## Data Flow — Register a Name

@@ -221,7 +221,9 @@ should not permanently live on centralised infrastructure. GitHub is a mirror, k
 where people currently are — which is exactly the dependency VayuWeb exists to end.
 
 **What licence?**
-MIT for code. The Constitution text is public domain (CC0), deliberately: a licence on a founding
+MIT for code, with contributions under a DCO and no contributor licence agreement, so nobody
+— including the founder — holds the rights to relicense it later. The Constitution and the
+specifications are public domain (CC0), deliberately: a licence on a founding
 charter is a leash on a fork.
 
 ## See also

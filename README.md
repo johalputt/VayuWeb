@@ -35,7 +35,7 @@ first, in public, where they can be attacked while changing them is still cheap.
 | **Status** | Specification and charter — pre-implementation |
 | **Code** | None yet. The `registry/`, `proxy/` and `client/` directories are placeholders |
 | **Charter** | [The VayuWeb Constitution](constitution/CONSTITUTION.md) — ratified, in force |
-| **Licence** | MIT for code · public domain for the Constitution text |
+| **Licence** | CC0 for the charter, specifications and artwork · MIT for code · no CLA |
 | **Home** | Long-term development moves to **Radicle**; GitHub is a temporary public mirror |
 
 If you are here to read one thing, read the [Constitution](constitution/CONSTITUTION.md).
@@ -188,7 +188,8 @@ VayuWeb/
 
 **Process:**
 [VWIP-0000](docs/spec/VWIP-0000.md) ·
-[VWIP-0001](docs/spec/VWIP-0001.md)
+[VWIP-0001](docs/spec/VWIP-0001.md) ·
+[VWIP-0002](docs/spec/VWIP-0002.md)
 
 ---
 
@@ -238,7 +239,8 @@ Security issues go through [SECURITY.md](SECURITY.md), not the public issue trac
 
 ## Licence
 
-Code is [MIT](LICENSE).
+Code is [MIT](LICENSE). The charter, the specifications and the brand artwork are dedicated
+to the public domain under CC0.
 
 The Constitution text is dedicated to the public domain, deliberately: any fork must be able to
 carry the charter with it. A licence on a constitution is a leash on a fork, and the right to
