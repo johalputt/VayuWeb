@@ -1,0 +1,33 @@
+MIT License
+
+Copyright (c) 2026 Ankush Choudhary Johal and the WebX contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+NOTE ON THE CONSTITUTION
+
+The text of the WebX Constitution (constitution/CONSTITUTION.md) is NOT covered by the
+licence above. It is dedicated to the public domain under Creative Commons CC0 1.0
+Universal, to the fullest extent permitted by law. Any fork, successor or unrelated project
+may copy, adapt or republish it without permission, attribution or condition.
+
+This is deliberate. A licence on a founding charter is a leash on a fork, and the right to
+fork is the last check that survives when every other one has failed.

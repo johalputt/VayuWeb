@@ -1,0 +1,37 @@
+name: Attack on the design
+description: A concrete attack the threat model does not already cover
+labels: ["threat-model", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read [docs/THREAT-MODEL.md](../../docs/THREAT-MODEL.md) first. If the attack is already
+        listed there with a mitigation you think is inadequate, say so — that is also a valid
+        report. **If the attack is exploitable against a real holder or reader, do not post it
+        here.** Follow [SECURITY.md](../../SECURITY.md) instead.
+  - type: input
+    id: adversary
+    attributes:
+      label: Adversary
+      description: Who, and what capabilities do they have.
+      placeholder: A pinning operator holding a large share of the pin set
+    validations:
+      required: true
+  - type: textarea
+    id: sequence
+    attributes:
+      label: The attack, step by step
+      description: Numbered. Who does what, in what order, to get what.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact and attacker cost
+    validations:
+      required: true
+  - type: textarea
+    id: mitigation
+    attributes:
+      label: Possible mitigation
+      description: Optional.

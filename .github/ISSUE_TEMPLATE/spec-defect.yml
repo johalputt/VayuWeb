@@ -1,0 +1,36 @@
+name: Specification defect
+description: An ambiguity, contradiction, undefined failure path, or unjustified number in a specification
+labels: ["spec", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        WebX is pre-implementation, so specification defects are the highest-value bug class
+        in the project. Be concrete: point at the clause.
+  - type: input
+    id: document
+    attributes:
+      label: Document and section
+      description: Which file, and which heading or clause number.
+      placeholder: docs/spec/RESOLUTION.md — section 4.2, step 6
+    validations:
+      required: true
+  - type: textarea
+    id: defect
+    attributes:
+      label: What is wrong
+      description: State it precisely. Quote the text if it is short.
+    validations:
+      required: true
+  - type: textarea
+    id: consequence
+    attributes:
+      label: What breaks because of it
+      description: Two implementers reading this clause would build incompatible things — or a peer would accept a record it should reject, or a lookup would leak. Say which.
+    validations:
+      required: true
+  - type: textarea
+    id: fix
+    attributes:
+      label: Suggested wording
+      description: Optional. If you have replacement text, put it here.

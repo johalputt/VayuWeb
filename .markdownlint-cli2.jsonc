@@ -1,0 +1,24 @@
+{
+  // markdownlint-cli2 expects the rule set under "config"; top-level keys are
+  // treated as cli2 options, not rules.
+  "config": {
+    // Line length is governed by judgement, not a linter.
+    "MD013": false,
+    // Inline HTML is used for the logo block and centred headers in README.md.
+    "MD033": false,
+    // Several files open with an HTML logo block before the H1.
+    "MD041": false,
+    // The Constitution repeats structural headings across Titles by design.
+    "MD024": false,
+    // Bold-as-heading is used for definition terms in the glossary.
+    "MD036": false,
+    // Contact addresses are written bare on purpose so they can be copied.
+    "MD034": false,
+    // Table pipe padding is a style preference, not a defect.
+    "MD060": false,
+    // Kept ON deliberately: every fenced block must declare a language, so the
+    // specifications render with syntax highlighting wherever they are read.
+    "MD040": true
+  },
+  "globs": ["**/*.md", "!node_modules"]
+}

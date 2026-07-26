@@ -1,0 +1,34 @@
+name: Documentation problem
+description: An error, broken link, unclear passage, or an overclaim
+labels: ["docs", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Overclaiming is a bug and a serious one. If a document makes WebX sound more private,
+        more available, or more censorship-proof than it is, report it here.
+  - type: input
+    id: file
+    attributes:
+      label: File
+      placeholder: docs/FAQ.md
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - Factual error
+        - Overclaim — promises more than the design delivers
+        - Broken or wrong link
+        - Unclear or ambiguous wording
+        - Inconsistent with another document
+    validations:
+      required: true
+  - type: textarea
+    id: detail
+    attributes:
+      label: Details
+    validations:
+      required: true

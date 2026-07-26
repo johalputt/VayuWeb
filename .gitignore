@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+out/
+target/
+*.tsbuildinfo
+
+# Tauri
+client/src-tauri/target/
+client/src-tauri/gen/
+
+# Local state — never commit a key, a store, or a replicated log
+*.key
+*.pem
+*.keystore
+secrets.json
+.env
+.env.*
+!.env.example
+corestore/
+.hypercore/
+.webx/
+ipfs-repo/
+
+# Editors and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*~
+
+# Logs and coverage
+*.log
+npm-debug.log*
+yarn-error.log*
+coverage/
+.nyc_output/
+
+# Python tooling used by scripts/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
