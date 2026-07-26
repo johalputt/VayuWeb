@@ -17,8 +17,8 @@ import json
 import re
 import sys
 
-JOURNAL = sys.argv[1]
-OUT = sys.argv[2]
+OUT = sys.argv[-1]
+JOURNALS = sys.argv[1:-1]
 
 # Well-known ICANN generic top-level domains WebX must not echo. Not exhaustive --
 # it is the set a reader would plausibly confuse with the clearnet.
@@ -134,7 +134,11 @@ for ext, purpose in TWO_LETTER:
 if two:
     cats.append(("two-letter", sorted(two)))
 
-for line in open(JOURNAL, encoding="utf-8"):
+lines = []
+for journal in JOURNALS:
+    lines.extend(open(journal, encoding="utf-8").readlines())
+
+for line in lines:
     result = json.loads(line).get("result")
     if not isinstance(result, dict) or "extensions" not in result:
         continue
@@ -158,6 +162,28 @@ for line in open(JOURNAL, encoding="utf-8"):
 
 TITLES = {
     "two-letter": "Two letters",
+    "professions": "Trades and professions",
+    "industry": "Industry and sectors",
+    "science": "Science and research",
+    "medicine": "Medicine and wellbeing",
+    "sport": "Sport and outdoors",
+    "games": "Games and play",
+    "food": "Food and drink",
+    "nature": "Nature and environment",
+    "animals": "Animals",
+    "home": "Home, garden and making",
+    "transport": "Transport and vehicles",
+    "finance": "Money and cooperative finance",
+    "fashion": "Fashion and textiles",
+    "music": "Music",
+    "screen": "Film, stage and performance",
+    "literature": "Books and literary forms",
+    "history": "History and heritage",
+    "philosophy": "Philosophy and belief",
+    "language": "Languages and linguistics",
+    "society": "Law, rights and social movements",
+    "space": "Space and astronomy",
+    "agriculture": "Agriculture",
     "core-identity": "Core and identity",
     "publishing": "Writing and publishing",
     "creative-media": "Art and media",
