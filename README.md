@@ -85,11 +85,22 @@ running alongside, reachable from the same browser, owned by nobody.
   optional extension is a convenience, never a requirement. A WebX lookup never falls through to
   clearnet DNS, and queries are never logged.
 
-- **Security-first by construction.** A deny-by-default content-security profile
-  (`default-src 'none'`, no inline anything, no reporting endpoint), every powerful browser
-  feature denied, the privileged control API on a Unix socket a browser cannot address, and a
-  **Private Mode** that routes all egress through an anonymising transport, keeps every byte in
-  memory, and refuses to start rather than fall back.
+- **Secure by subtraction, not by guarding.** There is no server, so the categories that account
+  for most website compromises simply do not exist: no SQL injection, no remote code execution at
+  the origin, no dependency treadmill, no stolen hosting credentials, no certificate mis-issuance.
+  What remains — the reader's browser — is held under a deny-by-default profile
+  (`default-src 'none'`, no inline anything, no reporting endpoint), with the privileged control
+  API on a Unix socket a browser cannot address.
+
+- **No money, anywhere.** A name costs seconds of CPU. Hosting costs your own disk. There is no
+  token, no treasury and no protocol fee, and the Constitution entrenches all three prohibitions
+  against amendment — so unlike a pricing promise, this one cannot be revised by whoever is
+  running things in ten years.
+
+- **Nobody learns what you looked up.** Resolution happens against your local replica of the
+  registry, so a lookup never leaves your machine. A clearnet DNS query tells a resolver operator
+  every name you visit; a WebX lookup tells nobody anything. It is the cheapest privacy in the
+  design, because it comes from not sending the query at all.
 
 - **Cryptographic ownership.** Ed25519 keypairs. Registration, update, transfer and release are
   signed operations. The registry answers exactly two questions — *is this signature valid*
@@ -141,6 +152,7 @@ WebX/
 
 | Document | What it covers |
 |---|---|
+| [**Position**](docs/POSITION.md) | **What WebX is and is not** — the parallel-web frame, and the four commitments: secure, future-proof, cheap, easy |
 | [Constitution](constitution/CONSTITUTION.md) | The founding charter: rights, governance, entrenchment, the right to fork |
 | [Whitepaper](docs/WHITEPAPER.md) | The problem, the design, and what WebX deliberately is not |
 | [Architecture](docs/ARCHITECTURE.md) | Components, data flow, trust boundaries |
@@ -157,7 +169,9 @@ WebX/
 [`webx://` scheme](docs/spec/URI-SCHEME.md) ·
 [Resolution](docs/spec/RESOLUTION.md) ·
 [Hosting](docs/spec/HOSTING.md) ·
-[Proof-of-Work](docs/spec/PROOF-OF-WORK.md)
+[Proof-of-Work](docs/spec/PROOF-OF-WORK.md) ·
+[Publishing](docs/spec/PUBLISHING.md) ·
+[Cost model](docs/spec/COST.md)
 
 **Security and privacy:**
 [Content security](docs/spec/CONTENT-SECURITY.md) ·
@@ -176,8 +190,11 @@ WebX/
 A charter that overclaims dies the first time reality tests it, so these are stated up front
 and repeated in the specifications:
 
-- **WebX does not make you anonymous.** It removes intermediaries from naming and hosting. It
-  does not hide your network traffic from your ISP. Use Tor for the part WebX does not solve.
+- **WebX is a parallel web, not a hidden one.** It does not make you anonymous, and that is a
+  design decision rather than a shortfall — see [POSITION.md](docs/POSITION.md). WebX removes the
+  chokepoints that let someone switch your site off; it does not hide your traffic from your
+  network provider. An optional anonymity layer is deferred until there is a population large
+  enough for an anonymity set to mean anything. Use Tor when hiding is what you need.
 - **WebX does not guarantee availability.** Content lives while at least one peer pins it. If
   everybody stops pinning, it is gone.
 - **WebX cannot forget.** The registry is an append-only log. You can withdraw a pointer and

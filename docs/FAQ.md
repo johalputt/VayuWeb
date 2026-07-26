@@ -139,19 +139,28 @@ produced by a single-name lookup.
 ## Privacy
 
 **Does WebX make me anonymous?**
-**No.** This is the most important answer in this document. WebX removes intermediaries from
-naming and hosting. It does not hide your IP address, your traffic patterns, or what you fetched
-from anyone watching your network. Your ISP can see that you are using it. A large pinning
-operator can see what passes through them.
+**No, and it is not trying to.** WebX is a parallel web, not a hidden one. It does not hide your
+IP address, your traffic patterns, or what you fetched from anyone watching your network. Your
+network provider can see that you are using it.
 
-**So what does it actually hide?**
-That you have to ask a company for permission to have a name, and that a company knows which of
-its customers you are. It removes the account, the billing relationship and the identity document
-from the naming layer. That is genuinely valuable, and it is not anonymity.
+**Isn't that a weakness?**
+It is a sequencing decision, and it buys three things worth having. Anonymity done properly means
+onion routing or a mixnet: seconds of latency, constant cover traffic, heavy battery use, and a
+small anonymity set that provides false assurance until the network is large. Not paying that
+cost keeps WebX fast, keeps it simple enough to be secure, and keeps it usable by people who just
+want a website nobody can switch off. An optional layer can be added later; latency baked in at
+the start cannot be removed.
+
+**So what does WebX actually protect?**
+Two things, and both are concrete. First, nobody can take your name or switch off your site,
+because there is no registrar, certificate authority, host or content network in the path to
+petition. Second, **nobody learns what you looked up** — resolution runs against your local copy
+of the registry, so the query never leaves your machine. A clearnet DNS lookup tells a resolver
+operator every name you visit; a WebX lookup tells nobody anything.
 
 **What should I use if I need anonymity?**
-Tor, and understand its limits too. WebX is designed to compose with it rather than replace it —
-Constitution Article 24 says so rather than pretending otherwise.
+Tor, and understand its limits too. WebX composes with it rather than replacing it, and
+Constitution Article 24 forbids claiming otherwise.
 
 ## Governance
 

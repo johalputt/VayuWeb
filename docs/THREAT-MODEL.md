@@ -231,8 +231,13 @@ maintenance be *stated* rather than quietly implied.
 Stated as flatly as possible, because every one of these has been claimed by some project in this
 space and none of them is true of WebX:
 
-- **WebX is not an anonymity system.** It removes intermediaries from naming and hosting. It does
-  not hide your traffic, your address, or your reading. Use Tor for what WebX does not do.
+- **WebX is not an anonymity system, by design.** It is a parallel web, not a hidden one — see
+  [POSITION.md](POSITION.md). It removes the chokepoints that let a party switch a site off; it
+  does not hide your traffic, your address, or your reading. An optional anonymity layer is
+  deferred, not refused. Use Tor for what WebX does not do.
+  One exception is worth stating positively rather than leaving as an accident: **name resolution
+  contacts no peer**, because it runs against the local registry replica, so no party learns which
+  name a reader looked up. That property holds while the replica fits on the reader's device.
 - **WebX does not defend a compromised endpoint.** If the attacker has your machine, they have
   your keys and your names.
 - **WebX does not promise availability.** Content lives while someone pins it, and not one moment
