@@ -41,7 +41,7 @@ body        = *61ldh
 ldh         = alnum / "-"
 alnum       = %x61-7A / %x30-39            ; "a"-"z" / "0"-"9"
 
-tld         = 2*15( %x61-7A )              ; lowercase ASCII letters
+tld         = 2*12( %x61-7A )              ; lowercase ASCII letters
 ```
 
 Three constraints are normative but are not expressed in the ABNF above, because
@@ -69,7 +69,7 @@ an invalid operation never becomes an ownership fact.
 | Reserved | Reason |
 | --- | --- |
 | All 36 single-character labels (`a`-`z`, `0`-`9`) | Only 36 exist per TLD and their value is set by scarcity, not by use. First-come allocation turns a governance question into a race. Held pending an allocation WXIP. |
-| All 1,296 two-character labels | They collide with ISO 3166-1 alpha-2 country codes. A registry that cannot adjudicate disputes should not hand out strings that read as sovereign claims. |
+| All 1,296 two-character labels | Scarcity, not sovereignty. Only 1,296 exist per TLD and their value comes from that scarcity rather than from use, so first-come allocation turns a governance question into a race. Held pending an allocation WXIP, on the same reasoning as single-character labels. The earlier rationale here — that they read as sovereign claims because they collide with ISO 3166 codes — is withdrawn: [NAMESPACE.md](NAMESPACE.md) section 5.3 establishes that a two-letter string is a string, and that a country *name* is the thing that constitutes a claim. |
 | `www` | Universally read as a host prefix rather than a site. Registering it invites a name that resolves to something other than what a user typed. |
 | `localhost` | Special-use in RFC 6761. A resolver MUST treat it as loopback and MUST NOT resolve it through WebX. |
 | `example`, `invalid`, `test` | RFC 2606 reserves these for documentation and testing. Documentation that uses a live name eventually points somewhere its author did not intend. |
@@ -189,7 +189,7 @@ Further rules:
 
 ## Launch TLDs
 
-**The launch catalogue holds 409 extensions across eleven categories**, including 60
+**The launch catalogue holds 1,260 extensions across 33 categories**, including 60
 two-letter extensions. It is listed in
 [NAMESPACE-CATALOGUE.md](NAMESPACE-CATALOGUE.md), and the reasoning behind a broad
 namespace — why breadth is safe here and expensive on the clearnet — is in

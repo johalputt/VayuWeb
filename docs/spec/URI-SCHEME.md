@@ -41,7 +41,7 @@ being confused with a DNS name in a log, a bookmark, or a person's memory.
 webx-URI = "webx://" label "." tld [ "/" path ] [ "?" query ] [ "#" fragment ]
 
 label    = 1*63( %x61-7A / %x30-39 / "-" )   ; a-z 0-9 -
-tld      = 1*15( %x61-7A )                   ; a-z
+tld      = 2*12( %x61-7A )                   ; a-z
 ```
 
 2.1 The authority is exactly `label "." tld`. It MUST match the grammar in

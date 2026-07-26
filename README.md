@@ -65,7 +65,7 @@ running alongside, reachable from the same browser, owned by nobody.
 
 ## Core design
 
-- **An elastic namespace — 409 extensions at launch, and no ceiling.** Creating a top-level
+- **An elastic namespace — 1,260 extensions at launch, and no ceiling.** Creating a top-level
   domain on the clearnet cost USD 185,000 in the 2012 application round, plus roughly USD 25,000
   a year, in a window that opens about once a decade. Here it costs a ratified proposal and some
   CPU, so the namespace can be as broad as the people using it want. See the
