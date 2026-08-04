@@ -5,7 +5,7 @@
   "description": "VayuWeb name registry: signed append-only log, deterministic CBOR, Ed25519, Argon2id proof-of-work",
   "license": "MIT",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": { "node": ">=22.6" },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "node --test --experimental-strip-types 'src/**/*.test.ts'",

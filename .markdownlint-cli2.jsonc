@@ -20,5 +20,5 @@
     // specifications render with syntax highlighting wherever they are read.
     "MD040": true
   },
-  "globs": ["**/*.md", "!node_modules"]
+  "globs": ["**/*.md", "!**/node_modules/**", "!**/dist/**"]
 }

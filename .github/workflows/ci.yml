@@ -1,0 +1,135 @@
+name: ci
+
+# Every commit is gated here. The repository was documentation-only until the registry
+# implementation started, so this replaces the former docs-only workflow: markdown and link
+# integrity still matter, and now so does the code.
+#
+# Four jobs, deliberately. An earlier design had twenty, one per check, which buys nothing but
+# twenty required-status-check names to maintain and twenty chances for a dependency install to
+# flake a typo fix. Checks are grouped by what they need, not by what they assert.
+#
+# Jobs that need no network do not get a language setup step: the runner already has python3,
+# and every checker in scripts/ is standard library only. That is not a preference, it is the
+# difference between a gate that fails when the code is wrong and one that also fails when a
+# package index is having an afternoon.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege. No job here writes to the repository, comments, or publishes anything.
+permissions:
+  contents: read
+
+# A superseded run on the same ref is wasted work; cancel it. Never cancel on main, where a
+# run's result is a record rather than a preview.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # The specification corpus: link integrity and header drift.
+  # Standard library Python over a checkout. No network, no setup step.
+  # ---------------------------------------------------------------------------
+  conformance:
+    name: conformance (specs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Assert the runner Python is new enough for the checkers
+        run: |
+          python3 - <<'PY'
+          import sys
+          if sys.version_info < (3, 9):
+              raise SystemExit(f"need Python 3.9+, runner has {sys.version.split()[0]}")
+          print(f"python {sys.version.split()[0]}")
+          PY
+
+      - name: Relative links resolve
+        # A broken cross-reference in a specification is a real defect: it is how an
+        # implementer ends up reading a rule that no longer exists.
+        run: python3 scripts/check-links.py
+
+      - name: Security header quotations have not drifted
+        # The strict content-security profile is normative and defined in exactly one place.
+        # A quotation that drifts means two implementers read two different policies and both
+        # believe they conform.
+        run: python3 scripts/check-headers.py
+
+  # ---------------------------------------------------------------------------
+  # The registry implementation. This is the gate the repository did not have.
+  # ---------------------------------------------------------------------------
+  registry:
+    name: registry (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22.6 is the floor: the test script uses --experimental-strip-types, which does not
+        # exist before it. 24 is the forward check, so a Node change that breaks the strict
+        # decoder is found here rather than by a peer refusing our records.
+        node: ["22", "24"]
+    defaults:
+      run:
+        working-directory: registry
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: registry/package-lock.json
+
+      - name: Install exactly what the lockfile says
+        # `npm ci` rather than `npm install`: it fails on a lockfile that disagrees with
+        # package.json instead of quietly rewriting it.
+        run: npm ci
+
+      - name: Typecheck
+        # `node --test --experimental-strip-types` erases types without checking them, so the
+        # strictness options in tsconfig.json are verified by this step and nothing else.
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # Markdown lint. Kept separate because it is the only job that needs npm for the
+  # documentation corpus, and a package-index flake here must not red the code gate.
+  # ---------------------------------------------------------------------------
+  markdown:
+    name: markdown
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Lint markdown
+        # Version pinned rather than `npx --yes markdownlint-cli2`: the unpinned form resolves
+        # whatever is newest at run time and executes it, which is an unreviewed dependency
+        # with code execution inside CI.
+        #
+        # Globs come from .markdownlint-cli2.jsonc only. Passing them on the command line as
+        # well does not override the config — markdownlint-cli2 takes the UNION of both, so a
+        # command-line exclusion silently fails to exclude anything the config still matches.
+        run: npx --yes markdownlint-cli2@0.18.1
