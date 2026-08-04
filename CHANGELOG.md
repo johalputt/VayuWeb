@@ -10,6 +10,34 @@ it.
 
 ## [Unreleased]
 
+### Added
+
+- **Convergence and equivocation detection** (`registry/src/converge.ts`) — the consensus-critical
+  half of Phase 2, which is pure logic and needs no network. Two peers on either side of a
+  partition can each accept a valid first registration of the same free name; both did the work,
+  both are signed, neither is wrong. Every peer must independently reach the same answer without
+  asking anyone, because a rule that needs a coordinator is a rule that *has* one.
+
+  The three rules apply in order: sole valid candidate, then strictly earlier in the linearised
+  order, then smaller `record_hash` as a big-endian unsigned integer. Three details are load-
+  bearing and each is pinned by a test. Rule 2 is skipped entirely unless **every** candidate has
+  a linearised position — a peer that has not linearised both cannot know the order agrees
+  everywhere, and guessing from arrival order is precisely how two peers reach different answers
+  about the same pair. Rule 2 requires *strictly* earlier, so a tie falls through rather than
+  being broken arbitrarily. And the result is independent of the order candidates arrive in,
+  which is the property that makes it convergence rather than a race.
+
+  The loser is returned explicitly along with its transitively voided chain, not merely dropped.
+  REGISTRY.md requires a client to surface that rather than hide it behind a silent refresh:
+  someone registered a name, watched it succeed, and lost it through no fault of their own, and
+  a UI that quietly updates is lying about what happened. A caller that wants to ignore it has
+  to do so deliberately.
+
+  Equivocation — one owner signing two different records at the same `seq` — is detected and
+  distinguished from an honest partition conflict between two different owners. It is not
+  punished: there is no penalty mechanism in the protocol, and inventing one here would be
+  inventing consensus. The evidence is what the function returns.
+
 ### Adversarial review — second pass
 
 A deeper pass than the one that gated 0.1.0, over surfaces the first did not reach: the CBOR

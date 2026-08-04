@@ -21,11 +21,12 @@ record is valid — the part every peer must agree on byte for byte.
 | Index keyspace codec (`src/keys.ts`) | Implemented, tested |
 | Name lifecycle: grace, quarantine, revocation (`src/lifecycle.ts`) | Implemented, tested |
 | Local append-only log and index (`src/store.ts`) | Implemented, tested — **not** Hypercore |
+| Convergence and equivocation detection (`src/converge.ts`) | Implemented, tested |
 | Command-line tool (`src/cli.ts`, `bin/`) | Implemented |
 | Conformance vectors ([`../conformance/vectors.json`](../conformance/vectors.json)) | Registry rules only |
 | Hypercore log and Hyperbee index | Not started |
-| Peer replication and convergence | Not started |
-| Equivocation detection, checkpoints, light clients | Not started |
+| Peer replication (Hyperswarm/HyperDHT transport) | Not started |
+| Checkpoints and light clients | Not started |
 
 `src/store.ts` is a single-writer, file-backed log with an index rebuilt by replay. It is enough
 to finish and test Phase 1 without pulling in the peer-to-peer stack, and the difference from
@@ -101,7 +102,7 @@ Implemented from [`../docs/spec/REGISTRY.md`](../docs/spec/REGISTRY.md),
 [`NAMES.md`](../docs/spec/NAMES.md) and
 [`PROOF-OF-WORK.md`](../docs/spec/PROOF-OF-WORK.md).
 
-Implementing them found six defects in the specifications themselves, each recorded in
+Implementing them found eight defects in the specifications themselves, each recorded in
 [`../CHANGELOG.md`](../CHANGELOG.md) and fixed in the text as well as the code. Every one was
 invisible to reading and obvious to implementing.
 

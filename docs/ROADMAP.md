@@ -32,13 +32,14 @@ earlier one, but it cannot *finish* early.
 source code and without asking a question — and produce a client that would interoperate. That
 property is required by Constitution Article 44.6, and it is not satisfied today.
 
-Implementing the registry against these specifications has so far found six defects in them,
+Implementing the registry against these specifications has so far found eight defects in them,
 each recorded in `CHANGELOG.md`: two that would have made proof-of-work free or unnecessary, one
 that let an expired holder reclaim a name during quarantine, one that let a single renewal buy an
-unbounded term, one false justification in the index keyspace layout, and one difficulty ceiling
-that the schedule cannot reach. Every one was invisible to reading and obvious to implementing,
-which is the argument for treating the vector set as part of the specification rather than as
-test scaffolding.
+unbounded term, one false justification in the index keyspace layout, one difficulty ceiling that
+the schedule cannot reach, one name able to alias itself, and one keyspace codec that did not
+enforce the grammar its own design rests on. Every one was invisible to reading and obvious to
+implementing, which is the argument for treating the vector set as part of the specification
+rather than as test scaffolding.
 
 ## Phase 1 — Registry core
 
@@ -64,6 +65,11 @@ Hyperswarm and HyperDHT discovery; replication and verification of received reco
 convergence rule for conflicting first-registrations with its deterministic tie-break;
 equivocation detection; snapshot and checkpoint format so a light client can verify without
 replaying all history.
+
+**Partly done.** The convergence rule and equivocation detection are implemented and tested in
+`registry/src/converge.ts` — they are pure logic and needed no network. Discovery, replication,
+and the snapshot/checkpoint format remain, and they are the parts that cannot be finished
+without peers to test against.
 
 **Depends on:** Phase 1.
 
