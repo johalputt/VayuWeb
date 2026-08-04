@@ -1,0 +1,13 @@
+# Files permitted to contain 64-hex-character literals.
+#
+# The scan in .github/workflows/security.yml exists to catch an Ed25519 secret key pasted
+# into source during debugging. Some files legitimately carry constants of that shape. Each
+# exemption is listed here with its reason, so adding one is a one-line diff a reviewer sees
+# rather than a silent widening of a regex.
+#
+# Format: one path per line. Blank lines and # comments ignored.
+
+# The 14 encoded small-order Curve25519 points. Public constants, fixed by the curve itself,
+# and the reason strict verification can reject a self-certifying owner key. Not secret, and
+# not capable of becoming secret.
+registry/src/signature.ts

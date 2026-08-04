@@ -1,4 +1,4 @@
-name: ci
+name: CI — Build, Test and Specification Integrity
 
 # Every commit is gated here. The repository was documentation-only until the registry
 # implementation started, so this replaces the former docs-only workflow: markdown and link
@@ -133,3 +133,23 @@ jobs:
         # well does not override the config — markdownlint-cli2 takes the UNION of both, so a
         # command-line exclusion silently fails to exclude anything the config still matches.
         run: npx --yes markdownlint-cli2@0.18.1
+
+  ci-pass:
+    name: ci-pass
+    # One required status check rather than one per job, so branch protection does not need
+    # editing every time a job is added or a matrix leg changes. `if: always()` plus the
+    # explicit success comparison means a skipped or cancelled dependency fails here; a bare
+    # `needs:` would let a cancelled job pass for green.
+    needs: [conformance, registry, markdown]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every CI check succeeded
+        run: |
+          results="${{ join(needs.*.result, ' ') }}"
+          echo "results: $results"
+          for r in $results; do
+            [ "$r" = "success" ] || { echo "::error::a CI check did not succeed"; exit 1; }
+          done
+          echo "OK — build, test and specification integrity passed."

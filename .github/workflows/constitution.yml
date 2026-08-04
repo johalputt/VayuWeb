@@ -1,0 +1,129 @@
+name: Constitution — Charter Enforcement
+
+# The charter forbids specific things. Several of those prohibitions are decidable by a
+# script, and the ones that are get enforced here rather than trusted to review.
+#
+# What this workflow does NOT claim: it cannot decide whether a design honours the spirit of
+# an Article. A determined contributor routes around any grep. Every check here is scoped to
+# catching drift and accident — the honest failure mode — and is described that way in its own
+# output, because a check that overstates its reach makes maintainers trust CI more than it
+# deserves, which is worse than having no check.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: constitution-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # Article 4 and REGISTRY.md scope: "an implementation that adds a privileged writer, an
+  # admin key or a seizure path is not a VayuWeb registry."
+  no-privileged-writer:
+    name: no privileged writer
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - name: Source must not implement a privileged writer
+        # Scoped to source deliberately. The specifications and the Constitution discuss these
+        # words in order to prohibit them; matching prose would fail on the very documents that
+        # forbid the thing, which is how a check teaches people to ignore it.
+        run: |
+          if git grep -inE '\b(admin_?key|root_?key|master_?key|seizure|superuser|backdoor)\b' \
+               -- 'registry/src/*.ts' 'proxy/**' 'client/**' ':!*README.md'; then
+            echo "::error::privileged-writer vocabulary found in source"
+            exit 1
+          fi
+          echo "OK — no privileged-writer vocabulary in source."
+          echo "Scope note: accident and drift detection only. A determined author renames."
+
+  # Licence integrity: CC0 for charter/specs/artwork, MIT for code, and no CLA — ever.
+  licensing:
+    name: licensing and no-CLA
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - name: Licence texts are present
+        run: |
+          test -f LICENSE || { echo "::error::LICENSE missing"; exit 1; }
+          test -f LICENSES/CC0-1.0.txt || { echo "::error::CC0 text missing"; exit 1; }
+          test -f LICENSES/MIT.txt || { echo "::error::MIT text missing"; exit 1; }
+          echo "OK — both licence texts present."
+      - name: No Contributor Licence Agreement is introduced
+        # CONTRIBUTING.md states there will never be one. A CLA is how a project quietly
+        # acquires the power to relicense contributors' work, so its introduction should be a
+        # deliberate, visible act rather than a paragraph nobody re-read.
+        run: |
+          if git grep -inE 'sign (the|a) CLA|CLA[ -]?bot|contributor licen[cs]e agreement' \
+               -- . ':!CONTRIBUTING.md' ':!.github/workflows/constitution.yml'; then
+            echo "::error::a Contributor Licence Agreement appears to have been introduced"
+            exit 1
+          fi
+          grep -q 'no Contributor Licence Agreement' CONTRIBUTING.md || {
+            echo "::error::CONTRIBUTING.md no longer states that there is no CLA"; exit 1; }
+          echo "OK — no CLA, and CONTRIBUTING.md still says so."
+
+  # Article citations across the corpus must resolve to an Article that exists. A citation
+  # pointing at a renumbered or deleted Article is how a rule quietly stops applying.
+  citations:
+    name: article citations resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - name: Every cited Article exists
+        run: |
+          python3 - <<'PY'
+          import re, pathlib, sys
+
+          charter = pathlib.Path('constitution/CONSTITUTION.md').read_text(encoding='utf-8')
+          defined = set(int(n) for n in re.findall(r'^#+\s*Article\s+(\d+)', charter, re.M))
+          if not defined:
+              sys.exit("no Articles found in the charter — the parser or the file changed")
+
+          cited, bad = 0, []
+          for path in pathlib.Path('.').rglob('*.md'):
+              if any(p in path.parts for p in ('node_modules', 'dist', '.git')):
+                  continue
+              for n in re.findall(r'Article\s+(\d+)', path.read_text(encoding='utf-8')):
+                  cited += 1
+                  if int(n) not in defined:
+                      bad.append(f"{path}: Article {n}")
+
+          print(f"{len(defined)} Articles defined, {cited} citations checked")
+          if bad:
+              for b in sorted(set(bad)):
+                  print(f"::error::unresolvable citation — {b}")
+              sys.exit(1)
+          print("OK — every cited Article exists.")
+          PY
+
+  constitution-pass:
+    name: constitution-pass
+    # One required status check instead of one per job. Branch protection points here, so
+    # adding or renaming a job above does not mean editing repository settings — and a
+    # skipped or cancelled dependency cannot pass for success.
+    needs: [no-privileged-writer, licensing, citations]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every constitution check succeeded
+        run: |
+          results="${{ join(needs.*.result, ' ') }}"
+          echo "results: $results"
+          for r in $results; do
+            [ "$r" = "success" ] || { echo "::error::a constitution check did not succeed"; exit 1; }
+          done
+          echo "OK — charter enforcement passed."

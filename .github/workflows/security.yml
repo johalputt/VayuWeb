@@ -1,0 +1,193 @@
+name: Security — Threat Model Enforcement
+
+# The security profile and the threat model make claims. This workflow turns the decidable
+# ones into gates.
+#
+# Honest scoping, stated here rather than implied: a secret scanner catches the committed
+# key, not the exfiltrated one; a supply-chain check catches the drifting lockfile, not the
+# compromised maintainer. These are the failure modes that actually occur in a volunteer
+# project, and they are worth gating. They are not a substitute for the adversarial review
+# that Phase 0 of the roadmap requires.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, because a dependency advisory published after a merge is not caught by a
+    # per-commit gate. Scheduled runs stop after 60 days of repository inactivity, so this is
+    # a supplement to the per-commit jobs and never the only place a check lives.
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  secret-scan:
+    name: secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false, fetch-depth: 0 }
+      - name: No private keys or provider tokens are committed
+        run: |
+          if git grep -nE 'BEGIN (RSA|OPENSSH|PGP|EC|DSA) PRIVATE KEY|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{60,}|AKIA[0-9A-Z]{16}|-----BEGIN PRIVATE KEY-----' \
+               -- . ':!.github/workflows/security.yml'; then
+            echo "::error::a private key or provider token appears to be committed"
+            exit 1
+          fi
+          echo "OK — no committed private keys or provider tokens."
+
+      - name: An Ed25519 secret key never reaches the repository
+        # THREAT-MODEL.md: owner secret keys are "the only thing that establishes name
+        # control". The client is specified to keep them in the OS keychain, never in a
+        # config file and never in the log. A 64-hex-character literal in source is the
+        # shape such a key would take if someone pasted one in during debugging.
+        #
+        # Some files legitimately hold constants of that shape — the encoded small-order
+        # Curve25519 points, for one. Those are named in conformance/key-literal-allowlist.txt
+        # with a reason, so an exemption is a one-line diff a reviewer notices rather than a
+        # quietly widened regex.
+        run: |
+          python3 - <<'PY'
+          import pathlib, subprocess, sys
+
+          allow = {
+              line.strip()
+              for line in pathlib.Path('conformance/key-literal-allowlist.txt')
+              .read_text(encoding='utf-8').splitlines()
+              if line.strip() and not line.startswith('#')
+          }
+
+          found = subprocess.run(
+              ['git', 'grep', '-nE', r'\b[0-9a-fA-F]{64}\b',
+               '--', 'registry/src/*.ts', ':!*.test.ts'],
+              capture_output=True, text=True).stdout.splitlines()
+
+          hits = [line for line in found if line.split(':')[0] not in allow]
+          for hit in hits:
+              print(f"::error::key-shaped literal outside the allowlist — {hit}")
+          if hits:
+              sys.exit(1)
+
+          print(f"OK — no key-shaped literals outside {len(allow)} allowlisted file(s).")
+          print("Scope note: accident detection. A split or re-encoded constant is not caught.")
+          PY
+
+  supply-chain:
+    name: supply chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: registry
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: registry/package-lock.json
+
+      - name: Lockfile pins exact versions from one registry
+        # A range in a lockfile means two builds of the same commit can differ. A second
+        # registry means a dependency can be served by a host nobody audited.
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          lock = json.load(open('package-lock.json'))
+          packages = lock.get('packages', {})
+
+          loose = [k for k, v in packages.items()
+                   if k and 'version' in v and not v['version'][0].isdigit()]
+          registries = {v['resolved'].split('/')[2]
+                        for v in packages.values() if v.get('resolved')}
+
+          print(f"{len(packages)} lockfile entries, registries: {sorted(registries)}")
+          if loose:
+              sys.exit(f"non-exact versions: {loose}")
+          if not registries <= {'registry.npmjs.org'}:
+              sys.exit(f"unexpected registry: {sorted(registries)}")
+          print("OK — exact versions, single registry.")
+          PY
+
+      - name: Install is reproducible from the lockfile
+        # `npm ci` fails when package.json and the lockfile disagree, instead of silently
+        # rewriting the lockfile the way `npm install` would.
+        run: npm ci
+
+      - name: No known high-severity advisories
+        run: npm audit --audit-level=high
+
+      - name: Dependency count has not quietly grown
+        # Every dependency is code that runs in CI and, later, on a user's machine. A sudden
+        # jump is worth a human look; the ceiling is deliberately loose so it fires on a
+        # change of kind rather than on ordinary maintenance.
+        run: |
+          count=$(python3 -c "import json;print(len(json.load(open('package-lock.json'))['packages'])-1)")
+          echo "resolved packages: $count"
+          [ "$count" -le 40 ] || { echo "::error::dependency count $count exceeds 40"; exit 1; }
+
+  content-security:
+    name: content-security profile
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - name: The strict profile forbids the directives it says it forbids
+        # CONTENT-SECURITY.md defines the profile in exactly one place. These assertions are
+        # positive as well as negative on purpose: encoding `form-action` as "must be present
+        # and must be 'self'" stops someone "hardening" it to 'none' later and silently
+        # breaking every form, which a negative-only check would wave through.
+        run: |
+          python3 - <<'PY'
+          import re, pathlib, sys
+          text = pathlib.Path('docs/spec/CONTENT-SECURITY.md').read_text(encoding='utf-8')
+
+          failures = []
+          for bad in ("unsafe-inline", "unsafe-eval", "unsafe-hashes"):
+              # Permitted where the document explains why it is forbidden; forbidden inside
+              # the canonical policy block itself.
+              for block in re.findall(r'```[a-z]*\n(.*?)```', text, re.S):
+                  if 'default-src' in block and bad in block:
+                      failures.append(f"{bad} appears inside a canonical policy block")
+
+          required = ["default-src", "form-action", "frame-ancestors", "base-uri"]
+          for directive in required:
+              if directive not in text:
+                  failures.append(f"required directive {directive} is absent from the profile")
+
+          if failures:
+              for f in sorted(set(failures)):
+                  print(f"::error::{f}")
+              sys.exit(1)
+          print("OK — strict profile intact: no unsafe-* in a policy block, "
+                f"and all of {', '.join(required)} present.")
+          PY
+
+      - name: Header quotations have not drifted
+        run: python3 scripts/check-headers.py
+
+  security-pass:
+    name: security-pass
+    needs: [secret-scan, supply-chain, content-security]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every security check succeeded
+        run: |
+          results="${{ join(needs.*.result, ' ') }}"
+          echo "results: $results"
+          for r in $results; do
+            [ "$r" = "success" ] || { echo "::error::a security check did not succeed"; exit 1; }
+          done
+          echo "OK — threat-model enforcement passed."

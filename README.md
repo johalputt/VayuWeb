@@ -18,14 +18,32 @@
 <p align="center">
   <a href="https://github.com/johalputt/VayuWeb/actions/workflows/ci.yml"><img
     src="https://github.com/johalputt/VayuWeb/actions/workflows/ci.yml/badge.svg?branch=main"
-    alt="ci"></a>
+    alt="CI — build, test and specification integrity"></a>
+  <a href="https://github.com/johalputt/VayuWeb/actions/workflows/constitution.yml"><img
+    src="https://github.com/johalputt/VayuWeb/actions/workflows/constitution.yml/badge.svg?branch=main"
+    alt="Constitution — charter enforcement"></a>
+  <a href="https://github.com/johalputt/VayuWeb/actions/workflows/security.yml"><img
+    src="https://github.com/johalputt/VayuWeb/actions/workflows/security.yml/badge.svg?branch=main"
+    alt="Security — threat model enforcement"></a>
+</p>
+
+<p align="center">
   <a href="constitution/CONSTITUTION.md"><img
     src="https://img.shields.io/badge/charter-ratified-2dd4bf" alt="charter: ratified"></a>
+  <a href="docs/ROADMAP.md"><img
+    src="https://img.shields.io/badge/roadmap-phase%201-f59e0b" alt="roadmap: phase 1"></a>
   <a href="LICENSE"><img
     src="https://img.shields.io/badge/licence-CC0%20docs%20%C2%B7%20MIT%20code-blue"
     alt="licence: CC0 docs, MIT code"></a>
-  <a href="docs/ROADMAP.md"><img
-    src="https://img.shields.io/badge/roadmap-phase%201-f59e0b" alt="roadmap: phase 1"></a>
+  <a href="CONTRIBUTING.md"><img
+    src="https://img.shields.io/badge/CLA-none%2C%20ever-2dd4bf" alt="CLA: none, ever"></a>
+  <a href="docs/spec/PRIVACY.md"><img
+    src="https://img.shields.io/badge/telemetry-zero-2dd4bf" alt="telemetry: zero"></a>
+  <a href="registry/"><img
+    src="https://img.shields.io/badge/registry%20tests-69-blue" alt="registry tests: 69"></a>
+  <a href="docs/THREAT-MODEL.md"><img
+    src="https://img.shields.io/badge/threat%20model-published-2dd4bf"
+    alt="threat model: published"></a>
 </p>
 
 ---
