@@ -136,7 +136,10 @@ test('a longer log never shares a root with a shorter prefix of itself', () => {
 test('peak count matches the binary weight of the log length', () => {
   // A merkle mountain range has one peak per set bit in the leaf count.
   for (const n of [1, 2, 3, 4, 5, 7, 8, 15, 16, 23, 32]) {
-    const bits = n.toString(2).split('').filter((b) => b === '1').length;
+    const bits = n
+      .toString(2)
+      .split('')
+      .filter((b) => b === '1').length;
     assert.equal(treeOf(entries(n)).roots().length, bits, `length ${n}`);
   }
 });

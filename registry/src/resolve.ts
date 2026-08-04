@@ -111,8 +111,18 @@ export interface Diagnostics {
 }
 
 export type Outcome =
-  | { readonly ok: true; readonly entry: RecordEntry; readonly record: RegistryRecord; readonly diagnostics: Diagnostics }
-  | { readonly ok: false; readonly error: ResolveErrorName; readonly detail: string; readonly diagnostics: Diagnostics };
+  | {
+      readonly ok: true;
+      readonly entry: RecordEntry;
+      readonly record: RegistryRecord;
+      readonly diagnostics: Diagnostics;
+    }
+  | {
+      readonly ok: false;
+      readonly error: ResolveErrorName;
+      readonly detail: string;
+      readonly diagnostics: Diagnostics;
+    };
 
 /**
  * Everything the algorithm cannot decide by itself.
@@ -152,11 +162,12 @@ const emptyDiagnostics = (name: string): Diagnostics => ({
   aliasHops: 0,
 });
 
-const fail = (
-  error: ResolveErrorName,
-  detail: string,
-  diagnostics: Diagnostics,
-): Outcome => ({ ok: false, error, detail, diagnostics });
+const fail = (error: ResolveErrorName, detail: string, diagnostics: Diagnostics): Outcome => ({
+  ok: false,
+  error,
+  detail,
+  diagnostics,
+});
 
 /**
  * Step 9. Choose one content source from a record's entries.
@@ -180,11 +191,7 @@ export function selectSource(record: RegistryRecord): RecordEntry | null {
  * and must not fall back across an integrity failure, which signals an attack rather than an
  * availability problem.
  */
-export function resolveName(
-  host: string,
-  ports: ResolverPorts,
-  now: number,
-): Outcome {
+export function resolveName(host: string, ports: ResolverPorts, now: number): Outcome {
   let diagnostics = emptyDiagnostics(host);
   const seen = new Set<string>();
   let current = host;

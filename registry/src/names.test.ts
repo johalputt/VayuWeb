@@ -23,10 +23,19 @@ test('the ratified TLD set is exactly the eleven founding extensions', () => {
   // Wire-visible: REGISTRY.md rejects any TLD outside this set. A peer whose set differs by
   // one entry accepts names others refuse, which is a namespace fork. Adding to it requires a
   // ratified VWIP, so an accidental edit must fail here rather than ship.
-  assert.deepEqual(
-    [...RATIFIED_TLDS].sort(),
-    ['blog', 'dao', 'decent', 'free', 'indie', 'libre', 'news', 'open', 'p2p', 'sov', 'vayu'],
-  );
+  assert.deepEqual([...RATIFIED_TLDS].sort(), [
+    'blog',
+    'dao',
+    'decent',
+    'free',
+    'indie',
+    'libre',
+    'news',
+    'open',
+    'p2p',
+    'sov',
+    'vayu',
+  ]);
   assert.equal(RATIFIED_TLDS.size, 11);
 });
 

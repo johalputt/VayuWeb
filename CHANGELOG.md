@@ -12,6 +12,35 @@ it.
 
 ### Added
 
+- **CI grows from 14 jobs to 22**, across a new `quality.yml` and additions to the existing
+  workflows. Every new gate exists because the thing it forbids would disable a check that has
+  already caught a real defect here:
+  - **formatting** (Prettier, pinned) — an unformatted diff hides the change under the reflow.
+  - **source hygiene** — no `as any` or `as unknown as`, no `@ts-ignore`, no `test.only`, no
+    `console` from library code, no `Date.now`/`Math.random`, no unresolved TODO markers. The
+    cast rules matter because a cast is exactly what hid the dropped nonce that typecheck caught;
+    `test.only` matters because it turns a green run into a lie. Exceptions use an explicit
+    `hygiene:allow <reason>` comment, so every waiver states why, next to the code it excuses.
+  - **no unused exports** — the `deadcode-gate.sh` equivalent. 193 exports checked; an export is
+    a promise to a caller, and one nobody makes still has to be kept working.
+  - **reproducible build** — Article 51 requires it for releases. Weakest useful form (same
+    machine, same moment) and it still catches an embedded timestamp, path or iteration order.
+  - **conformance vectors are current** — moved out of the release workflow so it runs on every
+    commit; a stale artifact means second implementations are checked against bytes this one no
+    longer produces.
+  - **workflow security** — every workflow must declare `permissions`, third-party actions must
+    be pinned to a commit SHA rather than a movable tag, `pull_request_target` is refused, and
+    no secret beyond the automatic token may be used. CI runs with more authority than any
+    reader has, and it runs on every push with nobody watching.
+- **A determinism fuzz suite** (`registry/src/fuzz.test.ts`), seeded so a failure is replayable
+  rather than merely reported. It pins the property `record_hash` depends on: no two byte
+  strings decode to one value. Every single-byte mutation of a random encoding must either be
+  rejected outright or re-encode to something different — a mutation that decoded *and*
+  round-tripped to the original bytes would be a second encoding of one value, which is the
+  malleability the convergence tie-break cannot survive. Also fuzzed: arbitrary byte strings
+  never decode to something that fails to re-encode identically, incremental merkle appends
+  match a rebuild at random lengths, every leaf proves inclusion and no leaf proves another, and
+  timestamp byte order equals numeric order.
 - **The log's merkle tree and the checkpoint format** (`registry/src/merkle.ts`,
   `registry/src/checkpoint.ts`), closing an Article 44.6 gap rather than working around it.
   `REGISTRY.md` named `treeRoot` and required "Hypercore inclusion proofs" without ever stating

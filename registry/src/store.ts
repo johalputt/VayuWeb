@@ -31,13 +31,26 @@
  * makes a corrupted store undetectable.
  */
 
-import { openSync, readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import {
+  openSync,
+  readFileSync,
+  writeFileSync,
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+} from 'node:fs';
 import { closeSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 import { parseRecordBytes, type RegistryRecord } from './record.ts';
 import { recordHashFromBytes } from './domain.ts';
-import { verify, predecessorFrom, type Predecessor, type RegistryView, type Verdict } from './verify.ts';
+import {
+  verify,
+  predecessorFrom,
+  type Predecessor,
+  type RegistryView,
+  type Verdict,
+} from './verify.ts';
 import { verifyPow, rateWindow, requiredBits, EPOCH_SECONDS } from './pow.ts';
 import { lifecycleOf, isFullyReleased, GRACE_SECONDS, QUARANTINE_SECONDS } from './lifecycle.ts';
 

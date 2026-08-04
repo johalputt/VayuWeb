@@ -135,10 +135,7 @@ test('comparison separates real divergence from ordinary progress', () => {
   // Same length, different history: one of the two is wrong.
   const forked = entries(5);
   forked[4] = new Uint8Array(6).fill(0xff);
-  assert.equal(
-    compareCheckpoints(at5, checkpointOf(forked, index, records, NOW)),
-    'DIVERGED',
-  );
+  assert.equal(compareCheckpoints(at5, checkpointOf(forked, index, records, NOW)), 'DIVERGED');
 });
 
 test('identical history with different derived state is its own verdict', () => {
@@ -158,7 +155,15 @@ test('identical history with different derived state is its own verdict', () => 
 test('a name verifies against a claimed tree root without holding the log', () => {
   const log = entries(8);
   const root = treeOf(log).root();
-  const answer = verifyNameInclusion('atlas.vayu', log[3]!, proveInclusion(log, 3), root, 8, NOW, 3);
+  const answer = verifyNameInclusion(
+    'atlas.vayu',
+    log[3]!,
+    proveInclusion(log, 3),
+    root,
+    8,
+    NOW,
+    3,
+  );
 
   assert.equal(answer.verified, true);
   assert.equal(answer.peersAgreeing, 3);
@@ -171,7 +176,13 @@ test('a name verifies against a claimed tree root without holding the log', () =
 test('a single-peer answer says plainly that withholding is undetectable', () => {
   const log = entries(8);
   const answer = verifyNameInclusion(
-    'atlas.vayu', log[0]!, proveInclusion(log, 0), treeOf(log).root(), 8, NOW, 1,
+    'atlas.vayu',
+    log[0]!,
+    proveInclusion(log, 0),
+    treeOf(log).root(),
+    8,
+    NOW,
+    1,
   );
   assert.equal(answer.verified, true);
   assert.match(answer.detail, /single peer/);
@@ -181,7 +192,13 @@ test('a proof pointing past the claimed length is refused', () => {
   // Either a bug or a peer trying to have a record counted at a length that does not contain it.
   const log = entries(8);
   const answer = verifyNameInclusion(
-    'atlas.vayu', log[7]!, proveInclusion(log, 7), treeOf(log).root(), 4, NOW, 2,
+    'atlas.vayu',
+    log[7]!,
+    proveInclusion(log, 7),
+    treeOf(log).root(),
+    4,
+    NOW,
+    2,
   );
   assert.equal(answer.verified, false);
   assert.match(answer.detail, /leaf 7 but the log is 4/);

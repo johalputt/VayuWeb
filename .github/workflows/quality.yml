@@ -1,0 +1,118 @@
+name: Quality — Source Discipline
+
+# The gates that are not about correctness but about keeping correctness checkable.
+#
+# Everything here exists because the thing it forbids would disable a check that has already
+# caught a real defect in this repository: a cast that silences the compiler, a focused test that
+# turns a green run into a lie, an unused export that has to be maintained for nobody, a build
+# that does not reproduce.
+#
+# None of these tools are dependencies. They run through pinned `npx` invocations or are standard
+# library Python, so the registry's package count stays where the supply-chain check can reason
+# about it, and a lint tool cannot become a supply-chain surface for the protocol itself.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  format:
+    name: formatting
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v5
+        with: { node-version: "22" }
+      - name: Source is formatted
+        # Pinned rather than `npx --yes prettier`: the unpinned form resolves whatever is newest
+        # at run time and executes it, which is an unreviewed dependency with code execution
+        # inside CI. Formatting is not a matter of taste here — an unformatted diff hides the
+        # change under the reflow.
+        working-directory: registry
+        run: npx --yes prettier@3.6.2 --check "src/**/*.ts" "bin/**/*.ts" "scripts/**/*.ts"
+
+  hygiene:
+    name: source hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - name: No escape hatches, focused tests or ambient nondeterminism
+        # `as any`, @ts-ignore, test.only, console output from library code, Date.now and
+        # Math.random. Each has an explicit `hygiene:allow <reason>` waiver form, so an exception
+        # is a written decision next to the code rather than a silent one.
+        run: python3 scripts/check-source-hygiene.py
+
+  deadcode:
+    name: no unused exports
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - name: Every export is imported or tested
+        run: python3 scripts/check-deadcode.py
+
+  reproducible-build:
+    name: reproducible build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: registry/package-lock.json
+      - name: The same source builds to the same bytes twice
+        # Constitution Article 51 requires reproducible builds for releases. This is the weakest
+        # useful form of that promise — same machine, same moment — and it still catches a build
+        # that embeds a timestamp, a path or an iteration order. Failing it means the release
+        # artifact cannot be independently confirmed by anyone.
+        working-directory: registry
+        run: |
+          set -euo pipefail
+          npm ci
+          # Clear dist before the FIRST build as well. Building over a stale directory compares
+          # a mixture of two layouts against one, which reports a false failure — it did exactly
+          # that when this check was written.
+          rm -rf dist
+          npm run build
+          find dist -type f -exec sha256sum {} + | sort -k2 > /tmp/build-a.txt
+          rm -rf dist
+          npm run build
+          find dist -type f -exec sha256sum {} + | sort -k2 > /tmp/build-b.txt
+          if ! diff -u /tmp/build-a.txt /tmp/build-b.txt; then
+            echo "::error::the build is not reproducible — two builds of one tree differ"
+            exit 1
+          fi
+          echo "OK — $(wc -l < /tmp/build-a.txt) built file(s) are byte-identical across builds."
+
+  quality-pass:
+    name: quality-pass
+    needs: [format, hygiene, deadcode, reproducible-build]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every quality check succeeded
+        run: |
+          results="${{ join(needs.*.result, ' ') }}"
+          echo "results: $results"
+          for r in $results; do
+            [ "$r" = "success" ] || { echo "::error::a quality check did not succeed"; exit 1; }
+          done
+          echo "OK — source discipline holds."

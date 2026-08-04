@@ -176,9 +176,22 @@ jobs:
       - name: Header quotations have not drifted
         run: python3 scripts/check-headers.py
 
+  # CI runs with more authority than any reader has, so the workflows themselves get the same
+  # scrutiny as the protocol code. A compromised or over-permissioned workflow does everything a
+  # maintainer can, on every push, with nobody watching.
+  workflow-security:
+    name: workflow security
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - name: Workflows declare permissions, pin third-party actions and use no extra secrets
+        run: python3 scripts/check-workflows.py
+
   security-pass:
     name: security-pass
-    needs: [secret-scan, supply-chain, content-security]
+    needs: [secret-scan, supply-chain, content-security, workflow-security]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

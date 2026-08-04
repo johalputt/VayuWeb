@@ -171,10 +171,7 @@ function others(candidates: readonly Candidate[], winner: Candidate): Candidate[
  * chains onto a void predecessor, which is transitive — so a single lost registration can void
  * a year of updates, and the client has to say so.
  */
-export function voidedChain(
-  loser: Candidate,
-  chain: readonly Candidate[],
-): readonly Candidate[] {
+export function voidedChain(loser: Candidate, chain: readonly Candidate[]): readonly Candidate[] {
   const voided: Candidate[] = [loser];
   const voidHashes = [loser.hash];
 
@@ -182,9 +179,7 @@ export function voidedChain(
   const ordered = [...chain].sort((a, b) => a.record.seq - b.record.seq);
   for (const candidate of ordered) {
     if (candidate === loser) continue;
-    const chainsOntoVoid = voidHashes.some(
-      (h) => compareBytes(candidate.record.prevHash, h) === 0,
-    );
+    const chainsOntoVoid = voidHashes.some((h) => compareBytes(candidate.record.prevHash, h) === 0);
     if (chainsOntoVoid) {
       voided.push(candidate);
       voidHashes.push(candidate.hash);

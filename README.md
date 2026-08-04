@@ -25,6 +25,9 @@
   <a href="https://github.com/johalputt/VayuWeb/actions/workflows/security.yml"><img
     src="https://github.com/johalputt/VayuWeb/actions/workflows/security.yml/badge.svg?branch=main"
     alt="Security — threat model enforcement"></a>
+  <a href="https://github.com/johalputt/VayuWeb/actions/workflows/quality.yml"><img
+    src="https://github.com/johalputt/VayuWeb/actions/workflows/quality.yml/badge.svg?branch=main"
+    alt="Quality — source discipline"></a>
 </p>
 
 <p align="center">

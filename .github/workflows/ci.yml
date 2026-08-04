@@ -4,9 +4,11 @@ name: CI — Build, Test and Specification Integrity
 # implementation started, so this replaces the former docs-only workflow: markdown and link
 # integrity still matter, and now so does the code.
 #
-# Four jobs, deliberately. An earlier design had twenty, one per check, which buys nothing but
-# twenty required-status-check names to maintain and twenty chances for a dependency install to
-# flake a typo fix. Checks are grouped by what they need, not by what they assert.
+# Checks are grouped by what they NEED, not by what they assert: one job per distinct toolchain
+# and network requirement. Splitting one check per job would buy nothing but a longer list of
+# required-status-check names to maintain and more chances for a package index to red a typo fix.
+# Source discipline lives in quality.yml, charter rules in constitution.yml, and threat-model
+# rules in security.yml, for the same reason.
 #
 # Jobs that need no network do not get a language setup step: the runner already has python3,
 # and every checker in scripts/ is standard library only. That is not a preference, it is the
@@ -141,13 +143,45 @@ jobs:
         # command-line exclusion silently fails to exclude anything the config still matches.
         run: npx --yes markdownlint-cli2@0.18.1
 
+  # ---------------------------------------------------------------------------
+  # The conformance vectors are the interoperability contract. A committed artifact that no
+  # longer matches what the code generates means every second implementation is being checked
+  # against bytes this one no longer produces.
+  # ---------------------------------------------------------------------------
+  vectors:
+    name: conformance vectors are current
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: registry/package-lock.json
+
+      - name: Regenerate and require no diff
+        run: |
+          set -euo pipefail
+          npm --prefix registry ci
+          npm --prefix registry run vectors
+          if ! git diff --quiet -- conformance/vectors.json; then
+            echo "::error::conformance/vectors.json is stale — run 'npm run vectors' and commit"
+            git diff --stat -- conformance/vectors.json
+            exit 1
+          fi
+          echo "OK — the committed vectors match a fresh generation."
+
   ci-pass:
     name: ci-pass
     # One required status check rather than one per job, so branch protection does not need
     # editing every time a job is added or a matrix leg changes. `if: always()` plus the
     # explicit success comparison means a skipped or cancelled dependency fails here; a bare
     # `needs:` would let a cancelled job pass for green.
-    needs: [conformance, registry, markdown]
+    needs: [conformance, registry, markdown, vectors]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

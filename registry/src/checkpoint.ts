@@ -129,11 +129,7 @@ const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => {
   return diff === 0;
 };
 
-export type ComparisonResult =
-  | 'IDENTICAL'
-  | 'DIVERGED'
-  | 'DIFFERENT_LENGTH'
-  | 'INDEX_DIVERGED';
+export type ComparisonResult = 'IDENTICAL' | 'DIVERGED' | 'DIFFERENT_LENGTH' | 'INDEX_DIVERGED';
 
 /**
  * Compare two checkpoints.

@@ -92,8 +92,7 @@ const code = (v: Verdict): string =>
 /** The registered predecessor every successor test chains onto. */
 const PREV_BYTES = registration();
 const PREV = accepted(PREV_BYTES);
-const prevView = (over: Partial<RegistryView> = {}) =>
-  view({ current: () => PREV, ...over });
+const prevView = (over: Partial<RegistryView> = {}) => view({ current: () => PREV, ...over });
 
 const successor = (
   over: Record<string, CborValue>,
@@ -172,12 +171,24 @@ test('AUDIT: the same bound applies to every operation, not just RENEW', () => {
   // before `notAfter < notBefore` refuses it earlier and for a different reason. Just short of
   // the expiry is still a year in the future, which is the whole point.
   const cases = [
-    { op: 'UPDATE', notBefore: PREV.record.notAfter - 1, notAfter: PREV.record.notAfter,
-      records: [entry('txt', 'x')] as CborValue },
-    { op: 'REVOKE', notBefore: PREV.record.notAfter - 1, notAfter: PREV.record.notAfter,
-      records: [] as CborValue },
-    { op: 'RELEASE', notBefore: NOW + 10 * TERM_SECONDS, notAfter: NOW + 10 * TERM_SECONDS,
-      records: [] as CborValue },
+    {
+      op: 'UPDATE',
+      notBefore: PREV.record.notAfter - 1,
+      notAfter: PREV.record.notAfter,
+      records: [entry('txt', 'x')] as CborValue,
+    },
+    {
+      op: 'REVOKE',
+      notBefore: PREV.record.notAfter - 1,
+      notAfter: PREV.record.notAfter,
+      records: [] as CborValue,
+    },
+    {
+      op: 'RELEASE',
+      notBefore: NOW + 10 * TERM_SECONDS,
+      notAfter: NOW + 10 * TERM_SECONDS,
+      records: [] as CborValue,
+    },
   ];
   for (const c of cases) {
     assert.equal(code(verify(successor(c), prevView(), NOW + 600)), 'defer:CLOCK_SKEW', c.op);
@@ -223,7 +234,10 @@ test('a clock-skewed record is deferred, never rejected', () => {
   // Deferral matters: rejecting would make a verifier whose clock is a minute slow permanently
   // disagree with its peers about a valid record.
   const skewed = successor({ notBefore: NOW + 600 });
-  assert.equal(code(verify(skewed, prevView(), NOW + 600 - MAX_CLOCK_SKEW_SECONDS - 1)), 'defer:CLOCK_SKEW');
+  assert.equal(
+    code(verify(skewed, prevView(), NOW + 600 - MAX_CLOCK_SKEW_SECONDS - 1)),
+    'defer:CLOCK_SKEW',
+  );
   assert.equal(code(verify(skewed, prevView(), NOW + 600 - MAX_CLOCK_SKEW_SECONDS)), 'accept');
 });
 
@@ -345,7 +359,10 @@ test('a successor without an accepted predecessor is refused', () => {
 });
 
 test('a successor must be at least 300s after its predecessor', () => {
-  assert.equal(code(verify(successor({ notBefore: NOW + 299 }), prevView(), NOW + 600)), 'TOO_SOON');
+  assert.equal(
+    code(verify(successor({ notBefore: NOW + 299 }), prevView(), NOW + 600)),
+    'TOO_SOON',
+  );
   assert.equal(code(verify(successor({ notBefore: NOW + 300 }), prevView(), NOW + 600)), 'accept');
 });
 

@@ -239,7 +239,11 @@ function parseEntry(value: CborValue): RecordEntry {
         }
         break;
       case 'cid':
-        if (!(entryValue instanceof Uint8Array) || entryValue.length < 1 || entryValue.length > 64) {
+        if (
+          !(entryValue instanceof Uint8Array) ||
+          entryValue.length < 1 ||
+          entryValue.length > 64
+        ) {
           fail('BAD_RECORD_ENTRY', 'cid value must be 1-64 bytes');
         }
         break;
@@ -357,8 +361,20 @@ export function parseRecord(map: CborMap): RegistryRecord {
   if (op !== 'TRANSFER' && coSig !== null) fail('BAD_COSIG', `${op} must not carry coSig`);
 
   return {
-    version, op: op as Operation, name, tld, ownerKey, seq,
-    notBefore, notAfter, entries, powProof, prevHash, sig, coSig, map,
+    version,
+    op: op as Operation,
+    name,
+    tld,
+    ownerKey,
+    seq,
+    notBefore,
+    notAfter,
+    entries,
+    powProof,
+    prevHash,
+    sig,
+    coSig,
+    map,
   };
 }
 

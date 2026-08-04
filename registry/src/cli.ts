@@ -174,7 +174,9 @@ function cmdRegister(args: Args): number {
     // Refuse before the work rather than after it. Over-payment is valid and harmless;
     // under-payment is refused by the verifier, so solving first would burn the user's CPU to
     // reach a rejection that was predictable from the outset.
-    err(`--bits ${bits} is below the ${needed} bits this log requires for a ${label.length}-character`);
+    err(
+      `--bits ${bits} is below the ${needed} bits this log requires for a ${label.length}-character`,
+    );
     err(`label in .${tld}. The proof would be solved and then rejected. Raise it or omit --bits.`);
     return 1;
   }
@@ -237,8 +239,7 @@ function cmdSuccessor(op: string, args: Args): number {
 
   if (op === 'RELEASE') notAfter = now;
 
-  const ownerKey =
-    op === 'TRANSFER' ? fromHex(required(args, 'to')) : prev.ownerKey;
+  const ownerKey = op === 'TRANSFER' ? fromHex(required(args, 'to')) : prev.ownerKey;
 
   const build = (proof: CborValue): CborMap =>
     new Map<string | Uint8Array, CborValue>([
@@ -416,7 +417,11 @@ function cmdVectors(): number {
     };
     const v = verify(fromHex(vector.record), view, vector.now);
     const actual =
-      v.outcome === 'accept' ? 'accept' : v.outcome === 'defer' ? `defer:${v.reason}` : `reject:${v.code}`;
+      v.outcome === 'accept'
+        ? 'accept'
+        : v.outcome === 'defer'
+          ? `defer:${v.reason}`
+          : `reject:${v.code}`;
     const want =
       vector.expect.outcome === 'accept'
         ? 'accept'

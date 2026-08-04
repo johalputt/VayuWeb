@@ -1,7 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { encode, decode, isDeterministic, CborError, type CborMap, type CborValue } from './cbor.ts';
+import {
+  encode,
+  decode,
+  isDeterministic,
+  CborError,
+  type CborMap,
+  type CborValue,
+} from './cbor.ts';
 
 const hex = (s: string): Uint8Array =>
   Uint8Array.from(s.match(/../g)?.map((b) => parseInt(b, 16)) ?? []);
@@ -100,7 +107,10 @@ test('a duplicate map key is rejected in both directions', () => {
   const dup = new Map<string | Uint8Array, number>();
   dup.set(Uint8Array.of(1), 1);
   dup.set(Uint8Array.of(1), 2);
-  assert.throws(() => encode(dup as CborMap), (e: unknown) => e instanceof CborError && e.code === 'DUPLICATE_KEY');
+  assert.throws(
+    () => encode(dup as CborMap),
+    (e: unknown) => e instanceof CborError && e.code === 'DUPLICATE_KEY',
+  );
   assert.ok(encode(m as CborMap).length > 0);
 });
 
@@ -135,9 +145,18 @@ test('null is the only simple value in the profile', () => {
 });
 
 test('negative and non-integer numbers are refused on encode', () => {
-  assert.throws(() => encode(-1), (e: unknown) => e instanceof CborError && e.code === 'NEGATIVE_INT');
-  assert.throws(() => encode(1.5), (e: unknown) => e instanceof CborError && e.code === 'NON_INTEGER');
-  assert.throws(() => encode(NaN), (e: unknown) => e instanceof CborError && e.code === 'NON_INTEGER');
+  assert.throws(
+    () => encode(-1),
+    (e: unknown) => e instanceof CborError && e.code === 'NEGATIVE_INT',
+  );
+  assert.throws(
+    () => encode(1.5),
+    (e: unknown) => e instanceof CborError && e.code === 'NON_INTEGER',
+  );
+  assert.throws(
+    () => encode(NaN),
+    (e: unknown) => e instanceof CborError && e.code === 'NON_INTEGER',
+  );
 });
 
 /* -------------------------------------------------------------------------- */

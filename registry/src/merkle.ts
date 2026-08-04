@@ -235,7 +235,9 @@ export function proveInclusion(entries: readonly Uint8Array[], leafIndex: number
     }
   }
 
-  const rootIndex = peakSpans.findIndex((p) => leafIndex >= p.start && leafIndex < p.start + p.span);
+  const rootIndex = peakSpans.findIndex(
+    (p) => leafIndex >= p.start && leafIndex < p.start + p.span,
+  );
   const covering = peakSpans[rootIndex]!;
 
   const siblings: Root[] = [];
@@ -291,11 +293,7 @@ function subtreeRoot(entries: readonly Uint8Array[], start: number, span: number
  * detect that. REGISTRY.md says so too. Callers must query several independent peers, take the
  * greatest verified length, and show that length with every answer.
  */
-export function verifyInclusion(
-  data: Uint8Array,
-  proof: Proof,
-  expectedRoot: Uint8Array,
-): boolean {
+export function verifyInclusion(data: Uint8Array, proof: Proof, expectedRoot: Uint8Array): boolean {
   if (data.length !== proof.leafSize) return false;
   if (proof.siblings.length !== proof.siblingIsLeft.length) return false;
   if (proof.rootIndex < 0 || proof.rootIndex >= proof.roots.length) return false;

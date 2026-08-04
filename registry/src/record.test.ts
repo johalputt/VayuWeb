@@ -73,6 +73,7 @@ test('a well-formed REGISTER parses', () => {
 
 test('required fields are required', () => {
   for (const field of ['version', 'op', 'name', 'tld', 'ownerKey', 'seq', 'records', 'powProof']) {
+    // hygiene:allow the point of the test is to pass what the type forbids
     rejects(record({ [field]: undefined as unknown as CborValue }), 'MISSING_FIELD');
   }
 });
@@ -117,10 +118,7 @@ test('notAfter may not precede notBefore', () => {
 
 test('REGISTER and RENEW require a proof; the other four forbid one', () => {
   rejects(record({ powProof: null }), 'MISSING_POW');
-  rejects(
-    record({ op: 'UPDATE', seq: 1, prevHash: new Uint8Array(32).fill(1) }),
-    'UNEXPECTED_POW',
-  );
+  rejects(record({ op: 'UPDATE', seq: 1, prevHash: new Uint8Array(32).fill(1) }), 'UNEXPECTED_POW');
 });
 
 test('a proof carrying its own cost parameters or salt is refused', () => {
@@ -180,10 +178,7 @@ test('AUDIT: a name may not alias itself', () => {
   rejects(record({ records: [entry('alias', 'atlas.vayu')] }), 'BAD_RECORD_ENTRY');
 
   // Same label under a different TLD is a different name, and stays legal.
-  assert.equal(
-    parseRecord(record({ records: [entry('alias', 'atlas.p2p')] })).entries.length,
-    1,
-  );
+  assert.equal(parseRecord(record({ records: [entry('alias', 'atlas.p2p')] })).entries.length, 1);
 });
 
 test('an unknown entry type is retained but marked not to be acted upon', () => {

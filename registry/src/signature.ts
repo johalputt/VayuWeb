@@ -155,7 +155,10 @@ export function assertValidSignature(
  */
 export function sign(secretKey: Uint8Array, message: Uint8Array): Uint8Array {
   if (secretKey.length !== SECRET_KEY_LENGTH) {
-    throw new SignatureError('BAD_KEY_LENGTH', `secret key must be 32 bytes, got ${secretKey.length}`);
+    throw new SignatureError(
+      'BAD_KEY_LENGTH',
+      `secret key must be 32 bytes, got ${secretKey.length}`,
+    );
   }
   return ed25519.sign(message, secretKey);
 }
@@ -163,14 +166,16 @@ export function sign(secretKey: Uint8Array, message: Uint8Array): Uint8Array {
 /** Derive the public key for a secret key. */
 export function publicKeyFrom(secretKey: Uint8Array): Uint8Array {
   if (secretKey.length !== SECRET_KEY_LENGTH) {
-    throw new SignatureError('BAD_KEY_LENGTH', `secret key must be 32 bytes, got ${secretKey.length}`);
+    throw new SignatureError(
+      'BAD_KEY_LENGTH',
+      `secret key must be 32 bytes, got ${secretKey.length}`,
+    );
   }
   return ed25519.getPublicKey(secretKey);
 }
 
 /** The Ed25519 group order L, as a bigint. A canonical `S` satisfies `0 <= S < L`. */
-export const GROUP_ORDER =
-  0x1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3edn;
+export const GROUP_ORDER = 0x1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3edn;
 
 /**
  * True when the `S` half of a signature is canonically reduced.

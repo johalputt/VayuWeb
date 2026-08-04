@@ -221,7 +221,13 @@ test('the declared 20-bit cap is unreachable: the schedule tops out at 18', () =
   // that fails here first.
   let reachable = 0;
   for (let length = 1; length <= 63; length += 1) {
-    for (const volume of [0, RATE_FLOOR, RATE_FLOOR * 2, RATE_FLOOR * 256, RATE_FLOOR * 1_000_000]) {
+    for (const volume of [
+      0,
+      RATE_FLOOR,
+      RATE_FLOOR * 2,
+      RATE_FLOOR * 256,
+      RATE_FLOOR * 1_000_000,
+    ]) {
       reachable = Math.max(reachable, requiredBits(length, volume));
     }
   }
@@ -275,6 +281,7 @@ test('the bit test examines the whole tag with no early exit', () => {
       return Reflect.get(target, prop);
     },
   });
+  // hygiene:allow the Proxy is the instrument under test; there is no honest type for it
   tagSatisfies(probe as unknown as Uint8Array, 1);
   assert.equal(read.size, 32, 'every byte must be read regardless of the verdict');
 });

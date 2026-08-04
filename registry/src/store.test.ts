@@ -37,7 +37,13 @@ const entry = (type: string, value: CborValue): CborMap =>
 const solved = new Map<string, Uint8Array>();
 
 function registration(over: Record<string, CborValue> = {}, at = NOW): Uint8Array {
-  const key = JSON.stringify([at, Object.keys(over).sort(), String(over['name']), String(over['records']), String(over['notBefore'])]);
+  const key = JSON.stringify([
+    at,
+    Object.keys(over).sort(),
+    String(over['name']),
+    String(over['records']),
+    String(over['notBefore']),
+  ]);
   const hit = solved.get(key);
   if (hit !== undefined) return hit;
   const built = solveRegistration(over, at);
@@ -126,7 +132,10 @@ test('replay re-verifies rather than trusting what is already on disk', () => {
   file[file.length - 1] ^= 0xff;
   writeFileSync(path, file);
 
-  assert.throws(() => Store.open(path, NOW), (e: unknown) => e instanceof Error);
+  assert.throws(
+    () => Store.open(path, NOW),
+    (e: unknown) => e instanceof Error,
+  );
 });
 
 test('a record appended to the log out of band is refused on reopen', () => {
@@ -137,7 +146,10 @@ test('a record appended to the log out of band is refused on reopen', () => {
   store.append(registration(), NOW);
 
   // A second registration of the same name, appended directly.
-  appendFileSync(path, frame(registration({ notBefore: NOW + 600, notAfter: NOW + 600 + TERM_SECONDS }, NOW + 600)));
+  appendFileSync(
+    path,
+    frame(registration({ notBefore: NOW + 600, notAfter: NOW + 600 + TERM_SECONDS }, NOW + 600)),
+  );
 
   assert.throws(
     () => Store.open(path, NOW),
@@ -257,17 +269,11 @@ test('the sorted rate index survives out-of-order arrival', () => {
   // notBefore is genuinely EARLIER than the first's. Backdating by 7200s is within the 86400s
   // the verifier allows, so both are valid; only the index ordering is exercised.
   store.append(
-    registration(
-      { name: 'atlasobservatory', notBefore: at, notAfter: at + TERM_SECONDS },
-      at,
-    ),
+    registration({ name: 'atlasobservatory', notBefore: at, notAfter: at + TERM_SECONDS }, at),
     at,
   );
   store.append(
-    registration(
-      { name: 'zenithobservatory', notBefore: NOW, notAfter: NOW + TERM_SECONDS },
-      NOW,
-    ),
+    registration({ name: 'zenithobservatory', notBefore: NOW, notAfter: NOW + TERM_SECONDS }, NOW),
     at,
   );
 

@@ -137,11 +137,7 @@ function clockVerdict(notBefore: number, now: number): Verdict | null {
  * bytes, and a verifier that parsed elsewhere and verified here could be handed a parsed object
  * that no longer corresponds to the bytes its hash was taken over.
  */
-export function verify(
-  bytes: Uint8Array,
-  state: RegistryView,
-  now: number,
-): Verdict {
+export function verify(bytes: Uint8Array, state: RegistryView, now: number): Verdict {
   // Framing first. A record that is not the unique deterministic encoding of its own content
   // has a malleable record_hash, and record_hash is the convergence tie-break.
   if (bytes.length > MAX_RECORD_BYTES) {
@@ -217,10 +213,7 @@ export function verify(
   // which reclaims the name ahead of everyone waiting the window out — and quarantine exists
   // precisely so that nobody can take it during that window.
   if (!acceptsSuccessor(prev, now, record.op)) {
-    return reject(
-      'EXPIRED',
-      `${record.name}.${record.tld} is not live enough for ${record.op}`,
-    );
+    return reject('EXPIRED', `${record.name}.${record.tld} is not live enough for ${record.op}`);
   }
   // Authority comes from the PREDECESSOR's key. On a TRANSFER the incoming key signs the
   // countersignature, never the record itself.

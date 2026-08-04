@@ -251,11 +251,15 @@ export function buildVectors(): Vector[] {
     {
       name: 'schema/small-order-owner-key',
       rule: 'A small-order point certifies signatures its holder never produced',
-      record: toHex(registration({ ownerKey: (() => {
-        const k = new Uint8Array(32);
-        k[0] = 1;
-        return k;
-      })() })),
+      record: toHex(
+        registration({
+          ownerKey: (() => {
+            const k = new Uint8Array(32);
+            k[0] = 1;
+            return k;
+          })(),
+        }),
+      ),
       now: VECTOR_NOW,
       state: FRESH,
       expect: rejectWith('BAD_KEY'),
@@ -263,11 +267,15 @@ export function buildVectors(): Vector[] {
     {
       name: 'schema/pow-carrying-cost-parameters',
       rule: 'REGISTRY.md: powProof is {alg, nonce, bits}; cost parameters are protocol constants',
-      record: toHex(registration({ powProof: (() => {
-        const p = powProof();
-        p.set('m', 8);
-        return p;
-      })() })),
+      record: toHex(
+        registration({
+          powProof: (() => {
+            const p = powProof();
+            p.set('m', 8);
+            return p;
+          })(),
+        }),
+      ),
       now: VECTOR_NOW,
       state: FRESH,
       expect: rejectWith('BAD_POW_SHAPE'),
@@ -275,11 +283,15 @@ export function buildVectors(): Vector[] {
     {
       name: 'schema/pow-carrying-salt',
       rule: 'PROOF-OF-WORK.md: the salt is derived from the record, never carried by it',
-      record: toHex(registration({ powProof: (() => {
-        const p = powProof();
-        p.set('salt', new Uint8Array(16));
-        return p;
-      })() })),
+      record: toHex(
+        registration({
+          powProof: (() => {
+            const p = powProof();
+            p.set('salt', new Uint8Array(16));
+            return p;
+          })(),
+        }),
+      ),
       now: VECTOR_NOW,
       state: FRESH,
       expect: rejectWith('BAD_POW_SHAPE'),
@@ -287,9 +299,7 @@ export function buildVectors(): Vector[] {
     {
       name: 'schema/alias-beside-another-entry',
       rule: 'REGISTRY.md: a name is either a pointer or a destination',
-      record: toHex(
-        registration({ records: [entry('alias', 'zenith.vayu'), entry('txt', 'x')] }),
-      ),
+      record: toHex(registration({ records: [entry('alias', 'zenith.vayu'), entry('txt', 'x')] })),
       now: VECTOR_NOW,
       state: FRESH,
       expect: rejectWith('BAD_RECORD_ENTRY'),
@@ -561,9 +571,7 @@ export function buildVectors(): Vector[] {
     {
       name: 'lifecycle/release-expires-immediately',
       rule: 'REGISTRY.md RELEASE: records empty and notAfter == notBefore',
-      record: toHex(
-        successor({ op: 'RELEASE', records: [], notAfter: VECTOR_NOW + 600 }),
-      ),
+      record: toHex(successor({ op: 'RELEASE', records: [], notAfter: VECTOR_NOW + 600 })),
       now: VECTOR_NOW + 600,
       state: HELD,
       expect: accept,

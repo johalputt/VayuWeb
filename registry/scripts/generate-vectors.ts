@@ -12,7 +12,13 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { buildVectors, VECTOR_NOW, VECTOR_OWNER_KEY, VECTOR_OTHER_KEY, toHex } from '../src/vectors.ts';
+import {
+  buildVectors,
+  VECTOR_NOW,
+  VECTOR_OWNER_KEY,
+  VECTOR_OTHER_KEY,
+  toHex,
+} from '../src/vectors.ts';
 
 const OUT = fileURLToPath(new URL('../../conformance/vectors.json', import.meta.url));
 

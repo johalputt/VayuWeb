@@ -32,7 +32,11 @@ const entry = (type: string, value: CborValue): CborMap =>
     ['value', value],
   ]);
 
-function rec(name: string, entries: CborValue[], over: Record<string, CborValue> = {}): RegistryRecord {
+function rec(
+  name: string,
+  entries: CborValue[],
+  over: Record<string, CborValue> = {},
+): RegistryRecord {
   const m = new Map<string | Uint8Array, CborValue>([
     ['version', 1],
     ['op', 'REGISTER'],
@@ -152,11 +156,20 @@ test('sources are preferred immutable first, and txt is never a source', () => {
   assert.equal(selectSource(all)?.type, 'cid');
 
   assert.equal(
-    selectSource(rec('atlas', [entry('txt', 'x'), entry('ipns', 'k5'), entry('peer', new Uint8Array(32))]))?.type,
+    selectSource(
+      rec('atlas', [entry('txt', 'x'), entry('ipns', 'k5'), entry('peer', new Uint8Array(32))]),
+    )?.type,
     'ipns',
   );
-  assert.equal(selectSource(rec('atlas', [entry('txt', 'x'), entry('peer', new Uint8Array(32))]))?.type, 'peer');
-  assert.equal(selectSource(rec('atlas', [entry('txt', 'only text')])), null, 'txt is not a source');
+  assert.equal(
+    selectSource(rec('atlas', [entry('txt', 'x'), entry('peer', new Uint8Array(32))]))?.type,
+    'peer',
+  );
+  assert.equal(
+    selectSource(rec('atlas', [entry('txt', 'only text')])),
+    null,
+    'txt is not a source',
+  );
   assert.deepEqual([...SOURCE_ORDER], ['cid', 'ipns', 'peer', 'alias']);
 });
 
