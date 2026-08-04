@@ -96,7 +96,7 @@ record_hash   = BLAKE2b-256("VayuWeb-Registry-Hash-v1" || 0x00 || det_cbor(full)
 ```
 
 `core` is the record map with `sig` and `coSig` removed; `full` is the complete map including
-them. Each prefix is the literal ASCII string (23 and 21 bytes) followed by one `0x00`, so a
+them. Each prefix is the literal ASCII string (26 and 24 bytes) followed by one `0x00`, so a
 registry-record signature can never be replayed over another VayuWeb structure and can never be
 read as a hash preimage; every other signed structure SHALL use a distinct prefix. BLAKE2b-256
 is chosen because Hypercore already uses it, so a node needs one hash primitive.
