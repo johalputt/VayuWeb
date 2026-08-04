@@ -26,6 +26,7 @@ import {
 } from './record.ts';
 import { recordHashFromBytes, signingInput, isZeroHash, bytesEqual } from './domain.ts';
 import { verifyStrict } from './signature.ts';
+import { acceptsSuccessor } from './lifecycle.ts';
 
 /** A registration term is exactly one year. Not "about" a year: an exact equality is checked. */
 export const TERM_SECONDS = 31_536_000;
@@ -49,7 +50,8 @@ export type VerifyRejection =
   | 'NO_PREDECESSOR'
   | 'TOO_SOON'
   | 'REVOKED'
-  | 'BAD_OWNER';
+  | 'BAD_OWNER'
+  | 'EXPIRED';
 
 /**
  * A record whose term starts beyond the skew tolerance is neither accepted nor rejected: the
@@ -208,6 +210,17 @@ export function verify(
   if (clock !== null) return clock;
   if (state.revoked(record.name, record.tld)) {
     return reject('REVOKED', 'the name has been revoked and accepts no further records');
+  }
+  // "a previous accepted record prev for name.tld still inside its term or grace period".
+  // REGISTRY.md states this among the chain rules but omits it from the verify() pseudocode.
+  // Without it a holder whose grace has lapsed can still UPDATE or TRANSFER during quarantine,
+  // which reclaims the name ahead of everyone waiting the window out — and quarantine exists
+  // precisely so that nobody can take it during that window.
+  if (!acceptsSuccessor(prev, now, record.op)) {
+    return reject(
+      'EXPIRED',
+      `${record.name}.${record.tld} is not live enough for ${record.op}`,
+    );
   }
   // Authority comes from the PREDECESSOR's key. On a TRANSFER the incoming key signs the
   // countersignature, never the record itself.

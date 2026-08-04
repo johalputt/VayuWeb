@@ -16,6 +16,7 @@ import { encode, type CborMap, type CborValue } from './cbor.ts';
 import { signingInput } from './domain.ts';
 import { sign, publicKeyFrom } from './signature.ts';
 import { POW_ALGORITHM, POW_NONCE_LENGTH } from './pow.ts';
+import { lifecycleOf } from './lifecycle.ts';
 
 const OWNER_SECRET = new Uint8Array(32).fill(0x42);
 const OWNER_KEY = publicKeyFrom(OWNER_SECRET);
@@ -264,6 +265,54 @@ test('TRANSFER requires a countersignature from the incoming key', () => {
     code(verify(successor(base, OWNER_SECRET, THIEF_SECRET), prevView(), NOW + 600)),
     'accept',
   );
+});
+
+test('AUDIT: an expired holder cannot reclaim the name during quarantine', () => {
+  // REGISTRY.md states among the chain rules that prev must be "still inside its term or grace
+  // period", but its verify() pseudocode omits the check entirely — it carries only revoked().
+  //
+  // Implemented literally, a holder whose grace has lapsed can still sign an UPDATE or a
+  // TRANSFER while the name sits in quarantine. That reclaims it ahead of everyone waiting the
+  // window out, and quarantine exists precisely so that nobody may take the name during it. The
+  // former holder would be the one party able to.
+  const life = lifecycleOf(PREV.record);
+  const renewal = (at: number) =>
+    successor({
+      op: 'RENEW',
+      notBefore: at,
+      notAfter: Math.max(PREV.record.notAfter, at) + TERM_SECONDS,
+      powProof: pow(),
+    });
+
+  // Inside grace a renewal is still the owner's right — that is what grace is for.
+  const inGrace = life.liveUntil + 1;
+  assert.equal(code(verify(renewal(inGrace), prevView(), inGrace)), 'accept');
+
+  // Once grace lapses the name is on its way back to the pool, and the former holder is the
+  // one party who must not be able to take it back.
+  const inQuarantine = life.graceUntil + 1;
+  assert.equal(code(verify(renewal(inQuarantine), prevView(), inQuarantine)), 'EXPIRED');
+});
+
+test('only RENEW may act during grace; the others need a live predecessor', () => {
+  // REGISTRY.md draws the line in two places: RENEW names "prev live or within its 30-day grace
+  // period", every other operation names "a live prev". There is nothing to update, transfer or
+  // release once the term has run out.
+  const life = lifecycleOf(PREV.record);
+  const inGrace = life.liveUntil + 1;
+
+  const transfer = successor(
+    {
+      op: 'TRANSFER',
+      ownerKey: THIEF_KEY,
+      notAfter: PREV.record.notAfter,
+      records: [],
+      notBefore: PREV.record.notAfter - 1,
+    },
+    OWNER_SECRET,
+    THIEF_SECRET,
+  );
+  assert.equal(code(verify(transfer, prevView(), inGrace)), 'EXPIRED');
 });
 
 test('a revoked name accepts nothing further, whoever signs it', () => {

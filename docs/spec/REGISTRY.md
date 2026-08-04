@@ -281,6 +281,12 @@ verify(rec, bytes, state):
   if rec.notBefore < prev.notBefore + 300:    reject TOO_SOON
   clock_check(rec)
   if revoked(rec.name, rec.tld):              reject REVOKED
+  // The chain rules require prev "still inside its term or grace period". RENEW may act in
+  // grace; every other operation needs a live prev. See "Expiry is a precondition" below.
+  if rec.op == RENEW:
+      if now >= prev.notAfter + 2592000:      reject EXPIRED
+  else:
+      if now >= prev.notAfter:                reject EXPIRED
   if not ed25519_strict(prev.ownerKey, input, rec.sig): reject BAD_SIG
   if rec.op != TRANSFER and rec.ownerKey != prev.ownerKey: reject BAD_OWNER
   if rec.op != RENEW and rec.powProof != null:             reject UNEXPECTED_POW
@@ -301,6 +307,27 @@ verify(rec, bytes, state):
 
 `state.current` reflects the verifier's own linearised log only. Verification makes no network
 call: a verifier that asks another peer for a verdict has replaced verification with trust.
+
+### Expiry is a precondition, not a consequence
+
+The chain rules above require a predecessor "still inside its term or grace period", and an
+earlier revision of the pseudocode omitted that check — it carried `revoked()` and nothing else.
+Implemented literally, a holder whose grace has lapsed can still sign an `UPDATE` or a
+`TRANSFER` while the name sits in quarantine, which reclaims it ahead of everyone waiting the
+window out. Quarantine exists precisely so that nobody may take the name during it, and the
+former holder is the one party who must not be able to.
+
+The line falls in two places, matching the per-operation preconditions:
+
+- `RENEW` may act while the name is live **or in grace**. That is what grace is for: a missed
+  renewal is meant to be recoverable.
+- `UPDATE`, `TRANSFER`, `RELEASE` and `REVOKE` require a **live** predecessor. There is nothing
+  to update, transfer or release once the term has run out.
+
+For the second group the requirement is close to implied — `notAfter == prev.notAfter` together
+with `notAfter >= notBefore` already forces the term start below the old expiry — but "close to
+implied" is not a rule, and an implementation that relies on it returns the wrong rejection
+code, which is itself wire-visible.
 
 ### Term bounds and the clock
 

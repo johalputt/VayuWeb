@@ -95,6 +95,13 @@ the registry core; the scheme will be set by a VWIP before then, not improvised 
   its author ever signs — a single proof of work buying unlimited names. `powProof` is now the
   three-field triple `{alg, nonce, bits}`, a proof carrying any of the four removed fields is
   rejected rather than ignored, and the salt is derived from the record's canonical bytes.
+- **Expiry was stated as a chain rule but missing from the verification pseudocode.** The prose
+  requires a predecessor "still inside its term or grace period"; the pseudocode carried only
+  `revoked()`. Implemented literally, a holder whose grace had lapsed could still sign an
+  `UPDATE` or a `TRANSFER` while the name sat in quarantine — reclaiming it ahead of everyone
+  waiting the window out, when quarantine exists so that nobody may take the name during it.
+  The check is now in the pseudocode and in the verifier, drawn where the per-operation
+  preconditions draw it: `RENEW` may act in grace, the other four need a live predecessor.
 - **The index keyspace justified itself with a false claim.** `REGISTRY.md` said key components
   "contain no `0x00` (guaranteed by the label grammar and by fixed-width integers)". True of
   `tld` and `label`; false of the two it names as guaranteed. A `u64be` timestamp in this
