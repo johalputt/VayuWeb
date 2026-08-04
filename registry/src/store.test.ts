@@ -26,8 +26,27 @@ const entry = (type: string, value: CborValue): CborMap =>
     ['value', value],
   ]);
 
-/** Build, solve and sign a registration that the store will actually accept. */
+/**
+ * Solved registrations, memoised by their inputs.
+ *
+ * Every entry costs a real Argon2id search at 64 MiB per evaluation, and most tests here want
+ * the same record. Solving it once per distinct input keeps the suite inside CI's timeout
+ * without weakening anything: the proof is still genuine, still verified by the store, and
+ * `solvePow` is still exercised — just not ten times for one answer.
+ */
+const solved = new Map<string, Uint8Array>();
+
 function registration(over: Record<string, CborValue> = {}, at = NOW): Uint8Array {
+  const key = `${at}|${JSON.stringify(Object.keys(over).sort())}|${String(over['records'])}|${String(over['notBefore'])}`;
+  const hit = solved.get(key);
+  if (hit !== undefined) return hit;
+  const built = solveRegistration(over, at);
+  solved.set(key, built);
+  return built;
+}
+
+/** Build, solve and sign a registration that the store will actually accept. */
+function solveRegistration(over: Record<string, CborValue>, at: number): Uint8Array {
   const bits = requiredBits(LABEL.length, 0);
   const skeleton = (nonce: Uint8Array): CborMap =>
     new Map<string | Uint8Array, CborValue>([
