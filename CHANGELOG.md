@@ -95,6 +95,16 @@ the registry core; the scheme will be set by a VWIP before then, not improvised 
   its author ever signs — a single proof of work buying unlimited names. `powProof` is now the
   three-field triple `{alg, nonce, bits}`, a proof carrying any of the four removed fields is
   rejected rather than ignored, and the salt is derived from the record's canonical bytes.
+- **The index keyspace justified itself with a false claim.** `REGISTRY.md` said key components
+  "contain no `0x00` (guaranteed by the label grammar and by fixed-width integers)". True of
+  `tld` and `label`; false of the two it names as guaranteed. A `u64be` timestamp in this
+  century begins with four zero bytes, so *every* key in the expiry and rate keyspaces carries
+  embedded separators, and a random Ed25519 owner key carries one about 12% of the time. The
+  layout is unambiguous — a fixed-width component needs no delimiter — but an implementer who
+  believed the sentence and split keys on `0x00` would parse three of the four keyspaces
+  wrongly, and silently: a truncated owner key returns another owner's names rather than
+  raising. Decoding is now specified as positional, and the codec pins it against keys chosen
+  to contain zero bytes.
 - **The documented 20-bit difficulty ceiling is unreachable.** `base` tops out at 10 and the
   rate term at 8, so the schedule cannot return more than 18 bits. The spec described twenty
   bits — "roughly a million evaluations, hours of CPU" — as the worst case a registrant should

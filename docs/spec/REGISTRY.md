@@ -332,8 +332,7 @@ precisely the divergence the deterministic rules exist to prevent.
 ## Index Keyspace Layout
 
 Hyperbee keys are byte strings ordered lexicographically. The registry SHALL use a one-byte
-namespace tag, `0x00` separators, and components that contain no `0x00` (guaranteed by the label
-grammar and by fixed-width integers):
+namespace tag and `0x00` separators:
 
 ```text
 0x6E 00 <tld> 00 <label>                 -> current record pointer {logIndex, seq, notAfter}
@@ -348,6 +347,22 @@ prefix makes that one bounded range scan instead of a full-tree walk; a TLD rati
 VWIP occupies a fresh disjoint range, so no existing key moves; and auditing one TLD becomes a
 contiguous read. The expiry queue is keyed by big-endian `notAfter`, so names expiring before a
 given instant form a prefix range and a node advances grace and quarantine without a full scan.
+
+**A decoder MUST read fixed-width components positionally and MUST NOT scan for a separator.**
+`tld` and `label` are free of `0x00` because the label grammar admits only `[a-z0-9-]`, so
+reading them up to the next separator is correct. The other two components carry `0x00`
+routinely, and an earlier revision of this section claimed otherwise:
+
+- `<notAfter:u64be>` and `<notBefore:u64be>` are mostly zero bytes. Every second in this
+  century begins `00 00 00 00`, so **every** key in the expiry and rate keyspaces contains
+  embedded separators.
+- `<ownerKey:32>` is a uniformly random Ed25519 public key, which contains at least one `0x00`
+  about 12% of the time — roughly one key in eight.
+
+The layout is unambiguous regardless, because a component of known width needs no delimiter.
+The hazard is to the implementer who splits a key on `0x00`: that yields a correct parse of the
+`n` keyspace and a wrong one of the other three, and the failure is silent — a truncated owner
+key returns another owner's names rather than raising anything.
 
 ## Checkpoints, Compaction and Light Clients
 
