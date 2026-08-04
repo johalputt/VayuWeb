@@ -212,6 +212,20 @@ test('an inverted range is refused rather than silently returning nothing', () =
 /* Rejections                                                                  */
 /* -------------------------------------------------------------------------- */
 
+test('AUDIT: a component outside the label grammar is refused', () => {
+  // The separator scheme is only sound because tld and label are drawn from [a-z0-9-].
+  // Checking only for the zero byte left the codec relying on every caller having validated
+  // its input, and the index is precisely where a wrong key returns another owner's record
+  // rather than raising.
+  assert.throws(() => currentKey('vayu', 'at las'), KeyError);
+  assert.throws(() => currentKey('vayu', 'Atlas'), KeyError);
+  assert.throws(() => currentKey('vayu', 'at.las'), KeyError);
+  assert.throws(() => currentKey('VAYU', 'atlas'), KeyError);
+  assert.throws(() => expiryKey(NOW, 'vayu', 'at\u0000las'), KeyError);
+  // The grammar itself still round-trips.
+  assert.deepEqual(decodeCurrentKey(currentKey('vayu', 'a-b-9')), { tld: 'vayu', label: 'a-b-9' });
+});
+
 test('a component carrying the separator is refused, since it would collide', () => {
   // Two distinct names must never encode to one key.
   assert.throws(() => currentKey('va yu', 'atlas'), KeyError);

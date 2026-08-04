@@ -8,6 +8,40 @@ Versions follow the scheme set by [VWIP-0003](docs/spec/VWIP-0003.md), which kee
 software. Before 1.0.0 the public interface is explicitly unstable and a minor release may break
 it.
 
+## [Unreleased]
+
+### Adversarial review — second pass
+
+A deeper pass than the one that gated 0.1.0, over surfaces the first did not reach: the CBOR
+decoder's malformed-input handling, the label and alias grammar, the index keyspace codec, and
+hex input on the command line. Recorded here whether or not it found anything, because a clean
+result is only evidence if someone says what was tried.
+
+**Attacked and found sound.** The deterministic CBOR decoder refuses negative integers, floats,
+tags, invalid UTF-8, duplicate map keys, unsorted map keys, truncated input and empty input,
+each with its own rejection code. Timestamps round-trip to 2^53-1 and refuse anything outside
+it. Inverted ranges are refused rather than silently returning nothing. Decoding a key from the
+wrong keyspace is refused. A TLD that is a prefix of another does not collide with its range
+scan. Odd-length and non-hex input to the hex decoder is refused rather than truncated.
+
+**Found and fixed:**
+
+- **A name could alias itself.** `atlas.vayu` carrying `alias: atlas.vayu` was accepted.
+  REGISTRY.md bounds resolution at three hops and requires a resolver to fail on a cycle, so a
+  conforming resolver survives it — but the trivial self-loop is exactly the case a resolver
+  written from the prose is most likely to mishandle, and it is the only cycle decidable from a
+  single record. Refusing it at parse means no implementation has to be correct about it. This
+  does **not** remove the need for cycle detection: `a → b → a` spans two records and is
+  invisible from either, so the hop limit remains the real defence.
+- **The index keyspace codec did not enforce the grammar its design depends on.** The `0x00`
+  separator scheme is sound only because `tld` and `label` are drawn from `[a-z0-9-]`, and the
+  codec checked only for the separator byte itself. It therefore relied on every caller having
+  validated its input — and the index is precisely where a wrong key returns another owner's
+  record rather than raising. It now enforces the grammar directly.
+
+Both are modest, and that is the honest summary of this pass: it found less than the one before
+it, which is what a second look at the same code should be expected to do.
+
 ## [0.1.0] — 2026-08-04
 
 First tagged release. The registry core, working on one machine: record format, verification,

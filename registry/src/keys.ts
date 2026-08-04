@@ -73,6 +73,14 @@ function textComponent(value: string, what: string): Uint8Array {
   const bytes = ASCII.encode(value);
   if (bytes.length === 0) throw new KeyError(`${what} must not be empty`);
   if (bytes.includes(SEPARATOR)) throw new KeyError(`${what} must not contain a zero byte`);
+  // Enforce the grammar this module's design depends on, rather than assuming callers have.
+  // The separator argument above is only sound because `tld` and `label` are drawn from
+  // [a-z0-9-]; a codec that relies on a property it does not check is relying on every one of
+  // its callers instead, and the index is where a wrong key returns another owner's record
+  // rather than raising.
+  if (!/^[a-z0-9-]+$/.test(value)) {
+    throw new KeyError(`${what} must match the label grammar [a-z0-9-]: got '${value}'`);
+  }
   return bytes;
 }
 

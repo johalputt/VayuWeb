@@ -317,6 +317,20 @@ export function parseRecord(map: CborMap): RegistryRecord {
   if (aliases.length === 1 && entries.length > 1) {
     fail('BAD_RECORD_ENTRY', 'an alias must not coexist with another entry');
   }
+  // A name may not alias itself. REGISTRY.md bounds resolution at 3 hops and requires a
+  // resolver to fail on a cycle, so this cannot be reached by a conforming resolver — but the
+  // trivial self-loop is the case a resolver written straight from the prose is most likely to
+  // get wrong, and it is the one case decidable from a single record. Refusing it here means
+  // no implementation has to be correct about it.
+  //
+  // It does NOT remove the need for cycle detection: a → b → a spans two records and is
+  // invisible from either one. The hop limit remains the real defence.
+  if (aliases.length === 1) {
+    const target = parseAlias(aliases[0]!.value as string);
+    if (target !== null && target.label === name && target.tld === tld) {
+      fail('BAD_RECORD_ENTRY', `${name}.${tld} may not alias itself`);
+    }
+  }
 
   const rawPow = map.get('powProof');
   if (rawPow === undefined) fail('MISSING_FIELD', 'powProof is required, use null when absent');

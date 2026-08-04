@@ -166,10 +166,24 @@ test('an alias is exclusive: at most one, and never beside another entry', () =>
     'BAD_RECORD_ENTRY',
   );
   rejects(
-    record({ records: [entry('alias', 'atlas.vayu'), entry('txt', 'x')] }),
+    record({ records: [entry('alias', 'other.vayu'), entry('txt', 'x')] }),
     'BAD_RECORD_ENTRY',
   );
-  assert.equal(parseRecord(record({ records: [entry('alias', 'atlas.vayu')] })).entries.length, 1);
+  assert.equal(parseRecord(record({ records: [entry('alias', 'other.vayu')] })).entries.length, 1);
+});
+
+test('AUDIT: a name may not alias itself', () => {
+  // Accepted before this fix. REGISTRY.md bounds resolution at 3 hops and requires a resolver
+  // to fail on a cycle, so a conforming resolver survives it — but the trivial self-loop is
+  // exactly the case a resolver written from the prose is most likely to mishandle, and it is
+  // the only cycle decidable from one record. Refusing it means nobody has to be right about it.
+  rejects(record({ records: [entry('alias', 'atlas.vayu')] }), 'BAD_RECORD_ENTRY');
+
+  // Same label under a different TLD is a different name, and stays legal.
+  assert.equal(
+    parseRecord(record({ records: [entry('alias', 'atlas.p2p')] })).entries.length,
+    1,
+  );
 });
 
 test('an unknown entry type is retained but marked not to be acted upon', () => {
