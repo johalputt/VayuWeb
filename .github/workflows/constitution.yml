@@ -60,18 +60,42 @@ jobs:
           test -f LICENSES/MIT.txt || { echo "::error::MIT text missing"; exit 1; }
           echo "OK — both licence texts present."
       - name: No Contributor Licence Agreement is introduced
-        # CONTRIBUTING.md states there will never be one. A CLA is how a project quietly
-        # acquires the power to relicense contributors' work, so its introduction should be a
-        # deliberate, visible act rather than a paragraph nobody re-read.
+        # A CLA is how a project quietly acquires the power to relicense contributors' work,
+        # so its introduction must be a deliberate, visible act.
+        #
+        # This checks for the ARTIFACTS a CLA brings, not for the phrase. An earlier version
+        # grepped the corpus for "contributor licence agreement" and failed on LICENSE,
+        # CHANGELOG.md, FAQ.md and VWIP-0002 — every one of them a document promising there
+        # will never be one. A prose grep cannot tell a prohibition from an adoption, which
+        # makes it undecidable; the presence of a signature bot or a signatures file is not.
         run: |
-          if git grep -inE 'sign (the|a) CLA|CLA[ -]?bot|contributor licen[cs]e agreement' \
-               -- . ':!CONTRIBUTING.md' ':!.github/workflows/constitution.yml'; then
-            echo "::error::a Contributor Licence Agreement appears to have been introduced"
-            exit 1
+          set -euo pipefail
+
+          artefacts=0
+          for path in .github/cla.yml .github/cla.yaml .cla-signatures \
+                      cla-signatures.json .github/CLA.md; do
+            if [ -e "$path" ]; then
+              echo "::error::CLA artefact present — $path"
+              artefacts=1
+            fi
+          done
+
+          # A CLA bot is wired in as a workflow step. Match the actions, not the words.
+          if git grep -lniE 'cla-assistant|contributor-assistant/github-action|cla-bot' \
+               -- '.github/workflows/*' ':!.github/workflows/constitution.yml' > /dev/null 2>&1; then
+            echo "::error::a CLA bot action is configured in a workflow"
+            artefacts=1
           fi
-          grep -q 'no Contributor Licence Agreement' CONTRIBUTING.md || {
+
+          [ "$artefacts" -eq 0 ] || exit 1
+
+          # The positive half: the promise must still be in the two documents that make it.
+          grep -qi 'no Contributor Licence Agreement' CONTRIBUTING.md || {
             echo "::error::CONTRIBUTING.md no longer states that there is no CLA"; exit 1; }
-          echo "OK — no CLA, and CONTRIBUTING.md still says so."
+          grep -qi 'no Contributor Licence Agreement' LICENSE || {
+            echo "::error::LICENSE no longer states that there is no CLA"; exit 1; }
+
+          echo "OK — no CLA artefacts, and both LICENSE and CONTRIBUTING.md still say so."
 
   # Article citations across the corpus must resolve to an Article that exists. A citation
   # pointing at a renumbered or deleted Article is how a rule quietly stops applying.
