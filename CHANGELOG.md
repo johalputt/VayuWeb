@@ -5,7 +5,7 @@ All notable changes to VayuWeb are recorded here. The format follows
 
 VayuWeb is pre-implementation. Until the first release there is no version number to assign, so
 changes accumulate under `[Unreleased]`. Versioning begins with the first tagged release of
-the registry core; the scheme will be set by a VWIP before then, not improvised at tag time.
+the registry core, under the scheme set by [VWIP-0003](docs/spec/VWIP-0003.md).
 
 ## [Unreleased]
 
@@ -68,6 +68,36 @@ the registry core; the scheme will be set by a VWIP before then, not improvised 
 - **Developer Certificate of Origin 1.1** for contributions (`CONTRIBUTING.md`), signed off per
   commit as the Linux kernel does.
 
+- **A command-line tool** (`registry/bin/vayuweb-registry.ts`) completing Phase 1's acceptance
+  test: register a name into a local log, resolve it back, and reject every malformed and
+  replayed record in the vector set. `keygen`, `register`, `update`, `renew`, `transfer`,
+  `release`, `revoke`, `resolve`, `list`, `difficulty`, `verify` and `vectors`. `--at` pins the
+  clock so any result is reproducible, and deferral is a distinct exit code rather than a soft
+  rejection. It touches no network, and says so.
+- **A local append-only log and index** (`registry/src/store.ts`). Length-prefixed deterministic
+  CBOR, with the index rebuilt by replay and **every entry re-verified on load** rather than
+  trusted for being on disk — a file an attacker can append to is not a file whose contents are
+  known-good. Explicitly not Hypercore: no merkle tree, so entries are not self-authenticating
+  and a light client cannot verify without replaying. Phase 2 replaces the storage beneath these
+  interfaces without changing the rules above them.
+- **VWIP-0003, the version scheme**, which `CHANGELOG.md` required before the first tag. Two
+  independent numbers — the protocol version in every record, and the implementation version on
+  the software — with a change to any verification rule classed as MAJOR even when the API is
+  untouched, because a peer that accepts a different record set is a different implementation
+  whatever its API looks like. It also forbids the term "reference implementation" until a
+  second one exists, and forbids claiming conformance for areas with no test vectors.
+- **Conformance vectors** (`conformance/vectors.json`, with a README describing the format).
+  Forty cases pinning the registry record rules: each is a record's exact bytes, the registry
+  state to verify it against, the instant to verify it at, and the verdict every conforming
+  implementation must return. The rejection **code** is part of the contract rather than just
+  accept-or-reject, which is what makes check order observable between implementations; `defer`
+  is carried as a third verdict, since an implementation that rejects a clock-skewed record
+  instead will disagree permanently with honest peers about a valid one. A test fails if a
+  rejection code is added without a vector, and another compares the committed artifact against
+  a fresh generation so an encoding change appears as a reviewable diff. Proof-of-work
+  verification is injected rather than evaluated in these vectors, and the README says so
+  plainly: passing them does not demonstrate a correct proof-of-work implementation.
+
 ### Changed
 
 - **`LICENSE` restructured into the two layers the project actually has**: CC0-1.0 for the
@@ -81,18 +111,6 @@ the registry core; the scheme will be set by a VWIP before then, not improvised 
   is the licensing counterpart of the entrenched clauses in Article 9. It also binds the author
   — a governance process able to relicense the whole corpus by vote would be the capture vector,
   not the remedy.
-
-- **Conformance vectors** (`conformance/vectors.json`, with a README describing the format).
-  Forty cases pinning the registry record rules: each is a record's exact bytes, the registry
-  state to verify it against, the instant to verify it at, and the verdict every conforming
-  implementation must return. The rejection **code** is part of the contract rather than just
-  accept-or-reject, which is what makes check order observable between implementations; `defer`
-  is carried as a third verdict, since an implementation that rejects a clock-skewed record
-  instead will disagree permanently with honest peers about a valid one. A test fails if a
-  rejection code is added without a vector, and another compares the committed artifact against
-  a fresh generation so an encoding change appears as a reviewable diff. Proof-of-work
-  verification is injected rather than evaluated in these vectors, and the README says so
-  plainly: passing them does not demonstrate a correct proof-of-work implementation.
 
 ### Fixed
 
