@@ -353,7 +353,7 @@ VayuWeb is at the specification and charter stage. There is no implementation, n
 network, no registered name, no user, and no release to download. Every number in this
 paper — the 1-year term, the 60-day renewal window, the 30-day grace period followed by
 a 30-day quarantine before a name returns to the open pool, the loopback ports, the
-label grammar, the twelve launch TLDs — is a design decision recorded in the
+label grammar, the eleven launch TLDs — is a design decision recorded in the
 specification set and open to revision by VWIP until the first implementation freezes
 it. The sequencing of that work, from reference registry to resolver to client, is in
 [docs/ROADMAP.md](ROADMAP.md). Readers who want the mechanism rather than the argument

@@ -281,7 +281,7 @@ NOT serve one name's content under another name's host.
 
 The proxy SHALL inject the strict content-security profile on every HTML
 response, replacing any policy the site supplied. That profile — the
-Content-Security-Policy, the twelve accompanying response headers, the request
+Content-Security-Policy, the ten accompanying response headers, the request
 headers the resolver must never emit, the response headers it must strip, and
 the markup it must neutralise — is specified normatively in
 [CONTENT-SECURITY.md](CONTENT-SECURITY.md) and is **not restated here**. It is

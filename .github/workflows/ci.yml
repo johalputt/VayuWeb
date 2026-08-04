@@ -63,6 +63,13 @@ jobs:
         # believe they conform.
         run: python3 scripts/check-headers.py
 
+      - name: Counted claims agree with the source that defines them
+        # "The eleven launch TLDs" is a fact about a list in another file, and nothing kept the
+        # two in step. The list held `.vayu` twice, so the sentence said twelve; eight documents
+        # inherited the wrong number, and correcting the two that were noticed left six still
+        # wrong. A number derived from the source cannot drift from it.
+        run: python3 scripts/check-counts.py
+
   # ---------------------------------------------------------------------------
   # The registry implementation. This is the gate the repository did not have.
   # ---------------------------------------------------------------------------

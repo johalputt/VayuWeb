@@ -202,7 +202,7 @@ supporters cannot manufacture it.
 
 **Tauri** — The desktop application framework (2.x) targeted for the VayuWeb client.
 
-**TLD** — Top-level domain, called an *extension* in user-facing copy. Twelve at launch, all
+**TLD** — Top-level domain, called an *extension* in user-facing copy. Eleven at launch, all
 equal in status.
 
 **Title** — One of the Constitution's six top-level divisions. Titles are navigational; Articles

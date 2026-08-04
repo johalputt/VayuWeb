@@ -55,7 +55,7 @@ Generate an Ed25519 keypair, do the proof-of-work, sign a registration record, a
 valid signature wins.
 
 **What extensions are there?**
-Twelve at launch: `.vayu`, `.vayu`, `.p2p`, `.free`, `.decent`, `.libre`, `.sov`, `.dao`,
+Eleven at launch: `.vayu`, `.p2p`, `.free`, `.decent`, `.libre`, `.sov`, `.dao`,
 `.indie`, `.open`, `.news`, `.blog`. Plural on purpose — a single namespace is a single thing
 worth capturing. All extensions are equal; none is the "real" one.
 
@@ -67,7 +67,7 @@ expiries is not a profitable business.
 
 **What stops squatting?**
 Proof-of-work makes bulk registration expensive, renewal requires fresh work so hoarding has an
-ongoing cost, and there are twelve extensions so no single namespace is the only prize. This is a
+ongoing cost, and there are eleven extensions so no single namespace is the only prize. This is a
 speed bump, not a wall — [spec/PROOF-OF-WORK.md](spec/PROOF-OF-WORK.md) says so explicitly.
 
 **What if I lose my key?**
