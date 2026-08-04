@@ -100,9 +100,13 @@ for `http://example.vayu/` arriving at the proxy.
     path onto it, resolving `/` and directory paths to `index.html` when
     present. No match returns 1414 `PATH_NOT_FOUND` — an ordinary 404, the
     site's problem rather than the network's.
-14. **Response.** Emit the bytes with the security headers below, the
-    diagnostic `X-VayuWeb-*` headers, and a `Content-Type` from the file
-    extension. Populate the caches. Return.
+14. **Response.** Emit the bytes with the security headers below and a
+    `Content-Type` from the file extension. Emit the diagnostic `X-VayuWeb-*`
+    headers **if and only if they have been enabled through the control API**;
+    they are off by default, and the reason is in the caching section below —
+    emitted unconditionally they brand every response as VayuWeb, which is the
+    most consequential fingerprint the resolver can produce. Populate the
+    caches. Return.
 
 Steps 7 through 12 are the only slow ones. A resolver SHOULD report per-step
 timings through the control API, never in the served response.
@@ -117,7 +121,11 @@ entry is the only option whose availability depends on one specific host being
 online, so it ranks below both content-addressed forms.
 
 If the chosen entry fails, the resolver MAY fall back to the next and MUST
-record the fallback in the diagnostic headers. It MUST NOT fall back across a
+record the fallback in the control API's per-request diagnostics — and in the
+`X-VayuWeb-*` response headers only when those have been enabled, since they are
+off by default. Recording it is mandatory; disclosing it to the page is not, and
+an earlier revision of this paragraph required the header unconditionally, which
+contradicted that default. It MUST NOT fall back across a
 `CONTENT_INTEGRITY` failure, which signals an attack rather than an
 availability problem.
 
@@ -233,8 +241,10 @@ Negative caching:
 - `REGISTRY_UNAVAILABLE`, `CONTENT_INTEGRITY`: never cached.
 
 When the registry is unreachable the resolver MAY serve a record up to 600
-seconds past its TTL, MUST mark it `X-VayuWeb-Stale: 1`, and MUST NOT serve past
-`notAfter`.
+seconds past its TTL and MUST NOT serve past `notAfter`. It MUST record the
+staleness in the control API's per-request diagnostics, and MUST send
+`X-VayuWeb-Stale: 1` only when the diagnostic headers are enabled — that header
+is one of them, and is off by default for the reason given below.
 
 Diagnostic headers — `X-VayuWeb-Name`, `X-VayuWeb-Seq`, `X-VayuWeb-CID`, `X-VayuWeb-Source`
 (`cid`, `ipns`, `peer`), `X-VayuWeb-Resolved-From` (`cache`, `registry`) and
@@ -314,8 +324,16 @@ HSTS entry would poison the browser's state for that host permanently.
 
 ## Error catalogue
 
-A failure is returned as an HTML page carrying the numeric code in an
-`X-VayuWeb-Error` header, and as a JSON object on the control API.
+A failure is returned as an HTML page carrying the numeric code, and as a JSON
+object on the control API.
+
+The code is carried in an `X-VayuWeb-Error` header **only when the diagnostic
+headers are enabled**. It is subject to the same default-off rule as the rest of
+the `X-VayuWeb-*` family and for the same reason: a header emitted on every
+failure brands the response as VayuWeb to any page that can provoke one, and a
+failure is the easiest response to provoke. With diagnostics off, the code
+appears in the HTML body — which the requesting page cannot read cross-origin —
+and on the control API, which is where a diagnostic belongs.
 
 | Code | Name | HTTP | User-facing message |
 | --- | --- | --- | --- |

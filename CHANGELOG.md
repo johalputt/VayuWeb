@@ -48,6 +48,23 @@ it.
   contains. Removing a repeated entry is editorial and changes no TLD: the set of distinct
   extensions was eleven before and is eleven now. Inventing a twelfth would have been
   substantive; deleting a duplicate is not.
+- **`RESOLUTION.md` required the resolver to emit the fingerprint it forbids.** The document
+  states that the `X-VayuWeb-*` diagnostic headers "MUST be **off by default**", and explains
+  why in unusually direct terms: emitted unconditionally they brand every response as VayuWeb,
+  which "lets any page that can elicit a response determine that VayuWeb is installed", and
+  "for a reader in a hostile jurisdiction that single fact may be all an adversary needs".
+
+  Four other normative statements in the same document contradicted it. Step 14 of the
+  resolution algorithm — a section headed "the following steps are normative and ordered" —
+  said to emit the diagnostic headers with every response. Record selection said the resolver
+  "MUST record the fallback in the diagnostic headers". The stale-serving rule said it "MUST
+  mark it `X-VayuWeb-Stale: 1`". The error catalogue said every failure carries its code in an
+  `X-VayuWeb-Error` header — on the response easiest for a hostile page to provoke.
+
+  An implementer following the numbered algorithm would therefore produce exactly the
+  disclosure the document elsewhere calls the most consequential fingerprint the resolver can
+  make, and would believe they had conformed, because they had. All four now defer to the
+  default-off rule: recording a diagnostic stays mandatory, disclosing it to the page does not.
 - **`scripts/check-counts.py` guarded the count but not the list**, which is precisely why the
   defect survived in the two places that never say "eleven". It now also validates every
   *enumeration* of the extensions against the ratified set in `NAMES.md`, failing on a repeat or
