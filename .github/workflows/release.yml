@@ -1,0 +1,191 @@
+name: Release — Tag on Version Change
+
+# Creates the `vX.Y.Z` tag and its GitHub release when `registry/package.json` changes version
+# on `main`, after checking the preconditions VWIP-0003 section 3.1 sets for a tag.
+#
+# Why a workflow rather than someone typing `git tag`: the preconditions are only worth having
+# if something enforces them. A human tagging by hand can skip every one and nothing notices
+# until a release is already published, and a published tag is what other people build against.
+#
+# What this deliberately does NOT claim: section 3.1(3) requires an adversarial review, and no
+# script can tell a review that happened from a heading someone typed. The check here is that
+# the section exists and is not empty, which is a check on the RECORD rather than on the work.
+# VWIP-0003's impossibility analysis says the same thing in the same words: what the requirement
+# buys is that the claim is attributable and falsifiable, not that it is true.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - registry/package.json
+  workflow_dispatch:
+
+# Least privilege, and the one place in this repository that needs more than read. `contents:
+# write` is required to create a tag and a release, and is granted to this job alone.
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  preconditions:
+    name: VWIP-0003 preconditions
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+      should_tag: ${{ steps.read.outputs.should_tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - id: read
+        name: Read the version and decide whether it is new
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./registry/package.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "registry/package.json declares $version"
+
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "tag v$version already exists — nothing to do"
+            echo "should_tag=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_tag=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: The changelog documents this exact version
+        # VWIP-0003 section 3.1(4). A release whose notes were never written is a release nobody
+        # can evaluate, and writing them after the tag is writing them for nobody.
+        if: steps.read.outputs.should_tag == 'true'
+        run: |
+          set -euo pipefail
+          version="${{ steps.read.outputs.version }}"
+          grep -q "^## \[$version\]" CHANGELOG.md || {
+            echo "::error::CHANGELOG.md has no '## [$version]' section"; exit 1; }
+          echo "OK — CHANGELOG.md documents $version."
+
+      - name: An adversarial review is recorded for this version
+        # Section 3.1(3), checked as far as a script honestly can: the section exists under this
+        # version's heading and carries prose. This cannot verify that a review happened. It can
+        # only ensure that claiming one is a deliberate, attributable act rather than a silence.
+        if: steps.read.outputs.should_tag == 'true'
+        run: |
+          set -euo pipefail
+          python3 - "${{ steps.read.outputs.version }}" <<'PY'
+          import re, sys
+          version = sys.argv[1]
+          text = open('CHANGELOG.md', encoding='utf-8').read()
+          start = text.find(f'## [{version}]')
+          if start < 0:
+              sys.exit(f'no section for {version}')
+          nxt = text.find('\n## ', start + 1)
+          section = text[start:nxt if nxt > 0 else len(text)]
+
+          heading = re.search(r'^###\s+Adversarial review\s*$', section, re.M)
+          if heading is None:
+              sys.exit("::error::no '### Adversarial review' section under this version. "
+                       "VWIP-0003 3.1(3) requires the pass to have run and its outcome recorded, "
+                       "including when nothing was found.")
+
+          after = section[heading.end():]
+          body = after.split('\n###', 1)[0].strip()
+          if len(body) < 200:
+              sys.exit('::error::the adversarial review section is too thin to be a record')
+          print(f'OK — adversarial review recorded ({len(body)} characters).')
+          PY
+
+      - uses: actions/setup-node@v5
+        if: steps.read.outputs.should_tag == 'true'
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: registry/package-lock.json
+
+      - name: Install, typecheck, test, build
+        # Section 3.1(1). Re-run here rather than trusting that CI passed on this commit: the two
+        # can diverge if a run was re-triggered against different content, and the tag is the
+        # thing people will trust.
+        if: steps.read.outputs.should_tag == 'true'
+        working-directory: registry
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run build
+
+      - name: The committed conformance vectors match a fresh generation
+        # Section 3.1(2). The vectors are the interoperability contract; a tag whose vectors
+        # disagree with its own code publishes a contract nothing honours.
+        if: steps.read.outputs.should_tag == 'true'
+        working-directory: registry
+        run: |
+          set -euo pipefail
+          npm run vectors
+          if ! git diff --quiet -- ../conformance/vectors.json; then
+            echo "::error::conformance/vectors.json is stale — run 'npm run vectors' and commit"
+            git diff --stat -- ../conformance/vectors.json
+            exit 1
+          fi
+          echo "OK — the committed vectors match a fresh generation."
+
+      - name: Specification integrity
+        if: steps.read.outputs.should_tag == 'true'
+        run: |
+          python3 scripts/check-links.py
+          python3 scripts/check-headers.py
+          python3 scripts/check-counts.py
+
+  tag:
+    name: create tag and release
+    needs: preconditions
+    if: needs.preconditions.outputs.should_tag == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The only elevated permission in this repository, scoped to the one job that needs it.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Create the annotated tag and the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.preconditions.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # Extract this version's section from the changelog as the release body, so the notes
+          # and the changelog cannot say different things.
+          python3 - "$VERSION" > /tmp/notes.md <<'PY'
+          import sys
+          version = sys.argv[1]
+          text = open('CHANGELOG.md', encoding='utf-8').read()
+          start = text.find(f'## [{version}]')
+          nxt = text.find('\n## ', start + 1)
+          body = text[start:nxt if nxt > 0 else len(text)]
+          print(body.split('\n', 1)[1].strip())
+          PY
+
+          git config user.name  'johalputt'
+          git config user.email 'ankushchoudharyjohal@gmail.com'
+          git tag -a "v$VERSION" -F /tmp/notes.md
+          git push origin "refs/tags/v$VERSION"
+
+          # Pre-1.0.0 is marked prerelease: VWIP-0003 2.2 makes the public interface explicitly
+          # unstable before 1.0.0, and the release page should say so rather than imply otherwise.
+          prerelease=""
+          case "$VERSION" in 0.*) prerelease="--prerelease" ;; esac
+
+          gh release create "v$VERSION" \
+            --title "VayuWeb v$VERSION" \
+            --notes-file /tmp/notes.md \
+            $prerelease
+
+          echo "released v$VERSION"
