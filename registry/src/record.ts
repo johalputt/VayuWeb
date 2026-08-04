@@ -21,6 +21,7 @@ import { decode, isDeterministic, type CborMap, type CborValue } from './cbor.ts
 import { isRatifiedTld, labelRejection, parseAlias } from './names.ts';
 import { PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH, isSmallOrderKey } from './signature.ts';
 import { RECORD_HASH_LENGTH } from './domain.ts';
+import { POW_ALGORITHM, POW_NONCE_LENGTH } from './pow.ts';
 
 /** The six operations. Order is irrelevant; membership is what validation asks. */
 export const OPERATIONS = ['REGISTER', 'UPDATE', 'RENEW', 'TRANSFER', 'RELEASE', 'REVOKE'] as const;
@@ -83,11 +84,9 @@ export class RecordError extends Error {
 
 export interface PowProof {
   readonly alg: string;
-  readonly m: number;
-  readonly t: number;
-  readonly p: number;
-  readonly salt: Uint8Array;
-  readonly nonce: number;
+  /** The searched nonce. The salt is derived from the record, never carried by it. */
+  readonly nonce: Uint8Array;
+  /** Claimed difficulty in leading zero bits. A verifier recomputes what was required. */
   readonly bits: number;
 }
 
@@ -154,29 +153,41 @@ function bytesField(map: CborMap, key: string, length: number): Uint8Array {
 
 const utf8Length = (text: string): number => new TextEncoder().encode(text).length;
 
+/**
+ * `powProof` is exactly `{alg, nonce, bits}` — three fields, and deliberately not five more.
+ *
+ * The cost parameters and the salt are NOT record fields. A record carrying its own `m`, `t`
+ * and `p` lets the registrant pick them, and `m = 8` KiB turns a memory-hard function into a
+ * cheap one that still verifies, because the verifier evaluates the function the attacker
+ * named. A record carrying its own salt is worse: the salt becomes a free parameter, so one
+ * ground (salt, nonce) pair can be attached to every record its author ever signs, and a single
+ * proof of work buys unlimited names.
+ *
+ * The salt is derived from the record's own canonical bytes instead — see pow.ts — which is
+ * what makes a proof valid for exactly one record.
+ */
 function parsePowProof(value: CborValue): PowProof {
   if (!(value instanceof Map)) fail('BAD_POW_SHAPE', 'powProof must be a map or null');
   const map: CborMap = value;
 
   const alg = textField(map, 'alg');
-  if (alg !== 'argon2id') fail('BAD_POW_SHAPE', `unsupported pow algorithm: ${alg}`);
+  if (alg !== POW_ALGORITHM) fail('BAD_POW_SHAPE', `unsupported pow algorithm: ${alg}`);
 
-  const salt = bytesField(map, 'salt', 16);
+  // Refuse a proof carrying tuning knobs rather than ignoring them. Ignoring would let a record
+  // that an attacker believes is cheap round-trip unchanged through the log, and the field would
+  // become load-bearing for some future implementation that did read it.
+  for (const forbidden of ['m', 't', 'p', 'salt']) {
+    if (map.has(forbidden)) {
+      fail('BAD_POW_SHAPE', `powProof must not carry '${forbidden}': it is a protocol constant`);
+    }
+  }
+
   const proof: PowProof = {
     alg,
-    m: uintField(map, 'm'),
-    t: uintField(map, 't'),
-    p: uintField(map, 'p'),
-    salt,
-    nonce: uintField(map, 'nonce'),
+    nonce: bytesField(map, 'nonce', POW_NONCE_LENGTH),
     bits: uintField(map, 'bits'),
   };
 
-  // Zero-valued parameters would make the proof free to produce, which is the whole cost the
-  // construction exists to impose.
-  if (proof.m === 0 || proof.t === 0 || proof.p === 0) {
-    fail('BAD_POW_SHAPE', 'memory, iterations and lanes must all be non-zero');
-  }
   if (proof.bits === 0 || proof.bits > 256) {
     fail('BAD_POW_SHAPE', `claimed difficulty out of range: ${proof.bits}`);
   }

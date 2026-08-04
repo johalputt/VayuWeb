@@ -10,6 +10,7 @@ import {
   type RecordRejection,
 } from './record.ts';
 import { encode, type CborMap, type CborValue } from './cbor.ts';
+import { POW_ALGORITHM, POW_NONCE_LENGTH } from './pow.ts';
 
 const entry = (type: string, value: CborValue, ttl?: number): CborMap => {
   const m = new Map<string | Uint8Array, CborValue>([
@@ -22,13 +23,9 @@ const entry = (type: string, value: CborValue, ttl?: number): CborMap => {
 
 const pow = (): CborMap =>
   new Map<string | Uint8Array, CborValue>([
-    ['alg', 'argon2id'],
-    ['m', 262144],
-    ['t', 3],
-    ['p', 1],
-    ['salt', new Uint8Array(16).fill(5)],
-    ['nonce', 41827366],
-    ['bits', 22],
+    ['alg', POW_ALGORITHM],
+    ['nonce', new Uint8Array(POW_NONCE_LENGTH).fill(7)],
+    ['bits', 10],
   ]);
 
 /** A valid REGISTER, which each test perturbs in exactly one way. */
@@ -126,12 +123,12 @@ test('REGISTER and RENEW require a proof; the other four forbid one', () => {
   );
 });
 
-test('a proof with zero-cost parameters is refused', () => {
-  // Zero memory, iterations or lanes makes the proof free to produce, which is the entire
-  // cost the construction exists to impose.
-  for (const field of ['m', 't', 'p']) {
+test('a proof carrying its own cost parameters or salt is refused', () => {
+  // Both are protocol constants. See the audit tests in pow.test.ts for the consequence of
+  // letting a record name either one.
+  for (const field of ['m', 't', 'p', 'salt']) {
     const p = pow();
-    p.set(field, 0);
+    p.set(field, 1);
     rejects(record({ powProof: p }), 'BAD_POW_SHAPE');
   }
 });
@@ -142,9 +139,9 @@ test('a proof naming another algorithm is refused', () => {
   rejects(record({ powProof: p }), 'BAD_POW_SHAPE');
 });
 
-test('the proof salt is fixed width', () => {
+test('the proof nonce is a fixed-width byte string', () => {
   const p = pow();
-  p.set('salt', new Uint8Array(15));
+  p.set('nonce', new Uint8Array(15));
   rejects(record({ powProof: p }), 'BAD_FIELD_TYPE');
 });
 

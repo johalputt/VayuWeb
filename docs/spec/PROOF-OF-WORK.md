@@ -127,9 +127,16 @@ on `n`. A verifier MUST accept a proof whose difficulty was computed for the epo
 `notBefore` or for the immediately preceding epoch, which absorbs propagation delay without
 widening the window enough to be farmable.
 
-`min(20, ...)` is a ceiling, not a target. Twenty bits is roughly a million evaluations —
-hours of CPU — and exists only to stop a runaway land rush from making a TLD permanently
-unusable.
+`min(20, ...)` is a ceiling, not a target. It exists only to stop a runaway land rush from
+making a TLD permanently unusable.
+
+**The ceiling does not currently bind.** `base` tops out at 10 and `rate` at 8, so the largest
+value this function can return is **18 bits** — roughly 262,144 expected evaluations, on the
+order of tens of minutes of CPU at 70 ms each. Twenty bits is not reachable, and an earlier
+revision of this paragraph described it as the worst case a registrant should budget for. The
+`min` is retained as a guard against a future schedule change rather than as a description of
+today's behaviour, and an implementation is expected to pin the real bound in a test, so that a
+change making 20 reachable is a deliberate act rather than a discovery.
 
 ### Worked Examples
 

@@ -84,6 +84,22 @@ the registry core; the scheme will be set by a VWIP before then, not improvised 
 
 ### Fixed
 
+- **The record schema let a registrant choose their own proof-of-work cost and salt.**
+  `REGISTRY.md` listed `m`, `t`, `p` and `salt` as fields of `powProof`, while
+  `PROOF-OF-WORK.md` specified the parameters as protocol constants and the salt as derived
+  from the record. Two normative documents disagreeing about a wire format is a fork on its
+  own; here the two readings also differ in whether the mechanism works at all. Cost parameters
+  in the record mean `m = 8` KiB verifies happily, because the verifier evaluates whatever
+  function the record names. A salt in the record is worse: the salt is what binds a proof to
+  one record, so a carried salt makes one ground `(salt, nonce)` pair reusable on every record
+  its author ever signs — a single proof of work buying unlimited names. `powProof` is now the
+  three-field triple `{alg, nonce, bits}`, a proof carrying any of the four removed fields is
+  rejected rather than ignored, and the salt is derived from the record's canonical bytes.
+- **The documented 20-bit difficulty ceiling is unreachable.** `base` tops out at 10 and the
+  rate term at 8, so the schedule cannot return more than 18 bits. The spec described twenty
+  bits — "roughly a million evaluations, hours of CPU" — as the worst case a registrant should
+  budget for; the real worst case is about 262,144 evaluations. The text now says so, and a
+  test pins the true bound so a schedule change that makes 20 reachable is deliberate.
 - **A single `RENEW` could buy an unbounded term for one proof of work.** Found by attacking the
   verification rules while implementing them. `RENEW` derives its expiry from `notBefore`, and
   the renewal-window check is a lower bound only; the clock checks sat inside the `REGISTER`

@@ -15,6 +15,7 @@ import { parseRecordBytes } from './record.ts';
 import { encode, type CborMap, type CborValue } from './cbor.ts';
 import { signingInput } from './domain.ts';
 import { sign, publicKeyFrom } from './signature.ts';
+import { POW_ALGORITHM, POW_NONCE_LENGTH } from './pow.ts';
 
 const OWNER_SECRET = new Uint8Array(32).fill(0x42);
 const OWNER_KEY = publicKeyFrom(OWNER_SECRET);
@@ -26,13 +27,9 @@ const NOW = 1_782_518_400;
 
 const pow = (): CborMap =>
   new Map<string | Uint8Array, CborValue>([
-    ['alg', 'argon2id'],
-    ['m', 262144],
-    ['t', 3],
-    ['p', 1],
-    ['salt', new Uint8Array(16).fill(5)],
-    ['nonce', 41827366],
-    ['bits', 22],
+    ['alg', POW_ALGORITHM],
+    ['nonce', new Uint8Array(POW_NONCE_LENGTH).fill(7)],
+    ['bits', 10],
   ]);
 
 const entry = (type: string, value: CborValue): CborMap =>

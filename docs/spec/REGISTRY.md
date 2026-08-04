@@ -77,10 +77,28 @@ At most one `alias` per record, and an `alias` MUST NOT coexist with another ent
 a name is either a pointer or a destination. Unknown `type` values are stored and replicated
 unchanged but MUST NOT be acted upon.
 
-`powProof` is a map with keys `alg` (text, `argon2id`), `m` (uint, KiB of memory), `t` (uint,
-iterations), `p` (uint, lanes), `salt` (bstr, 16 bytes), `nonce` (uint), and `bits` (uint,
-claimed difficulty in leading zero bits). The digest is NOT stored: every verifier recomputes
-it, so there is nothing to forge and 32 bytes per record are saved.
+`powProof` is a map with exactly three keys: `alg` (text, the algorithm identifier defined in
+[PROOF-OF-WORK.md](PROOF-OF-WORK.md), currently `argon2id-v19-m65536-t2-p1`), `nonce` (bstr,
+16 bytes) and `bits` (uint, claimed difficulty in leading zero bits). The digest is NOT stored:
+every verifier recomputes it, so there is nothing to forge and 32 bytes per record are saved.
+
+A verifier MUST reject a `powProof` carrying `m`, `t`, `p` or `salt`. An earlier revision of
+this table listed those four as record fields, and each one hands the registrant a dial that
+the verifier then obediently turns:
+
+- **Cost parameters in the record** let the registrant choose them. `m = 8` KiB reduces a
+  memory-hard function to one that fits in cache, and the proof still verifies, because the
+  verifier is evaluating the function the attacker specified. Rejecting only zero values does
+  not help — `m = 1` is not zero.
+- **A salt in the record** is worse, because it is a free parameter. The salt is what binds a
+  proof to one record; carried rather than derived, a single ground `(salt, nonce)` pair can be
+  attached to every record its author ever signs. One proof of work would buy unlimited names,
+  and the anti-squatting cost — the reason the construction exists — would be paid once.
+
+The parameters are protocol constants named by `alg`, and the salt is derived from the record's
+own canonical bytes, both per [PROOF-OF-WORK.md](PROOF-OF-WORK.md). A VWIP that changes the cost
+changes the identifier, so proofs from two regimes stay distinguishable instead of silently
+comparable.
 
 ## Canonical Serialisation and Signing
 
