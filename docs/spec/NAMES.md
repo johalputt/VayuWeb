@@ -41,7 +41,7 @@ body        = *61ldh
 ldh         = alnum / "-"
 alnum       = %x61-7A / %x30-39            ; "a"-"z" / "0"-"9"
 
-tld         = 2*12( %x61-7A )              ; lowercase ASCII letters
+tld         = %x61-7A *11( %x61-7A / %x30-39 ) ; letter, then letters/digits
 ```
 
 Three constraints are normative but are not expressed in the ABNF above, because
@@ -205,13 +205,12 @@ Each extension has its own reserved-label set (the common set above, plus anythi
 its charter adds) and its own proof-of-work difficulty curve, driven by its
 registration rate over the trailing 30 days.
 
-The twelve below are the protocol's founding extensions, described here because
+The eleven below are the protocol's founding extensions, described here because
 they carry meaning specific to VayuWeb itself. They hold no privileged status:
 Constitution Article 35 requires every extension to be equal, and no client may
 present one as more official than another.
 
 - `.vayu` — the protocol's own namespace; general-purpose, the default suggestion.
-- `.vayu` — general-purpose, for projects in the Vayu ecosystem and its neighbours.
 - `.p2p` — peer-to-peer software, protocols and node operators.
 - `.free` — projects whose defining claim is that they cost nothing to use.
 - `.decent` — decentralisation as subject matter: research, tooling, commentary.

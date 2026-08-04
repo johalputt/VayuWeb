@@ -46,7 +46,7 @@ marked otherwise. JSON renderings encode byte strings as unpadded base64url.
 | `version` | uint | CBOR uint | `1` at launch; a verifier MUST reject a major version it does not implement. |
 | `op` | text | ASCII | `REGISTER`, `UPDATE`, `RENEW`, `TRANSFER`, `RELEASE` or `REVOKE`. |
 | `name` | text | NFC, lowercase ASCII | 1-63 bytes from `[a-z0-9-]`, per [docs/spec/NAMES.md](NAMES.md). |
-| `tld` | text | ASCII, no leading dot | One of the twelve launch TLDs; any other is rejected. |
+| `tld` | text | ASCII, no leading dot | One of the eleven launch TLDs; any other is rejected. |
 | `ownerKey` | bstr | 32 bytes | Ed25519 public key: incoming owner for `TRANSFER`, current owner otherwise. |
 | `seq` | uint | CBOR uint | 0 for `REGISTER`, `prev.seq + 1` otherwise; max 2^32-1. |
 | `notBefore` | uint | Unix seconds, UTC | Second at which the record takes effect. |
