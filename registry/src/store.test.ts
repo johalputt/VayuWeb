@@ -37,7 +37,7 @@ const entry = (type: string, value: CborValue): CborMap =>
 const solved = new Map<string, Uint8Array>();
 
 function registration(over: Record<string, CborValue> = {}, at = NOW): Uint8Array {
-  const key = `${at}|${JSON.stringify(Object.keys(over).sort())}|${String(over['records'])}|${String(over['notBefore'])}`;
+  const key = JSON.stringify([at, Object.keys(over).sort(), String(over['name']), String(over['records']), String(over['notBefore'])]);
   const hit = solved.get(key);
   if (hit !== undefined) return hit;
   const built = solveRegistration(over, at);
@@ -52,7 +52,7 @@ function solveRegistration(over: Record<string, CborValue>, at: number): Uint8Ar
     new Map<string | Uint8Array, CborValue>([
       ['version', 1],
       ['op', 'REGISTER'],
-      ['name', LABEL],
+      ['name', (over['name'] as string | undefined) ?? LABEL],
       ['tld', 'vayu'],
       ['ownerKey', OWNER],
       ['seq', 0],
@@ -200,6 +200,87 @@ test('difficulty rises with the registration rate the log has seen', () => {
   // With an empty log the rate term contributes nothing.
   assert.equal(store.difficultyFor('ab', 'vayu', NOW), requiredBits(2, 0));
   assert.equal(store.registrationsInWindow('vayu', NOW), 0);
+});
+
+test('AUDIT: the difficulty window is not a linear scan of the log', () => {
+  // Found by asking what an attacker gains by adding records rather than by reading them.
+  //
+  // Difficulty depends on the trailing 30 days of registrations in a TLD, and verifying one
+  // record consults that twice. Computing it by scanning every entry makes replaying a log of
+  // N records cost O(N^2) — and REGISTRY.md gives no way out, since the log is never truncated
+  // and "a peer that has never verified the history and wants full assurance MUST pay the full
+  // cost once". Adding a record costs the attacker one proof of work; the replay cost imposed
+  // on every peer that ever joins grows quadratically. That prices newcomers out of verifying,
+  // and a registry only newcomers-who-trust-someone can join is a different thing entirely.
+  //
+  // A timing assertion would be the obvious test and would be flaky in CI. What actually
+  // protects the fix is that the incremental index agrees with the naive computation under
+  // every arrival order — including out-of-order, which replication produces and which a
+  // sorted-array optimisation gets wrong if it appends instead of inserting.
+  const path = scratch();
+  const store = Store.open(path, NOW);
+  store.append(registration(), NOW);
+
+  // The fast index must agree with the reference implementation at every probe, including the
+  // window boundaries and instants far outside it.
+  const probes = [
+    0,
+    NOW - 40 * 86_400,
+    NOW - 1,
+    NOW,
+    NOW + 1,
+    NOW + 3600,
+    NOW + 29 * 86_400,
+    NOW + 31 * 86_400,
+    NOW + 10_000_000,
+  ];
+  for (const probe of probes) {
+    assert.equal(
+      store.registrationsInWindow('vayu', probe),
+      store.registrationsInWindowNaive('vayu', probe),
+      `fast and reference disagree at ${probe}`,
+    );
+  }
+
+  // And the record does fall inside its own window, so the probes above are not all zero.
+  assert.equal(store.registrationsInWindow('vayu', NOW + 3600), 1);
+});
+
+test('the sorted rate index survives out-of-order arrival', () => {
+  // Binary search is correct only on a sorted array. Replication delivers records in arrival
+  // order, not in time order, so an implementation that appends instead of inserting returns
+  // wrong counts — and a wrong count is a wrong difficulty, which is a fork.
+  const store = Store.open(scratch(), NOW);
+  const at = NOW + 7200;
+
+  // Distinct names so both are accepted, and — the point of the test — the SECOND record's
+  // notBefore is genuinely EARLIER than the first's. Backdating by 7200s is within the 86400s
+  // the verifier allows, so both are valid; only the index ordering is exercised.
+  store.append(
+    registration(
+      { name: 'atlasobservatory', notBefore: at, notAfter: at + TERM_SECONDS },
+      at,
+    ),
+    at,
+  );
+  store.append(
+    registration(
+      { name: 'zenithobservatory', notBefore: NOW, notAfter: NOW + TERM_SECONDS },
+      NOW,
+    ),
+    at,
+  );
+
+  // Sanity: the two really are out of order, or this test proves nothing.
+  assert.equal(store.length, 2, 'both registrations must have been accepted');
+
+  for (const probe of [NOW, NOW + 3600, at, at + 1, NOW + 20 * 86_400, NOW + 40 * 86_400]) {
+    assert.equal(
+      store.registrationsInWindow('vayu', probe),
+      store.registrationsInWindowNaive('vayu', probe),
+      `fast and reference disagree at ${probe}`,
+    );
+  }
 });
 
 test('the rate window counts only the same TLD', () => {

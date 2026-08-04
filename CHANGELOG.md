@@ -3,11 +3,57 @@
 All notable changes to VayuWeb are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-VayuWeb is pre-implementation. Until the first release there is no version number to assign, so
-changes accumulate under `[Unreleased]`. Versioning begins with the first tagged release of
-the registry core, under the scheme set by [VWIP-0003](docs/spec/VWIP-0003.md).
+Versions follow the scheme set by [VWIP-0003](docs/spec/VWIP-0003.md), which keeps the
+**protocol version** carried in every record separate from the **implementation version** on the
+software. Before 1.0.0 the public interface is explicitly unstable and a minor release may break
+it.
 
-## [Unreleased]
+## [0.1.0] — 2026-08-04
+
+First tagged release. The registry core, working on one machine: record format, verification,
+proof-of-work, the name lifecycle, a local log and a command-line tool. **No network** — peer
+replication is Phase 2 — and nothing here should be run in front of a hostile party yet.
+
+Versioned under [VWIP-0003](docs/spec/VWIP-0003.md). This release speaks **protocol version 1**.
+Per that proposal it is not a reference implementation and must not be described as one: no
+second implementation exists to check it against, so where this code and the specifications
+disagree, the specifications win.
+
+### Adversarial review
+
+Run before this version was bumped, as VWIP-0003 section 3.1(3) requires. Recorded here
+because a clean result is only evidence if someone says what was attacked.
+
+**Attacked and found nothing:** CBOR nesting depth (already bounded at 32 in both encode and
+decode, so a 4096-byte record of nested arrays cannot exhaust the stack); the duplicate-arrival
+path; revocation stickiness across a post-quarantine re-registration; equivocation at the same
+`seq`; signature and countersignature authority under every operation; the `--at` flag as a way
+to forge a term (it cannot: a postdated record is deferred by every peer's own clock, and a
+backdated one is refused).
+
+**Found and fixed, in this release:**
+
+- **A linear-cost amplification in the difficulty window.** Difficulty depends on the trailing
+  thirty days of registrations in a TLD, and verifying one record consulted that twice by
+  scanning every entry in the log — making a full replay O(N²). That is not merely slow: adding
+  a record costs an attacker one proof of work, linear in what they spend, while the replay cost
+  imposed on every peer that ever joins grows quadratically. `REGISTRY.md` offers no relief,
+  since the log is never truncated and "a peer that has never verified the history and wants full
+  assurance MUST pay the full cost once". Quadratic replay prices newcomers out of verifying, and
+  a registry only newcomers-who-trust-someone can join is a different thing from the one
+  specified. Now a per-TLD sorted index with two binary searches, and the duplicate check is a
+  set rather than a scan.
+- **A stray NUL byte in `store.ts`**, which had become the index-key separator by accident. It
+  was collision-free and worked, but it made the file read as binary to `grep` and was nobody's
+  intent. Replaced with a space, which is unambiguous because the label grammar admits only
+  `[a-z0-9-]`.
+
+The first fix is the one worth reading twice, because its first mutation test **failed to
+fail**: reverting the sorted insertion to a plain append left all 189 tests green. The
+out-of-order test had used two records with the same `notBefore`, so the array was sorted either
+way and the property was never exercised. The test was rewritten to invert the order genuinely,
+and the mutation then failed as it should. A test that passes against the broken version proves
+nothing, and this one had to be caught by trying.
 
 ### Added
 
@@ -167,9 +213,14 @@ the registry core, under the scheme set by [VWIP-0003](docs/spec/VWIP-0003.md).
 
 ### Notes
 
-- The registry core is under implementation in `registry/`: deterministic CBOR, domain
-  separation, strict Ed25519, the label grammar and ratified TLD set, record schema validation
-  and the verification state machine. `proxy/` and `client/` remain placeholders.
+- **What this release does not do.** There is no network: no discovery, no replication, no
+  convergence, no equivocation detection, no checkpoints and no light clients. The log is a local
+  file rather than a Hypercore, so entries are not self-authenticating and nothing can be
+  verified without replaying everything. `proxy/` and `client/` remain placeholders. Replication,
+  convergence and resolution have no conformance vectors either, and per VWIP-0003 section 4.3 no
+  claim of conformance is made for them.
+- Phase 6 of the roadmap — a second implementation by parties with no common employer or funder
+  — cannot be delivered from inside this repository and is not claimed as progressing.
 - Proof-of-work verification is defined as an interface (`RegistryView.powVerified`) with no
   default implementation. A permissive default would make every caller that forgot to supply one
   accept unproven records silently, which a passing test suite cannot show.
