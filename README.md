@@ -15,25 +15,43 @@
   a parallel web with no registrar, no certificate authority, and no landlord.
 </p>
 
+<p align="center">
+  <a href="https://github.com/johalputt/VayuWeb/actions/workflows/ci.yml"><img
+    src="https://github.com/johalputt/VayuWeb/actions/workflows/ci.yml/badge.svg?branch=main"
+    alt="ci"></a>
+  <a href="constitution/CONSTITUTION.md"><img
+    src="https://img.shields.io/badge/charter-ratified-2dd4bf" alt="charter: ratified"></a>
+  <a href="LICENSE"><img
+    src="https://img.shields.io/badge/licence-CC0%20docs%20%C2%B7%20MIT%20code-blue"
+    alt="licence: CC0 docs, MIT code"></a>
+  <a href="docs/ROADMAP.md"><img
+    src="https://img.shields.io/badge/roadmap-phase%201-f59e0b" alt="roadmap: phase 1"></a>
+</p>
+
 ---
 
-## Coming soon
+## Not usable yet
 
-**VayuWeb is not built yet, and this repository does not pretend otherwise.**
+**VayuWeb does not work yet, and this repository does not pretend otherwise.**
 
-What exists today is the part that has to come first: the **Constitution**, the
-**specifications**, and the **threat model**. There is no binary to download, no network to
-join, and no name to register. Everything in this repository describes a system that is being
-designed in the open, before a line of it is written.
+There is no binary to download, no network to join, and no name to register. Implementation
+began only after the **Constitution**, the **specifications** and the **threat model** were
+written — and what exists so far is a handful of registry primitives, not a registry.
 
 That order is deliberate. A naming system inherits whatever politics it was built with, and
-retrofitting governance onto shipped infrastructure has never once worked. So the rules come
-first, in public, where they can be attacked while changing them is still cheap.
+retrofitting governance onto shipped infrastructure has never once worked. So the rules came
+first, in public, where they could be attacked while changing them was still cheap.
+
+It is already earning its keep. Building against the specifications has found three
+consensus-critical defects in them — a wrong domain-separation prefix length, a founding TLD
+that violated its own grammar, and a duplicated entry in the launch namespace. Each would have
+produced a silent fork rather than a visible error, and each was found by implementing rather
+than by re-reading.
 
 | | |
 |---|---|
-| **Status** | Specification and charter — pre-implementation |
-| **Code** | None yet. The `registry/`, `proxy/` and `client/` directories are placeholders |
+| **Status** | Specification complete; implementation started at [Phase 1](docs/ROADMAP.md) |
+| **Code** | `registry/` holds the serialisation, hashing, signature and naming primitives. `proxy/` and `client/` are still placeholders |
 | **Charter** | [The VayuWeb Constitution](constitution/CONSTITUTION.md) — ratified, in force |
 | **Licence** | CC0 for the charter, specifications and artwork · MIT for code · no CLA |
 | **Home** | Long-term development moves to **Radicle**; GitHub is a temporary public mirror |
