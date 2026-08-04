@@ -1,7 +1,22 @@
 # registry/ — the VayuWeb name registry
 
-**Not yet implemented.** This directory will hold the peer-to-peer registry: a Hypercore
-append-only log with a Hyperbee index over it, holding every signed name record.
+**Implementation started; the registry does not work yet.** This directory will hold the
+peer-to-peer registry: a Hypercore append-only log with a Hyperbee index over it, holding every
+signed name record.
+
+What exists today is one module, and it is not a registry:
+
+| Component | State |
+|---|---|
+| Deterministic CBOR codec (`src/cbor.ts`) | Implemented, tested |
+| Domain-separated hashing and signing | Not started |
+| Record schema and validation | Not started |
+| Proof-of-work generation and verification | Not started |
+| The six operations and the lifecycle state machine | Not started |
+| Hyperbee index and keyspace | Not started |
+| Peer replication and convergence | Not started |
+
+Nothing here can register, resolve or replicate a name, and there is no network to join.
 
 Its responsibilities, as specified in [../docs/spec/REGISTRY.md](../docs/spec/REGISTRY.md):
 
