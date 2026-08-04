@@ -2121,7 +2121,7 @@ capability that only the holder ever created cannot be demanded from a party tha
 
 ### Article 35. The Namespace: TLD Equality, Creation, Freeze and Non-Removal
 
-35.1 The initial top-level domains are: .vayu, .vayu, .p2p, .free, .decent, .libre, .sov, .dao,
+35.1 The initial top-level domains are: .vayu, .p2p, .free, .decent, .libre, .sov, .dao,
 .indie, .open, .news and .blog.
 
 35.2 TLDs are flat, equal and non-hierarchical. No TLD confers status, priority, trust,

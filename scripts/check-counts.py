@@ -42,6 +42,18 @@ def read(rel):
         return handle.read()
 
 
+def launch_tld_set():
+    """The ratified extensions themselves, as a set. Source of truth for enumeration checks."""
+    text = read("docs/spec/NAMES.md")
+    anchor = re.search(r"below are the protocol's founding extensions", text)
+    if anchor is None:
+        return None
+    run = re.search(r"(?:^- `\.[a-z0-9]+`.*\n)+", text[anchor.end():], re.M)
+    if run is None:
+        return None
+    return set(re.findall(r"^- `\.([a-z0-9]+)`", run.group(0), re.M))
+
+
 def count_launch_tlds():
     """The founding extensions, enumerated as bullets in NAMES.md.
 
@@ -114,6 +126,45 @@ RULES = [
 ]
 
 
+def check_tld_enumerations(truth_set):
+    """Every ENUMERATION of the launch TLDs must match the ratified set exactly.
+
+    The count rules below guard sentences like "the eleven launch TLDs". They do not guard a
+    document that lists the extensions without stating how many there are -- and that is exactly
+    where the original defect survived. `.vayu` appeared twice in Article 35.1 of the charter,
+    every derived document inherited it, and correcting the ones that stated a number left the
+    charter and RESOLUTION.md still listing it twice, because neither says "eleven".
+
+    A list is matched by finding three or more consecutive ratified extensions on the same line
+    or the next, then reading the whole run.
+    """
+    failures = []
+    checked = 0
+    pattern = re.compile(r"\.([a-z0-9]+)")
+
+    for rel, path in markdown_files():
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+        # Collapse wrapped lines so a list broken across two lines is still one run.
+        for match in re.finditer(r"\.vayu[,`\s].{0,400}?\.blog", text, re.S):
+            run = match.group(0)
+            found = [m.group(1) for m in pattern.finditer(run)]
+            listed = [t for t in found if t in truth_set]
+            if len(listed) < 3:
+                continue
+            checked += 1
+            duplicates = sorted({t for t in listed if listed.count(t) > 1})
+            missing = sorted(truth_set - set(listed))
+            line = text[:match.start()].count("\n") + 1
+            if duplicates:
+                failures.append(
+                    f"{rel}:{line}: extension list repeats {', '.join(duplicates)}")
+            if missing:
+                failures.append(
+                    f"{rel}:{line}: extension list omits {', '.join(missing)}")
+    return checked, failures
+
+
 def as_number(word):
     """Interpret an asserted quantity, or None if it is not one."""
     lowered = word.lower()
@@ -165,6 +216,21 @@ def main():
                             f"but {rule['source']} defines {truth}\n"
                             f"      {match.group(0).strip()}"
                         )
+
+    truth_set = launch_tld_set()
+    if truth_set is None:
+        print("::error::could not read the founding-extension list from docs/spec/NAMES.md",
+              file=sys.stderr)
+        return 1
+    listed, list_failures = check_tld_enumerations(truth_set)
+    print(f"derived: {sorted(truth_set)} (the ratified extensions)")
+    print(f"checked {listed} extension enumeration(s)")
+    if listed == 0:
+        print("::error::no extension enumerations matched -- this check is enforcing nothing",
+              file=sys.stderr)
+        return 1
+    failures.extend(list_failures)
+    checked += listed
 
     if not checked:
         # Every rule above exists because a real document makes the claim. Matching none

@@ -38,6 +38,23 @@ it.
   punished: there is no penalty mechanism in the protocol, and inventing one here would be
   inventing consensus. The evidence is what the function returns.
 
+### Fixed
+
+- **The duplicated `.vayu` originated in the charter, and the first fix never reached it.**
+  Article 35.1 of `constitution/CONSTITUTION.md` — the constitutional definition of the
+  namespace — listed `.vayu` twice, and `docs/spec/RESOLUTION.md` step 2 inherited it. The
+  earlier round corrected the eight documents that stated a *number* and left the two that
+  merely listed the extensions, so the charter and `NAMES.md` disagreed about what the namespace
+  contains. Removing a repeated entry is editorial and changes no TLD: the set of distinct
+  extensions was eleven before and is eleven now. Inventing a twelfth would have been
+  substantive; deleting a duplicate is not.
+- **`scripts/check-counts.py` guarded the count but not the list**, which is precisely why the
+  defect survived in the two places that never say "eleven". It now also validates every
+  *enumeration* of the extensions against the ratified set in `NAMES.md`, failing on a repeat or
+  an omission, and fails loudly if it matches no enumeration at all. Mutation-tested by
+  reintroducing the duplicate into the charter, `RESOLUTION.md` and `FAQ.md` in turn; each is
+  caught.
+
 ### Adversarial review — second pass
 
 A deeper pass than the one that gated 0.1.0, over surfaces the first did not reach: the CBOR
