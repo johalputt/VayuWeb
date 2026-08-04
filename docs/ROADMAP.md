@@ -26,11 +26,19 @@ earlier one, but it cannot *finish* early.
 | Threat model | Complete (draft) |
 | Whitepaper, architecture, governance guide, glossary, FAQ | Complete (draft) |
 | Independent adversarial review of the above | **Open — this is the current work** |
-| Test vectors for every wire-visible rule | Open |
+| Test vectors for every wire-visible rule | Partial — [`conformance/vectors.json`](../conformance/vectors.json) pins the registry record rules, including a vector for every rejection code; replication, convergence and resolution have none |
 
 **Done when:** a competent implementer can read the specifications alone — without access to any
 source code and without asking a question — and produce a client that would interoperate. That
 property is required by Constitution Article 44.6, and it is not satisfied today.
+
+Implementing the registry against these specifications has so far found six defects in them,
+each recorded in `CHANGELOG.md`: two that would have made proof-of-work free or unnecessary, one
+that let an expired holder reclaim a name during quarantine, one that let a single renewal buy an
+unbounded term, one false justification in the index keyspace layout, and one difficulty ceiling
+that the schedule cannot reach. Every one was invisible to reading and obvious to implementing,
+which is the argument for treating the vector set as part of the specification rather than as
+test scaffolding.
 
 ## Phase 1 — Registry core
 

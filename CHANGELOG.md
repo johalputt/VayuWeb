@@ -82,6 +82,18 @@ the registry core; the scheme will be set by a VWIP before then, not improvised 
   — a governance process able to relicense the whole corpus by vote would be the capture vector,
   not the remedy.
 
+- **Conformance vectors** (`conformance/vectors.json`, with a README describing the format).
+  Forty cases pinning the registry record rules: each is a record's exact bytes, the registry
+  state to verify it against, the instant to verify it at, and the verdict every conforming
+  implementation must return. The rejection **code** is part of the contract rather than just
+  accept-or-reject, which is what makes check order observable between implementations; `defer`
+  is carried as a third verdict, since an implementation that rejects a clock-skewed record
+  instead will disagree permanently with honest peers about a valid one. A test fails if a
+  rejection code is added without a vector, and another compares the committed artifact against
+  a fresh generation so an encoding change appears as a reviewable diff. Proof-of-work
+  verification is injected rather than evaluated in these vectors, and the README says so
+  plainly: passing them does not demonstrate a correct proof-of-work implementation.
+
 ### Fixed
 
 - **The record schema let a registrant choose their own proof-of-work cost and salt.**

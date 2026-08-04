@@ -5,11 +5,14 @@
   "description": "VayuWeb name registry: signed append-only log, deterministic CBOR, Ed25519, Argon2id proof-of-work",
   "license": "MIT",
   "type": "module",
-  "engines": { "node": ">=22.6" },
+  "engines": {
+    "node": ">=22.6"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "node --test --experimental-strip-types 'src/**/*.test.ts'",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "vectors": "node --experimental-strip-types scripts/generate-vectors.ts"
   },
   "dependencies": {
     "@noble/curves": "^1.6.0",
