@@ -117,41 +117,46 @@ export interface RegistryRecord {
   readonly map: CborMap;
 }
 
-const fail = (code: RecordRejection, message: string): never => {
+// Deliberately a `function` declaration rather than a `const` arrow. TypeScript only applies
+// never-returning control-flow narrowing when the callee is a function declaration or a const
+// with an explicit type annotation; an inferred arrow silently does not narrow. The earlier
+// arrow form meant every `if (x === undefined) fail(...)` left `x` possibly-undefined, which
+// was then papered over with `as` casts — and a cast keeps compiling after someone deletes the
+// guard above it, which is precisely the check this module exists to make impossible.
+function fail(code: RecordRejection, message: string): never {
   throw new RecordError(code, message);
-};
+}
 
-const uintField = (map: CborMap, key: string): number => {
+function uintField(map: CborMap, key: string): number {
   const value = map.get(key);
   if (value === undefined) fail('MISSING_FIELD', `${key} is required`);
   if (typeof value === 'bigint') fail('BAD_FIELD_TYPE', `${key} exceeds the supported range`);
   if (typeof value !== 'number') fail('BAD_FIELD_TYPE', `${key} must be an unsigned integer`);
-  return value as number;
-};
+  return value;
+}
 
-const textField = (map: CborMap, key: string): string => {
+function textField(map: CborMap, key: string): string {
   const value = map.get(key);
   if (value === undefined) fail('MISSING_FIELD', `${key} is required`);
   if (typeof value !== 'string') fail('BAD_FIELD_TYPE', `${key} must be text`);
-  return value as string;
-};
+  return value;
+}
 
-const bytesField = (map: CborMap, key: string, length: number): Uint8Array => {
+function bytesField(map: CborMap, key: string, length: number): Uint8Array {
   const value = map.get(key);
   if (value === undefined) fail('MISSING_FIELD', `${key} is required`);
   if (!(value instanceof Uint8Array)) fail('BAD_FIELD_TYPE', `${key} must be a byte string`);
-  const bytes = value as Uint8Array;
-  if (bytes.length !== length) {
-    fail('BAD_FIELD_TYPE', `${key} must be ${length} bytes, got ${bytes.length}`);
+  if (value.length !== length) {
+    fail('BAD_FIELD_TYPE', `${key} must be ${length} bytes, got ${value.length}`);
   }
-  return bytes;
-};
+  return value;
+}
 
 const utf8Length = (text: string): number => new TextEncoder().encode(text).length;
 
 function parsePowProof(value: CborValue): PowProof {
   if (!(value instanceof Map)) fail('BAD_POW_SHAPE', 'powProof must be a map or null');
-  const map = value as CborMap;
+  const map: CborMap = value;
 
   const alg = textField(map, 'alg');
   if (alg !== 'argon2id') fail('BAD_POW_SHAPE', `unsupported pow algorithm: ${alg}`);
@@ -180,7 +185,7 @@ function parsePowProof(value: CborValue): PowProof {
 
 function parseEntry(value: CborValue): RecordEntry {
   if (!(value instanceof Map)) fail('BAD_RECORD_ENTRY', 'entry must be a map');
-  const map = value as CborMap;
+  const map: CborMap = value;
 
   const type = textField(map, 'type');
   const entryValue = map.get('value');
@@ -190,7 +195,7 @@ function parseEntry(value: CborValue): RecordEntry {
   let ttl = DEFAULT_TTL;
   if (rawTtl !== undefined) {
     if (typeof rawTtl !== 'number') fail('BAD_RECORD_ENTRY', 'ttl must be an unsigned integer');
-    ttl = rawTtl as number;
+    ttl = rawTtl;
     if (ttl < MIN_TTL || ttl > MAX_TTL) {
       fail('BAD_RECORD_ENTRY', `ttl ${ttl} outside ${MIN_TTL}-${MAX_TTL}`);
     }
@@ -229,7 +234,7 @@ function parseEntry(value: CborValue): RecordEntry {
         break;
       case 'txt': {
         if (typeof entryValue !== 'string') fail('BAD_RECORD_ENTRY', 'txt value must be text');
-        const text = entryValue as string;
+        const text: string = entryValue;
         const bytes = utf8Length(text);
         if (bytes < 1 || bytes > 255) fail('BAD_RECORD_ENTRY', 'txt value must be 1-255 bytes');
         for (const character of text) {
@@ -240,7 +245,7 @@ function parseEntry(value: CborValue): RecordEntry {
         break;
       }
       case 'alias':
-        if (typeof entryValue !== 'string' || parseAlias(entryValue as string) === null) {
+        if (typeof entryValue !== 'string' || parseAlias(entryValue) === null) {
           fail('BAD_RECORD_ENTRY', 'alias must name a valid, ratified label.tld');
         }
         break;
@@ -288,7 +293,7 @@ export function parseRecord(map: CborMap): RegistryRecord {
   const rawEntries = map.get('records');
   if (rawEntries === undefined) fail('MISSING_FIELD', 'records is required');
   if (!Array.isArray(rawEntries)) fail('BAD_FIELD_TYPE', 'records must be an array');
-  const entryValues = rawEntries as CborValue[];
+  const entryValues: CborValue[] = rawEntries;
   if (entryValues.length > MAX_RECORD_ENTRIES) {
     fail('TOO_MANY_RECORDS', `${entryValues.length} entries exceeds ${MAX_RECORD_ENTRIES}`);
   }
