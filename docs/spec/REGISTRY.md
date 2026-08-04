@@ -242,12 +242,17 @@ verify(rec, bytes, state):
   input = "VayuWeb-Registry-Record-v1" || 0x00 || det_cbor(strip(rec, sig, coSig))
   prev  = state.current(rec.name, rec.tld)     // may be absent
 
+  // Clock discipline. Applies to EVERY operation, not to REGISTER alone -- see
+  // "Term bounds and the clock" below for why.
+  clock_check(rec):
+      if rec.notBefore > now + 300:           defer  CLOCK_SKEW
+      if rec.notBefore < now - 86400:         reject BACKDATED
+
   if rec.op == REGISTER:
       if rec.seq != 0 or rec.prevHash != ZERO32:   reject BAD_CHAIN
       if prev exists and not fully_released(prev): reject NAME_TAKEN
       if rec.notAfter - rec.notBefore != 31536000: reject BAD_TERM
-      if rec.notBefore > now + 300:                defer  CLOCK_SKEW
-      if rec.notBefore < now - 86400:              reject BACKDATED
+      clock_check(rec)
       if not ed25519_strict(rec.ownerKey, input, rec.sig): reject BAD_SIG
       if not pow_ok(rec, difficulty(rec.name, rec.tld, state)): reject BAD_POW
       return accept
@@ -256,6 +261,7 @@ verify(rec, bytes, state):
   if rec.seq != prev.seq + 1:                 reject BAD_SEQ
   if rec.prevHash != record_hash(prev):       reject BAD_CHAIN
   if rec.notBefore < prev.notBefore + 300:    reject TOO_SOON
+  clock_check(rec)
   if revoked(rec.name, rec.tld):              reject REVOKED
   if not ed25519_strict(prev.ownerKey, input, rec.sig): reject BAD_SIG
   if rec.op != TRANSFER and rec.ownerKey != prev.ownerKey: reject BAD_OWNER
@@ -277,6 +283,33 @@ verify(rec, bytes, state):
 
 `state.current` reflects the verifier's own linearised log only. Verification makes no network
 call: a verifier that asks another peer for a verdict has replaced verification with trust.
+
+### Term bounds and the clock
+
+`clock_check` runs on every operation. An earlier revision of this section placed those two
+lines inside the `REGISTER` branch, and that placement was a hole rather than an omission of
+detail.
+
+`RENEW` derives its expiry as `max(prev.notAfter, notBefore) + 31536000`, and its window check
+`notBefore >= prev.notAfter - 5184000` is a **lower** bound — it asks only that the renewal is
+not too early. With no upper bound on `notBefore`, a renewal naming a term start a century ahead
+receives an expiry a century and a year ahead, for a single proof of work. That defeats the one
+property `RENEW` exists to create: that holding ten thousand names is a recurring annual cost
+rather than a one-off. A squatter would pay once.
+
+Bounding `notBefore` from above closes it at the source, and costs nothing, because for every
+operation the term begins at the moment of the act — `notBefore` is always approximately `now`.
+Early renewal is unaffected: "early" there is relative to the predecessor's expiry, not to the
+clock.
+
+The other operations need the same bound for a smaller but real reason. `TOO_SOON` measures each
+record against `prev.notBefore`, so a postdated `UPDATE` raises the floor every later record must
+clear and freezes the name for the remainder of its term. The bound is a property of a record,
+not of one operation.
+
+A postdated record is **deferred, never rejected**. The verifier's own clock may be behind, and
+a rejection there would make two honest peers permanently disagree about a valid record —
+precisely the divergence the deterministic rules exist to prevent.
 
 ## Index Keyspace Layout
 

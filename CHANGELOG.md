@@ -82,8 +82,32 @@ the registry core; the scheme will be set by a VWIP before then, not improvised 
   — a governance process able to relicense the whole corpus by vote would be the capture vector,
   not the remedy.
 
+### Fixed
+
+- **A single `RENEW` could buy an unbounded term for one proof of work.** Found by attacking the
+  verification rules while implementing them. `RENEW` derives its expiry from `notBefore`, and
+  the renewal-window check is a lower bound only; the clock checks sat inside the `REGISTER`
+  branch, so nothing bounded `notBefore` from above. A renewal naming a term start a century
+  ahead received a term ending a century and a year ahead, at the cost of one proof — defeating
+  the property `RENEW` exists to create, that holding a large portfolio is a recurring annual
+  cost rather than a one-off. `clock_check` now applies to every operation. Postdating is
+  **deferred, not rejected**, so a verifier with a slow clock does not permanently disagree with
+  its peers about a valid record.
+- **Three namespace and prefix defects in the specifications**, each found by implementing the
+  text rather than reading it: the domain-separation prefixes were documented as 23 and 21 bytes
+  and are 26 and 24; `.p2p` violated the letters-only label ABNF, which now admits digits after
+  the first character; and the launch-extension list contained `.vayu` twice, so eight documents
+  described twelve extensions where eleven exist. `scripts/check-counts.py` now derives such
+  counts from the document that defines them, and refuses a duplicated entry outright.
+- **The accompanying-header count** was given as twelve in three documents; section 3 of
+  `CONTENT-SECURITY.md` defines ten.
+
 ### Notes
 
-- No protocol code exists yet. The `registry/`, `proxy/` and `client/` directories are
-  placeholders describing what will be built there.
+- The registry core is under implementation in `registry/`: deterministic CBOR, domain
+  separation, strict Ed25519, the label grammar and ratified TLD set, record schema validation
+  and the verification state machine. `proxy/` and `client/` remain placeholders.
+- Proof-of-work verification is defined as an interface (`RegistryView.powVerified`) with no
+  default implementation. A permissive default would make every caller that forgot to supply one
+  accept unproven records silently, which a passing test suite cannot show.
 - Long-term development will move to Radicle; this GitHub repository is a public mirror.
