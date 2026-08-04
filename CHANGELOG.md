@@ -12,6 +12,34 @@ it.
 
 ### Added
 
+- **The log's merkle tree and the checkpoint format** (`registry/src/merkle.ts`,
+  `registry/src/checkpoint.ts`), closing an Article 44.6 gap rather than working around it.
+  `REGISTRY.md` named `treeRoot` and required "Hypercore inclusion proofs" without ever stating
+  the tree's construction, so the value was **uncomputable from these specifications alone** —
+  precisely the property the charter requires an implementer to have. The construction is now
+  normative in `REGISTRY.md`: leaf, parent and root hashing with their domain-separation bytes,
+  byte size bound into every node, flat-tree indices, and combination by leaf span rather than
+  byte size so the tree's shape cannot depend on the data.
+
+  Inclusion proofs are implemented and adversarially tested: a proof does not verify against a
+  different root, for data it was not made for, with any sibling tampered, with a sibling's side
+  flipped, or with a substituted peak — that last one because verification checks the
+  reconstructed peak against the claimed one rather than only the final root, and checking the
+  root alone would let a proof point at a different peak supplied in the same list.
+
+  Checkpoints carry no signature, deliberately: a signed checkpoint would be an attestation
+  peers could be asked to trust rather than recompute, which is the privileged authority the
+  charter forbids. Comparison distinguishes real divergence (same length, different history)
+  from ordinary progress (different lengths) and from an indexer bug (same history, different
+  derived state) — collapsing the third into the first would send someone hunting the log for a
+  defect that is not in it.
+
+  Freshness is handled by being honest about it in the types. No inclusion proof shows that the
+  length a peer handed over is current, so `LightClientAnswer` carries `observedAt`,
+  `peersAgreeing` and a `freshnessUnproven: true` that cannot be omitted, and the trusted length
+  is the greatest **corroborated** one — taking the greatest claimed would let a single lying
+  peer set it. It fails toward staleness rather than trust, because a stale answer is wrong
+  about *when* and a forged one is wrong about *what*.
 - **The resolution algorithm** (`registry/src/resolve.ts`) — Phase 3's core, as pure logic.
   Steps 1 to 10 and 13 of `RESOLUTION.md` are decidable without a network and are implemented
   here; the registry lookup, IPNS resolution and content fetch arrive through a `ResolverPorts`

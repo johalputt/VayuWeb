@@ -403,6 +403,45 @@ liveNames}`. Anyone can derive it from the same log, so it is not an authority a
 signature that would make it one. It is a comparison aid: two peers agreeing on `treeRoot` at a
 `logLength` have identical history to that point, reducing a divergence check to 32 bytes.
 
+`liveNames` counts names that **resolve** at the checkpoint instant, not names present in the
+index. A name in grace or quarantine is indexed and does not resolve; counting it would make the
+figure describe storage rather than the namespace.
+
+### The merkle tree
+
+An earlier revision of this section named `treeRoot` and required "Hypercore inclusion proofs"
+without stating the tree's construction, which left the value uncomputable from these
+specifications alone — the property Constitution Article 44.6 requires. The construction is
+therefore normative here. It is the flat-tree / merkle-mountain-range form Hypercore uses, so
+the two agree:
+
+```text
+leaf(data)          = BLAKE2b-256( 0x00 || uint64be(len(data))     || data )
+parent(left, right) = BLAKE2b-256( 0x01 || uint64be(lsize + rsize) || lhash || rhash )
+treeRoot(roots)     = BLAKE2b-256( 0x02 || for each root, in left-to-right order:
+                                             hash || uint64be(index) || uint64be(size) )
+```
+
+- The leading byte separates node kinds. Without it, a leaf whose data happened to equal two
+  concatenated hashes could be presented as an interior node — the standard second-preimage
+  attack on merkle trees.
+- `size` is the **byte length** of the data a node covers, not a count of leaves, and is bound
+  into every hash. Omitting it would admit a differently shaped tree over the same leaves with
+  the same root.
+- `index` is flat-tree position: leaf `k` is at `2k`, and a subtree covering `count` leaves from
+  leaf `start` is at `2 * start + count - 1`. Interior nodes therefore occupy odd indices, which
+  is what lets an inclusion proof be a bare list of sibling hashes carrying no shape metadata.
+- Combining is by **leaf span**, not byte size: two subtrees combine when they cover the same
+  number of leaves. Entries differ in length, so combining by byte size would give the tree a
+  shape that depended on the data.
+- The root of an empty log is `BLAKE2b-256(0x02)` — defined rather than special-cased, so two
+  peers with empty logs can still compare.
+
+`indexRoot` is `BLAKE2b-256("VayuWeb-Registry-Index-v1" || 0x00 || rows)`, where each row is a
+current-pointer key from the index keyspace concatenated with the 32-byte `record_hash` it points
+at, and rows are sorted bytewise. Sorting is what makes the value independent of the order a peer
+happened to accept records in; without it every pair of peers would report a false divergence.
+
 A light client verifies one name without the full history:
 
 1. Obtain a `logLength` and `treeRoot` from one or more peers.
