@@ -12,6 +12,30 @@ it.
 
 ### Added
 
+- **The resolution algorithm** (`registry/src/resolve.ts`) — Phase 3's core, as pure logic.
+  Steps 1 to 10 and 13 of `RESOLUTION.md` are decidable without a network and are implemented
+  here; the registry lookup, IPNS resolution and content fetch arrive through a `ResolverPorts`
+  interface with no default, for the same reason `RegistryView` has none.
+
+  The check *order* is the load-bearing part and is tested directly: the steps are normative and
+  ordered, so two resolvers checking in different orders return different numbered errors for a
+  request that is wrong in more than one way — and that number is what the user sees and what a
+  second implementation is measured against. TLD classification precedes label validation;
+  label validation precedes any registry lookup, so malformed input reaches neither the network
+  nor the cache; and "the log has never synchronised" (1502) beats "the name is not there"
+  (1404), because those are different answers.
+
+  Also pinned: an expired name does not resolve *even though its content is usually still held
+  locally*, which is the entire point of the rule; unknown entry types are stored but never
+  acted upon; the alias budget is three hops counted per original request, and a two-name cycle
+  — invisible from either record alone — is detected rather than chased; and path mapping
+  refuses traversal *before* normalising rather than after, which is the ordering that has
+  produced traversal bugs for thirty years.
+
+  Diagnostics are a field on the outcome, never a header. Recording them is mandatory;
+  disclosing them to the requesting page is the caller's decision and off by default. Keeping
+  the two apart in the type system is what makes that default enforceable rather than
+  aspirational.
 - **Convergence and equivocation detection** (`registry/src/converge.ts`) — the consensus-critical
   half of Phase 2, which is pure logic and needs no network. Two peers on either side of a
   partition can each accept a valid first registration of the same free name; both did the work,

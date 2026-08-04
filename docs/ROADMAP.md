@@ -86,6 +86,11 @@ The loopback HTTP proxy on `127.0.0.1:7654`; the token-authenticated control API
 caching; per-name origin isolation and the default Content-Security-Policy; the numbered error
 catalogue.
 
+**Partly done.** The resolution algorithm itself — steps 1 to 10 and 13, the record-selection
+order, alias following with its hop budget, and the numbered error catalogue — is implemented and
+tested in `registry/src/resolve.ts`, with the registry, IPNS and content-fetch steps behind an
+interface. The proxy, the control API and the browser integration remain.
+
 **Depends on:** Phase 2.
 
 **Done when:** an unmodified browser, pointed at the proxy, renders a VayuWeb page end to end — and

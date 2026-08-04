@@ -22,6 +22,7 @@ record is valid — the part every peer must agree on byte for byte.
 | Name lifecycle: grace, quarantine, revocation (`src/lifecycle.ts`) | Implemented, tested |
 | Local append-only log and index (`src/store.ts`) | Implemented, tested — **not** Hypercore |
 | Convergence and equivocation detection (`src/converge.ts`) | Implemented, tested |
+| Resolution algorithm (`src/resolve.ts`) | Implemented, tested — no network; steps 11-12 are ports |
 | Command-line tool (`src/cli.ts`, `bin/`) | Implemented |
 | Conformance vectors ([`../conformance/vectors.json`](../conformance/vectors.json)) | Registry rules only |
 | Hypercore log and Hyperbee index | Not started |
