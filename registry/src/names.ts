@@ -43,6 +43,53 @@ import { NAMESPACE_ANNEX } from './namespace.generated.ts';
  */
 export const RATIFIED_TLDS: ReadonlySet<string> = new Set(NAMESPACE_ANNEX);
 
+/**
+ * Labels withheld in every extension. NAMES.md, "Reserved labels".
+ *
+ * "A registration operation naming one of them is invalid and MUST be rejected by every peer, not
+ * merely ignored; an invalid operation never becomes an ownership fact."
+ *
+ * This set was missing, and its absence was a wire-visible divergence in code whose own header
+ * claims to implement reserved labels. `wpad.vayu`, `pac.vayu`, `proxy.vayu`, `control.vayu`,
+ * `api.vayu` and `vayu.vayu` were all registrable here and `BAD_LABEL` on any implementation
+ * written from the specification — two peers holding different ownership facts for one name,
+ * permanently, on the exact label set NAMES.md singles out as dangerous.
+ *
+ * Two harms, and the second is the larger one:
+ *
+ * - **The named vector.** `wpad` is Web Proxy Auto-Discovery: a browser looking for its proxy
+ *   fetches `wpad.<domain>/wpad.dat` and runs the JavaScript it finds there to decide where every
+ *   request goes. `pac` is the same attack under the configuration file's own name. NAMES.md is
+ *   explicit that "a name that a browser might fetch as configuration MUST NOT be registrable by a
+ *   stranger".
+ * - **The fork.** No attacker is needed. Two conformant-looking peers simply disagree about who
+ *   owns `api.vayu`, and nothing later reconciles them.
+ *
+ * `_vayu` appears in the specification's table and not here: underscore is not in the label
+ * character set, so the grammar refuses it before reservation is ever consulted. Listing it would
+ * be a second, weaker check for a string the first check already cannot admit.
+ */
+export const RESERVED_LABELS: ReadonlySet<string> = new Set([
+  // Host-prefix confusion.
+  'www',
+  // RFC 6761 special-use: a resolver must treat it as loopback, never resolve it through VayuWeb.
+  'localhost',
+  // RFC 2606, reserved for documentation and testing.
+  'example',
+  'invalid',
+  'test',
+  // Protocol identity, withheld in every extension including `.vayu` so no holder speaks as the
+  // protocol.
+  'vayu',
+  // The resolver's own control surface, and proxy auto-configuration conventions.
+  'control',
+  'api',
+  'resolver',
+  'proxy',
+  'pac',
+  'wpad',
+]);
+
 /** Maximum label length in characters, which for ASCII is also bytes. */
 export const MAX_LABEL_LENGTH = 63;
 
@@ -104,6 +151,12 @@ export function labelRejection(label: string): NameRejection | null {
   // pending an allocation VWIP. Their value comes from scarcity, so first-come allocation
   // would turn a governance question into a race.
   if (label.length <= 2) return 'RESERVED_LABEL';
+
+  // The named reservations. Checked last among the label rules because it is the only one that
+  // consults a set rather than the shape of the string — but checked, which it was not: every
+  // label in RESERVED_LABELS returned null here while the module's own header claimed to
+  // implement them.
+  if (RESERVED_LABELS.has(label)) return 'RESERVED_LABEL';
 
   return null;
 }

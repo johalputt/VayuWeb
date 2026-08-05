@@ -135,6 +135,32 @@ test('I rebind my own hostname to 127.0.0.1 and reach your proxy', () => {
   }
 });
 
+test('a reserved label is refused at the proxy, which is where wpad would be fetched', () => {
+  // The registry refusing `wpad.vayu` is necessary and not sufficient. The attack happens in a
+  // browser: one configured to discover its proxy automatically fetches `wpad.<domain>/wpad.dat`
+  // and runs the JavaScript it finds there to decide where every request goes. That fetch arrives
+  // *here*, so this is the surface that has to refuse it — and it does so through the same
+  // `labelRejection` the verifier uses, rather than through a second list that could drift.
+  const cache = new NegativeCache();
+  for (const host of [
+    'wpad.vayu',
+    'pac.vayu',
+    'proxy.vayu',
+    'api.vayu',
+    'control.vayu',
+    'vayu.vayu',
+  ]) {
+    const response = handleRequest(get('/', { host }), ports(), cache, NOW);
+    assert.equal(response.status, RESOLVE_ERRORS.LABEL_INVALID.http, host);
+  }
+  // And an ordinary name still routes, so the refusal is about the label rather than about
+  // everything.
+  assert.equal(
+    handleRequest(get('/', { host: 'atlas.vayu' }), ports(), cache, NOW).status,
+    RESOLVE_ERRORS.NAME_NOT_FOUND.http,
+  );
+});
+
 test('absolute-form takes its host from the target, never from a disagreeing Host header', () => {
   // A request carrying `http://a.vayu/` with `Host: b.vayu` is one two implementations would route
   // differently, and a proxy that consults whichever is more convenient is a proxy an attacker can

@@ -10,6 +10,36 @@ it.
 
 ## [Unreleased]
 
+### Fixed — `wpad.vayu` was registrable, in code that claimed to prevent it
+
+- **The reserved-label set was never implemented.** `NAMES.md` withholds twelve named labels in
+  every extension and says a registration naming one "is invalid and MUST be rejected by every
+  peer, not merely ignored; an invalid operation never becomes an ownership fact".
+  `registry/src/names.ts` implemented the length classes and stopped. Its own header claimed the
+  module covers "label grammar, **reserved labels** and the ratified TLD set".
+
+  So `wpad.vayu`, `pac.vayu`, `proxy.vayu`, `control.vayu`, `api.vayu` and `vayu.vayu` were all
+  registrable here.
+
+  **Two harms, and the second is the larger.** `wpad` is Web Proxy Auto-Discovery: a browser
+  configured to find its proxy automatically fetches `wpad.<domain>/wpad.dat` and runs the
+  JavaScript it finds there to decide where every request goes — a proxy-hijack vector with its own
+  CVE history, and the reason `NAMES.md` says "a name that a browser might fetch as configuration
+  MUST NOT be registrable by a stranger". `pac` is the same attack under the configuration file's
+  own name. But no attacker is needed for the second harm: an implementation written from the
+  specification refuses all twelve as `BAD_LABEL`, this one accepted them, and two peers holding
+  different ownership facts for one name is the fork Article 44.6 exists to prevent.
+
+- Fixed at the single validation point both the verifier and the proxy already use, so there is
+  no second list to drift. **A conformance vector per reserved label** now exists — without them a
+  second implementation was not measured on the rule either, which is part of how this survived.
+  A proxy test pins the browser-facing refusal specifically, because that is where a `wpad` fetch
+  actually arrives.
+
+- `_vayu` is named in the specification's table and deliberately absent from the set: underscore is
+  not in the label character set, so the grammar refuses it before reservation is consulted, and a
+  second check for a string the first cannot admit is a check that only looks like coverage.
+
 ### Added — three conformance suites for the rules where forks actually live
 
 - **`conformance/vectors.json` gains `convergence`, `resolution` and `replication`** alongside the

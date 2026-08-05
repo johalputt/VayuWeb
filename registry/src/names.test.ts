@@ -8,6 +8,7 @@ import {
   labelRejection,
   isValidLabel,
   isWellShapedTld,
+  RESERVED_LABELS,
   isRatifiedTld,
   nameRejection,
   assertValidName,
@@ -119,6 +120,65 @@ test('all one and two character labels are reserved in every TLD', () => {
   let registrable = 0;
   for (const a of alphabet) for (const b of alphabet) if (isValidLabel(a + b)) registrable++;
   assert.equal(registrable, 0, 'no two-character label may be registrable');
+});
+
+test('I register wpad.vayu and your browser fetches its proxy configuration from me', () => {
+  // The attack, in the attacker's voice.
+  //
+  // `wpad` is Web Proxy Auto-Discovery. A browser configured to find its proxy automatically
+  // fetches `wpad.<domain>/wpad.dat` and runs the JavaScript it finds there to decide where every
+  // request goes. It is a proxy-hijack vector old enough to have its own CVE history, and
+  // NAMES.md withholds the label for exactly that reason: "a name that a browser might fetch as
+  // configuration MUST NOT be registrable by a stranger".
+  //
+  // `pac` is the same attack under the file's own name. `control`, `api`, `resolver` and `proxy`
+  // collide with the resolver's own control surface. `vayu` is protocol identity — withheld in
+  // every extension including `.vayu`, so that no holder can speak as the protocol. `localhost`
+  // is RFC 6761 special-use. `example`, `invalid` and `test` are RFC 2606.
+  //
+  // The second harm is worse than the first and needs no attacker at all. An implementation
+  // written from NAMES.md refuses all of these as BAD_LABEL. One that does not accepts them. Two
+  // peers then hold different ownership facts for the same name, permanently — the namespace fork
+  // Article 44.6 and the Phase 0 acceptance test exist to prevent, on the exact label set the
+  // specification singles out as dangerous.
+  for (const label of RESERVED_LABELS) {
+    assert.equal(
+      labelRejection(label),
+      'RESERVED_LABEL',
+      `${label} is withheld by NAMES.md and must be refused`,
+    );
+    assert.equal(nameRejection(label, 'vayu'), 'RESERVED_LABEL', label);
+  }
+});
+
+test('the reserved set is exactly the one NAMES.md withholds', () => {
+  // Read back from the specification rather than trusted to have been transcribed. A reserved
+  // set that drifts from the table is a set that refuses names others accept, or accepts names
+  // others refuse, and both are the fork this rule exists to prevent.
+  const spec = readFileSync(new URL('../../docs/spec/NAMES.md', import.meta.url), 'utf8');
+  const section = spec.split('## Reserved labels')[1]?.split('Reserved labels are not')[0] ?? '';
+  const named = [...section.matchAll(/`([a-z_][a-z0-9_]*)`/g)]
+    .map((m) => m[1]!)
+    .filter((word) => !['a', 'z', '0', '9'].includes(word));
+
+  for (const label of named) {
+    assert.ok(
+      RESERVED_LABELS.has(label) || label.startsWith('_'),
+      `${label} is named in NAMES.md but not in RESERVED_LABELS`,
+    );
+  }
+  // `_vayu` is refused by the grammar before reservation is consulted: underscore is not in the
+  // label character set at all. Named in the table for the reader, not needed in the set.
+  assert.equal(labelRejection('_vayu'), 'BAD_CHARACTER');
+});
+
+test('a reserved label is refused in every extension, not only in .vayu', () => {
+  // "Withheld in every TLD" is the rule. A per-extension carve-out would make `vayu.blog`
+  // registrable, and a holder of it could speak as the protocol on a page a reader trusts.
+  for (const tld of ['vayu', 'blog', 'news', 'p2p', 'zine']) {
+    assert.equal(nameRejection('wpad', tld), 'RESERVED_LABEL', tld);
+    assert.equal(nameRejection('vayu', tld), 'RESERVED_LABEL', tld);
+  }
 });
 
 test('non-ASCII and uppercase are rejected rather than normalised', () => {

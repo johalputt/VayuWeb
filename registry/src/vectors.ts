@@ -34,6 +34,7 @@ import { sign, publicKeyFrom } from './signature.ts';
 import { POW_ALGORITHM, POW_NONCE_LENGTH } from './pow.ts';
 import { TERM_SECONDS, RENEWAL_WINDOW_SECONDS } from './verify.ts';
 import { GRACE_SECONDS } from './lifecycle.ts';
+import { RESERVED_LABELS } from './names.ts';
 
 /**
  * Fixed keys. Not secret, never to be used for anything real, and constant so that the vector
@@ -165,6 +166,16 @@ const accept = { outcome: 'accept' } as const;
 const rejectWith = (code: string) => ({ outcome: 'reject', code }) as const;
 const deferWith = (reason: string) => ({ outcome: 'defer', reason }) as const;
 
+/** One vector per named reserved label, built from the set the verifier enforces. */
+const RESERVED_LABEL_VECTORS: Vector[] = [...RESERVED_LABELS].sort().map((label) => ({
+  name: `reserved/${label}`,
+  rule: `NAMES.md: ${label} is withheld in every extension and MUST be rejected by every peer`,
+  record: toHex(registration({ name: label })),
+  now: VECTOR_NOW,
+  state: FRESH,
+  expect: rejectWith('BAD_LABEL'),
+}));
+
 /**
  * Every vector. Ordered by the stage of verification it exercises, so a failing implementation
  * fails early on the coarsest thing it got wrong.
@@ -199,6 +210,17 @@ export function buildVectors(): Vector[] {
       state: FRESH,
       expect: rejectWith('NON_CANONICAL'),
     },
+
+    /* -- reserved labels ----------------------------------------------------- */
+    //
+    // A vector per named reservation. Without these, a second implementation is not measured on
+    // the rule at all — which is how this one shipped: NAMES.md withheld the labels, the module's
+    // own header claimed to implement them, and every one of them was registrable.
+    //
+    // `wpad` and `pac` are the sharp end. A browser looking for its proxy fetches
+    // `wpad.<domain>/wpad.dat` and runs the JavaScript it finds there to decide where every
+    // request goes, so a stranger holding that name configures the reader's proxy.
+    ...RESERVED_LABEL_VECTORS,
 
     /* -- schema ------------------------------------------------------------- */
     {
