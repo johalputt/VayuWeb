@@ -26,7 +26,7 @@ earlier one, but it cannot *finish* early.
 | Threat model | Complete (draft) |
 | Whitepaper, architecture, governance guide, glossary, FAQ | Complete (draft) |
 | Independent adversarial review of the above | **Open — this is the current work** |
-| Test vectors for every wire-visible rule | Partial — [`conformance/vectors.json`](../conformance/vectors.json) pins the registry record rules, including a vector for every rejection code; replication, convergence and resolution have none |
+| Test vectors for every wire-visible rule | **Four suites**, in [`conformance/vectors.json`](../conformance/vectors.json): record verification (a vector for every rejection code), convergence, resolution and replication. The last three pin what implementations must *agree* about rather than what one accepts — which is where a fork lives, and where every consensus-critical defect found here so far has been |
 
 **Done when:** a competent implementer can read the specifications alone — without access to any
 source code and without asking a question — and produce a client that would interoperate. That

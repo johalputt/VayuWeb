@@ -10,6 +10,41 @@ it.
 
 ## [Unreleased]
 
+### Added — three conformance suites for the rules where forks actually live
+
+- **`conformance/vectors.json` gains `convergence`, `resolution` and `replication`** alongside the
+  existing record suite, closing Phase 0's last open item. The record suite pins what a verifier
+  *accepts*. These pin what independent implementations must **agree about afterwards**, which is a
+  different property and the one that matters for Article 44.6.
+
+  The distinction is not academic here. **Every consensus-critical defect this project has found
+  was invisible to record verification** and visible only to the question "what would a second
+  implementation do": the convergence rule decided conflicts by local arrival order, so two peers
+  kept different owners forever; that rule was then found to be called by nothing; and the
+  resolver preferred the frozen snapshot over the living pointer, so a conforming publisher and a
+  conforming resolver together froze every site. Record vectors passed throughout all three.
+
+- **The convergence suite carries each pair twice, mirrored.** An implementation that decides by
+  argument position, by arrival, or by its own log index gives one answer to the pair and a
+  different answer to its mirror — which is exactly the fork that shipped. Vectors carry
+  `logIndex: null` deliberately: a vector cannot express a local log position, and the whole point
+  of the contract is that no implementation needs one.
+
+- Resolution vectors pin the pointer-before-snapshot order, that `txt` is never a source, that
+  subdomains are refused rather than guessed at, and that an unsynchronised resolver answers
+  `REGISTRY_UNAVAILABLE` rather than `NAME_NOT_FOUND` — because a resolver that has never
+  synchronised does not know the name is absent, and saying so would be inventing a fact from its
+  own ignorance.
+
+- All three suites mutation-tested against the real defects: restoring the frozen-publisher order,
+  making convergence decide by argument position, and having an unsynchronised resolver claim a
+  name is absent. Each is caught.
+
+- A first draft of the resolution vectors passed the **text** form of a CID where REGISTRY.md
+  types the entry value as a byte string, and was refused as `BAD_RECORD_ENTRY`. Recorded because
+  it is the vectors doing their job on their own author: the text form belongs in a URL bar, not
+  in a record.
+
 ### Added — pin sets, availability reporting, and unpublishing
 
 - **`registry/src/pins.ts`** implements HOSTING.md's availability section and Constitution

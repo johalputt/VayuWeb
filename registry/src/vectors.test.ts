@@ -3,7 +3,19 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { buildVectors, fromHex, type Vector } from './vectors.ts';
+import {
+  buildVectors,
+  buildConvergenceVectors,
+  buildReplicationVectors,
+  buildResolutionVectors,
+  fromHex,
+  type Vector,
+} from './vectors.ts';
+import { resolveConflict, type Candidate } from './converge.ts';
+import { resolveName } from './resolve.ts';
+import { decodeMessage, ReplicationError } from './replicate.ts';
+import { recordHashFromBytes } from './domain.ts';
+import { compareBytes } from './cbor.ts';
 import { verify, predecessorFrom, type RegistryView, type Verdict } from './verify.ts';
 import { parseRecordBytes } from './record.ts';
 
@@ -131,3 +143,95 @@ test('vector names are unique, so a failure names exactly one case', () => {
   const names = buildVectors().map((v) => v.name);
   assert.equal(new Set(names).size, names.length);
 });
+
+/* -------------------------------------------------------------------------- */
+/* The three suites that pin what implementations must AGREE about             */
+/* -------------------------------------------------------------------------- */
+
+test('every convergence vector picks the same winner, whichever way round it is given', () => {
+  // The pair and its mirror. An implementation that decided by argument position, by arrival, or
+  // by its own log index gives one answer to the first and a different answer to the second —
+  // which is exactly the fork that shipped here and survived every record vector.
+  const failures: string[] = [];
+  for (const vector of buildConvergenceVectors()) {
+    const a = candidate(vector.a);
+    const b = candidate(vector.b);
+    const resolution = resolveConflict([a, b]);
+    const winner = compareBytes(resolution.winner.hash, a.hash) === 0 ? 'a' : 'b';
+    if (winner !== vector.expect.winner || resolution.rule !== vector.expect.rule) {
+      failures.push(
+        `${vector.name}\n      rule:     ${vector.rule}` +
+          `\n      expected: ${vector.expect.winner} by ${vector.expect.rule}` +
+          `\n      actual:   ${winner} by ${resolution.rule}`,
+      );
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+test('every resolution vector returns the outcome the specification requires', () => {
+  const failures: string[] = [];
+  for (const vector of buildResolutionVectors()) {
+    const record = vector.record === null ? null : parseRecordBytes(fromHex(vector.record));
+    const outcome = resolveName(
+      vector.host,
+      { lookup: () => record, hasVerifiedHead: () => vector.hasVerifiedHead },
+      vector.now,
+    );
+    const actual = outcome.ok ? `ok:${outcome.entry.type}` : `error:${outcome.error}`;
+    const want =
+      vector.expect.outcome === 'ok' ? `ok:${vector.expect.source}` : `error:${vector.expect.code}`;
+    if (actual !== want) {
+      failures.push(
+        `${vector.name}\n      rule:     ${vector.rule}` +
+          `\n      expected: ${want}\n      actual:   ${actual}`,
+      );
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+test('every replication vector decodes, or is refused with the code the specification names', () => {
+  const failures: string[] = [];
+  for (const vector of buildReplicationVectors()) {
+    let actual: string;
+    try {
+      actual = `ok:${decodeMessage(fromHex(vector.message)).t}`;
+    } catch (error) {
+      actual =
+        error instanceof ReplicationError ? `reject:${error.code}` : `threw:${String(error)}`;
+    }
+    const want =
+      vector.expect.decode === 'ok' ? `ok:${vector.expect.type}` : `reject:${vector.expect.code}`;
+    if (actual !== want) {
+      failures.push(
+        `${vector.name}\n      rule:     ${vector.rule}` +
+          `\n      expected: ${want}\n      actual:   ${actual}`,
+      );
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+test('the committed artifact carries all four suites', () => {
+  // A suite that exists in code and not in the artifact is a suite no second implementation can
+  // run, which makes it a test of this implementation rather than a contract between two.
+  const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')) as Record<string, unknown>;
+  for (const suite of ['vectors', 'convergence', 'resolution', 'replication']) {
+    assert.ok(Array.isArray(artifact[suite]), `${suite} must be an array in the artifact`);
+    assert.ok((artifact[suite] as unknown[]).length > 0, `${suite} must not be empty`);
+  }
+});
+
+/** Build a convergence candidate from a record's hex, as a second implementation would. */
+function candidate(hex: string): Candidate {
+  const bytes = fromHex(hex);
+  return {
+    record: parseRecordBytes(bytes),
+    hash: recordHashFromBytes(bytes),
+    // Deliberately null. A vector cannot carry a local log position, and the whole point of the
+    // convergence contract is that no implementation needs one.
+    logIndex: null,
+    valid: true,
+  };
+}

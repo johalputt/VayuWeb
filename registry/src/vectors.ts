@@ -27,7 +27,8 @@
  * against them needs to know.
  */
 
-import { encode, type CborMap, type CborValue } from './cbor.ts';
+import { encode, compareBytes, type CborMap, type CborValue } from './cbor.ts';
+import { LIMITS, PROTOCOL_VERSION, encodeMessage } from './replicate.ts';
 import { signingInput, recordHashFromBytes } from './domain.ts';
 import { sign, publicKeyFrom } from './signature.ts';
 import { POW_ALGORITHM, POW_NONCE_LENGTH } from './pow.ts';
@@ -627,6 +628,225 @@ export function buildVectors(): Vector[] {
       now: VECTOR_NOW + 600,
       state: HELD,
       expect: rejectWith('UNEXPECTED_POW'),
+    },
+  ];
+}
+
+/* -------------------------------------------------------------------------- */
+/* Convergence, resolution and replication                                     */
+/* -------------------------------------------------------------------------- */
+//
+// The record suite above pins what a verifier accepts. These three pin what implementations must
+// AGREE about after that — which is where a fork lives.
+//
+// The distinction is not academic here. Every consensus-critical defect this project has found
+// was invisible to record verification and visible only to the question "what would a second
+// implementation do": the convergence rule decided conflicts by local arrival order, so two peers
+// kept different owners forever; the rule was then found to be called by nothing; and the
+// resolver preferred the frozen snapshot over the living pointer, so a conforming publisher and a
+// conforming resolver together froze every site. Record vectors passed throughout.
+
+/** Two candidate records for one name at one seq, and which one every implementation must pick. */
+export interface ConvergenceVector {
+  readonly name: string;
+  readonly rule: string;
+  readonly a: string;
+  readonly b: string;
+  /** Which record wins. Stated as a label rather than a hash so a failure names the loser. */
+  readonly expect: { readonly winner: 'a' | 'b'; readonly rule: string };
+}
+
+/** A host and the registry state behind it, and the outcome every implementation must return. */
+export interface ResolutionVector {
+  readonly name: string;
+  readonly rule: string;
+  readonly host: string;
+  /** The record the local index holds for that name, or null. */
+  readonly record: string | null;
+  readonly hasVerifiedHead: boolean;
+  readonly now: number;
+  readonly expect:
+    | { readonly outcome: 'ok'; readonly source: string }
+    | { readonly outcome: 'error'; readonly code: string };
+}
+
+/** One replication message, and whether it decodes. */
+export interface ReplicationVector {
+  readonly name: string;
+  readonly rule: string;
+  readonly message: string;
+  readonly expect:
+    | { readonly decode: 'ok'; readonly type: string }
+    | { readonly decode: 'reject'; readonly code: string };
+}
+
+/** A registration by the other key, so a race is between strangers rather than equivocation. */
+const byOther = (over: Record<string, CborValue> = {}): Uint8Array =>
+  build(
+    {
+      version: 1,
+      op: 'REGISTER',
+      name: 'atlas',
+      tld: 'vayu',
+      ownerKey: VECTOR_OTHER_KEY,
+      seq: 0,
+      notBefore: VECTOR_NOW,
+      notAfter: VECTOR_NOW + TERM_SECONDS,
+      records: [entry('txt', 'v=vayuweb1;other')],
+      powProof: powProof(),
+      prevHash: new Uint8Array(32),
+      ...over,
+    },
+    VECTOR_OTHER_SECRET,
+  );
+
+const withEntries = (entries: CborValue[]): Uint8Array => registration({ records: entries });
+
+export function buildConvergenceVectors(): ConvergenceVector[] {
+  const mine = registration();
+  const theirs = byOther();
+  const lower =
+    compareBytes(recordHashFromBytes(mine), recordHashFromBytes(theirs)) < 0 ? 'a' : 'b';
+
+  return [
+    {
+      name: 'converge/smaller-digest-wins',
+      rule: 'REGISTRY.md: otherwise, the smaller record_hash as a big-endian unsigned integer wins',
+      a: toHex(mine),
+      b: toHex(theirs),
+      expect: { winner: lower, rule: 'SMALLER_HASH' },
+    },
+    {
+      // The same pair with the arguments swapped. An implementation that decided by position,
+      // by arrival, or by its own log index gives a different answer here and the same answer
+      // above, which is precisely the fork that shipped.
+      name: 'converge/order-does-not-decide',
+      rule: 'REGISTRY.md: a peer MUST NOT use its own log position or arrival order',
+      a: toHex(theirs),
+      b: toHex(mine),
+      expect: { winner: lower === 'a' ? 'b' : 'a', rule: 'SMALLER_HASH' },
+    },
+  ];
+}
+
+export function buildResolutionVectors(): ResolutionVector[] {
+  // The BINARY CID, which is what a `cid` entry carries: version 1, raw codec, sha2-256, then
+  // the digest. The text form belongs in a URL bar, not in a record — and REGISTRY.md's entry
+  // rule says so by typing the value as a byte string, which a first draft of these vectors got
+  // wrong by passing the base32 text and being refused as BAD_RECORD_ENTRY.
+  const CID = Uint8Array.from([0x01, 0x55, 0x12, 0x20, ...new Uint8Array(32).fill(0xab)]);
+  return [
+    {
+      name: 'resolve/pointer-beats-snapshot',
+      rule: 'RESOLUTION.md: with several content entries present, select ipns before cid',
+      host: 'atlas.vayu',
+      record: toHex(withEntries([entry('cid', CID), entry('ipns', 'k51qzi5uqu5d')])),
+      hasVerifiedHead: true,
+      now: VECTOR_NOW + 60,
+      expect: { outcome: 'ok', source: 'ipns' },
+    },
+    {
+      name: 'resolve/snapshot-without-pointer',
+      rule: 'RESOLUTION.md: cid is the content source when no pointer is present',
+      host: 'atlas.vayu',
+      record: toHex(withEntries([entry('txt', 'v=vayuweb1'), entry('cid', CID)])),
+      hasVerifiedHead: true,
+      now: VECTOR_NOW + 60,
+      expect: { outcome: 'ok', source: 'cid' },
+    },
+    {
+      name: 'resolve/txt-is-never-a-source',
+      rule: 'RESOLUTION.md: a txt entry is never a content source',
+      host: 'atlas.vayu',
+      record: toHex(withEntries([entry('txt', 'v=vayuweb1')])),
+      hasVerifiedHead: true,
+      now: VECTOR_NOW + 60,
+      expect: { outcome: 'error', code: 'NO_USABLE_RECORD' },
+    },
+    {
+      name: 'resolve/unratified-tld',
+      rule: 'RESOLUTION.md step 2: only a member of the Namespace Annex is resolved',
+      host: 'atlas.example',
+      record: null,
+      hasVerifiedHead: true,
+      now: VECTOR_NOW,
+      expect: { outcome: 'error', code: 'TLD_UNKNOWN' },
+    },
+    {
+      name: 'resolve/subdomains-are-refused-not-guessed',
+      rule: 'RESOLUTION.md step 1: more than two dot-separated components is refused',
+      host: 'a.atlas.vayu',
+      record: null,
+      hasVerifiedHead: true,
+      now: VECTOR_NOW,
+      expect: { outcome: 'error', code: 'LABEL_INVALID' },
+    },
+    {
+      // Not 1404. A resolver that has never synchronised does not know the name is absent, and
+      // answering "no one has registered this" would be inventing a fact from its own ignorance.
+      name: 'resolve/unsynchronised-is-not-absent',
+      rule: 'RESOLUTION.md step 7: no verified head gives 1502, not 1404',
+      host: 'atlas.vayu',
+      record: null,
+      hasVerifiedHead: false,
+      now: VECTOR_NOW,
+      expect: { outcome: 'error', code: 'REGISTRY_UNAVAILABLE' },
+    },
+    {
+      name: 'resolve/absent-name',
+      rule: 'RESOLUTION.md step 7: a synchronised resolver reports an unregistered name as 1404',
+      host: 'atlas.vayu',
+      record: null,
+      hasVerifiedHead: true,
+      now: VECTOR_NOW,
+      expect: { outcome: 'error', code: 'NAME_NOT_FOUND' },
+    },
+  ];
+}
+
+export function buildReplicationVectors(): ReplicationVector[] {
+  const hello = encodeMessage({
+    t: 'HELLO',
+    v: PROTOCOL_VERSION,
+    len: 7,
+    root: new Uint8Array(32).fill(9),
+  });
+  const want = encodeMessage({ t: 'WANT', from: 0, count: LIMITS.wantCount });
+  const oversizedBatch = encode(
+    new Map<string | Uint8Array, CborValue>([
+      ['t', 'RECORDS'],
+      ['from', 0],
+      ['recs', Array.from({ length: LIMITS.recordsPerBatch + 1 }, () => Uint8Array.of(1))],
+    ]),
+  );
+  const unknown = encode(new Map<string | Uint8Array, CborValue>([['t', 'GOSSIP']]));
+
+  return [
+    {
+      name: 'replicate/hello',
+      rule: 'REPLICATION.md 3.2: HELLO carries the protocol version, log length and tree root',
+      message: toHex(hello),
+      expect: { decode: 'ok', type: 'HELLO' },
+    },
+    {
+      name: 'replicate/want-at-the-limit',
+      rule: 'REPLICATION.md 5: WANT.count is bounded at 256',
+      message: toHex(want),
+      expect: { decode: 'ok', type: 'WANT' },
+    },
+    {
+      name: 'replicate/batch-over-the-limit',
+      rule: 'REPLICATION.md 5: a batch larger than 256 is refused at decode',
+      message: toHex(oversizedBatch),
+      expect: { decode: 'reject', code: 'LIMIT_EXCEEDED' },
+    },
+    {
+      // Ignored rather than fatal: refusing to speak to a peer that knows a message you do not is
+      // how a protocol becomes unextendable.
+      name: 'replicate/unknown-type',
+      rule: 'REPLICATION.md 3.2: an unknown message type is named as unknown',
+      message: toHex(unknown),
+      expect: { decode: 'reject', code: 'UNKNOWN_TYPE' },
     },
   ];
 }

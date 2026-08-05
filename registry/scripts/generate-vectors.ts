@@ -14,6 +14,9 @@ import { fileURLToPath } from 'node:url';
 
 import {
   buildVectors,
+  buildConvergenceVectors,
+  buildResolutionVectors,
+  buildReplicationVectors,
   VECTOR_NOW,
   VECTOR_OWNER_KEY,
   VECTOR_OTHER_KEY,
@@ -23,6 +26,9 @@ import {
 const OUT = fileURLToPath(new URL('../../conformance/vectors.json', import.meta.url));
 
 const vectors = buildVectors();
+const convergence = buildConvergenceVectors();
+const resolution = buildResolutionVectors();
+const replication = buildReplicationVectors();
 
 const artifact = {
   $comment:
@@ -48,10 +54,21 @@ const artifact = {
     ownerKey: toHex(VECTOR_OWNER_KEY),
     otherKey: toHex(VECTOR_OTHER_KEY),
     baseInstant: VECTOR_NOW,
+    suites:
+      'record pins what a verifier accepts. convergence, resolution and replication pin what ' +
+      'implementations must AGREE about after that, which is where a fork lives — every ' +
+      'consensus-critical defect found in this project so far was invisible to record ' +
+      'verification and visible only to the question "what would a second implementation do".',
   },
   vectors,
+  convergence,
+  resolution,
+  replication,
 };
 
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8');
-process.stdout.write(`wrote ${vectors.length} vectors to ${OUT}\n`);
+process.stdout.write(
+  `wrote ${vectors.length} record, ${convergence.length} convergence, ${resolution.length} ` +
+    `resolution and ${replication.length} replication vectors to ${OUT}\n`,
+);
