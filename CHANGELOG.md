@@ -10,6 +10,96 @@ it.
 
 ## [Unreleased]
 
+### Added — Phase 2: the replication protocol
+
+- **[REPLICATION.md](docs/spec/REPLICATION.md)** specifies how many machines reach one registry
+  state without a coordinator: five messages, a symmetric exchange with no client and no server,
+  and an explicit budget of limits. It is written against *any* ordered reliable channel.
+  Hyperswarm over HyperDHT is named as the intended first binding and marked non-normative,
+  because a protocol defined in terms of one discovery network makes that network's operators
+  load-bearing, which is what Article 4 forbids.
+
+- **`registry/src/replicate.ts`** implements the state machine, transport-free. Three refusals
+  carry it: replication transports records and decides nothing, so every record is verified
+  locally by the same `verify()` a local record passes; merging is set-based, so state never
+  depends on who sent what when; and nothing is allocated for what a peer merely asserts, so a
+  peer claiming a log of 2^53 records costs the receiver one bounded request.
+
+- **28 tests against paired peers with real stores and real proofs of work**, structured as the
+  conformance properties of REPLICATION.md section 8 rather than as unit coverage: order
+  independence over *every* permutation of a record set, partition-and-heal convergence, a race
+  between strangers delivered in opposite orders to each peer, hostile batches where one
+  malformed record must not discard the other hundred and ninety-nine, and every limit.
+
+- **No peer identity, reputation, membership or scoring**, and the omission is deliberate rather
+  than pending. Those are the materials a governance layer gets built from, and Article 39 says
+  there is no governing body.
+
+### Fixed — the convergence rule was called by nothing
+
+- **The rule was specified, implemented, unit-tested and unreachable.** `resolveConflict` and
+  `voidedChain` had no caller outside their own test file. The merge path did first-arrival-wins,
+  so the effective rule was the delivery-order fork the rule exists to prevent — and fixing the
+  rule alone, as the entry below does, would have changed no behaviour whatsoever.
+
+  This is the sharpest instance yet of the failure this project keeps finding: the deadcode gate
+  did not catch it, because the functions *are* exercised — by tests. A test can keep a wrong
+  answer looking alive indefinitely.
+
+  `Store.append` now runs it, and the order of work is the security-relevant part. Judging a
+  conflict properly means verifying the newcomer's Argon2id proof at 64 MiB, so doing that for
+  every claim aimed at a held name would make spamming popular names a way to burn the network's
+  memory bandwidth at the cost of sending bytes. The digest is therefore compared first: a
+  newcomer with the larger digest cannot win under the rule, so there is nothing to learn from
+  verifying it. An attacker must grind their digest below the incumbent's before a peer spends
+  anything, at a full proof of work per attempt.
+
+  Both halves are pinned by tests that assert the rejection *code*, which is what makes them able
+  to fail: a claim carrying a broken proof is rejected as `NAME_TAKEN` when it cannot win (so the
+  expensive path was never reached) and on the proof itself when it could (so the cheap path is
+  not a way in). The first mutation of this was caught only incidentally by an unrelated store
+  test — inadequate, so the targeted tests were written and the mutation re-run.
+
+- **Wiring the rule in without a concurrency bound would have made every name stealable.** Found
+  by attacking the merge path immediately after writing it, and independently flagged in the same
+  session by an existing store test that the change had regressed — the failure was a real alarm,
+  not a stale expectation.
+
+  Nothing in the digest rule mentions time, so "first valid signature wins" decays into "lowest
+  digest ever produced wins". No race is needed: wait until a name is established, grind
+  registrations until one has a lower digest, submit it. The grinding is *cheap*, which is the
+  part that makes it serious — an incumbent digest is uniform over 256 bits, so beating a given
+  one takes about **two attempts on average**. Roughly half of every name in the registry would
+  have been available for a couple of proofs of work, with nothing anywhere recording that
+  anything had gone wrong.
+
+  Two rules now decide whether a conflict is a partition at all, both computed from record fields
+  so every peer answers identically:
+
+  - **A late claim is not a concurrent claim.** A conflicting `REGISTER` whose `notBefore` exceeds
+    the incumbent's by more than `MAX_BACKDATE_SECONDS` is refused outright — not weighed, not
+    compared. The window is taken rather than invented: it is already the protocol's answer to how
+    far apart two records can be and still both be arrivable now. Deciding by `notBefore` does not
+    reintroduce the delivery-order fork, because `notBefore` is carried in the record, identical
+    on every peer, and bounded against the receiver's clock.
+  - **Equivocation is not a race.** A conflicting `REGISTER` signed by the incumbent's own key is
+    refused. That is one party rewriting their own history, or a compromised key; the name belongs
+    to that key either way, and resolving it by digest would let an owner replace their own
+    registration at will while silently applying the evidence Article 38 wants surfaced.
+
+  `THREAT-MODEL.md` gains T6b. Both rules are pinned by tests asserting the rejection code and
+  mutation-tested by removing each guard.
+
+- `Verdict` gains `voided`, so a caller learns which chain a merge destroyed rather than
+  discovering it later. REGISTRY.md requires a client to surface that: somebody registered a name,
+  saw it succeed, and lost it through no fault of their own, and a UI that quietly refreshes is
+  lying about what happened.
+
+- `Verdict` gains `duplicate`, because "accepted" and "accepted and changed something" are
+  different facts and replication needs the difference. A peer resending one record forever would
+  otherwise report progress on every batch, which a syncing loop reads as a reason to keep going —
+  one record, an unbounded session.
+
 ### Fixed — convergence decided by arrival order, which is a permanent namespace fork
 
 - **The convergence rule let any relay choose who owns a contested name.** Rule 2 awarded a

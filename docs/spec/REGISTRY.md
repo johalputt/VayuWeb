@@ -240,6 +240,38 @@ A peer MUST NOT use its own log position, arrival order, receipt timestamp, or a
 observed ordering to decide a conflict. There is no third rule, and an implementation that adds
 one has forked the namespace.
 
+### What is a conflict at all
+
+The rule above resolves a **partition**, and two conditions decide whether one is in front of
+you. Both are computed from record fields, so every peer answers them identically.
+
+**A late claim is not a concurrent claim.** A conflicting `REGISTER` whose `notBefore` exceeds the
+incumbent registration's `notBefore` by more than `MAX_BACKDATE_SECONDS` (86,400) MUST be refused
+as `NAME_TAKEN`. It is not weighed against the incumbent and its digest is never compared.
+
+Without this bound, "first valid signature wins" decays into "lowest digest ever produced wins".
+Nothing in the digest rule mentions time, so a name held for a decade would fall to anyone who
+grinds a lower digest — and the grinding is cheap, not expensive: an incumbent digest is uniform
+over 256 bits, so beating a *given* one takes about two attempts on average. Roughly half of every
+name in the registry would be available for a couple of proofs of work. That would defeat Article
+30.1 and Article 11 at once, and Article 9.7 entrenches the latter.
+
+The window is `MAX_BACKDATE_SECONDS` because that is already the protocol's own answer to how far
+apart two records can be and still both be arrivable now: a record older than that is rejected as
+`BACKDATED`. Only the late direction needs a rule — clock discipline means an incoming record can
+never be more than a day *older* than the incumbent, because it would have been refused first.
+
+Deciding by `notBefore` is **not** an ordering rule of the kind rejected above. `notBefore` is
+carried in the record, is identical on every peer, and is bounded against the receiver's own clock
+by `clock_check`. Arrival order is none of those things.
+
+**Equivocation is not a race.** A conflicting `REGISTER` whose `ownerKey` equals the incumbent
+registration's `ownerKey` MUST be refused as `NAME_TAKEN`. One key signing two registrations for
+one name is that party rewriting their own history, or a compromised key — not two strangers who
+each did the work. The name already belongs to that key either way, so resolving it by digest
+would let an owner replace their own registration at will, and would silently apply exactly the
+evidence Article 38 asks to be surfaced. Detection is reported; it changes no state.
+
 ### Why there is no ordering rule
 
 Constitution Article 30.3 reads: "the earlier position in log order prevails. Where log order

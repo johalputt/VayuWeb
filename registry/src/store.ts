@@ -43,9 +43,12 @@ import { closeSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 import { parseRecordBytes, type RegistryRecord } from './record.ts';
+import { compareHashes, resolveConflict, voidedChain } from './converge.ts';
+import { compareBytes } from './cbor.ts';
 import { recordHashFromBytes } from './domain.ts';
 import {
   verify,
+  MAX_BACKDATE_SECONDS,
   predecessorFrom,
   type Predecessor,
   type RegistryView,
@@ -78,6 +81,16 @@ export interface NameEntry {
   readonly current: Predecessor;
   readonly logIndex: number;
   readonly revoked: boolean;
+  /**
+   * The `record_hash` of the REGISTER this name's chain descends from.
+   *
+   * Held so a convergence conflict can be judged without scanning the log. A newcomer conflicts
+   * with the chain's *root*, not with whatever `UPDATE` happens to be current, because a conflict
+   * is two records at the same `seq` and `seq` 0 is where a registration race happens. Storing it
+   * also makes the "could this newcomer possibly win?" comparison a map lookup, which is what
+   * stops an attacker making us verify Argon2id proofs for names that are plainly held.
+   */
+  readonly rootHash: Uint8Array;
 }
 
 /**
@@ -234,17 +247,179 @@ export class Store implements RegistryView {
    */
   append(bytes: Uint8Array, now: number): Verdict {
     if (this.has(bytes)) {
-      return { outcome: 'accept', record: parseRecordBytes(bytes) };
+      return { outcome: 'accept', record: parseRecordBytes(bytes), duplicate: true };
     }
     const verdict = this.verifyAt(bytes, now);
+    if (verdict.outcome === 'reject' && verdict.code === 'NAME_TAKEN') {
+      return this.mergeConflict(bytes, now, verdict);
+    }
     if (verdict.outcome !== 'accept') return verdict;
 
+    this.write(bytes);
+    this.apply(bytes, verdict.record);
+    return verdict;
+  }
+
+  /**
+   * A registration arrived for a name this peer already holds. Decide it by the convergence rule.
+   *
+   * This is the path that makes `converge.ts` reachable, and its absence was a real defect: the
+   * rule was specified, implemented and unit-tested while nothing in the merge path called it, so
+   * the effective rule was "whoever arrived first". Under replication that is the delivery-order
+   * fork the rule exists to prevent, one layer down — two peers handed the same pair in opposite
+   * orders kept different owners, permanently, and a relay chose which.
+   *
+   * ## Convergence resolves a partition, and only a partition
+   *
+   * Two guards decide whether this is a race at all, and without them wiring the rule in is worse
+   * than leaving it unreachable. Both were found by attacking this function after writing it.
+   *
+   * **A late claim is not a concurrent claim.** Nothing in the digest rule bounds *when* a
+   * conflicting registration may arrive, so without a window "first valid signature wins" decays
+   * into "lowest digest ever produced wins": a name held for a decade could be taken by anyone
+   * who grinds a lower digest. The grinding is not even expensive — an incumbent digest is
+   * uniform over 256 bits, so beating a given one takes about two attempts on average. That would
+   * make roughly half of all names stealable for a couple of proofs of work, and it would destroy
+   * Article 11's non-revocability, which Article 9.7 entrenches.
+   *
+   * The window is `MAX_BACKDATE_SECONDS`, taken rather than invented: it is already the
+   * protocol's own answer to "how far apart can two records be and still both be arrivable now",
+   * since a record older than that is rejected as `BACKDATED`. Only the late direction needs
+   * guarding — clock discipline means an incoming record can never be more than a day *older*
+   * than the incumbent, because it would have been refused before reaching here.
+   *
+   * Deciding by `notBefore` is not a delivery-order rule, which would reintroduce the fork this
+   * whole path exists to prevent. `notBefore` is in the record, identical on every peer, and
+   * bounded by clock discipline against the receiver's own clock.
+   *
+   * **Equivocation is not a race.** One owner signing two registrations for one name is not two
+   * parties who each did the work; it is one party rewriting their own history, or a compromised
+   * key. The name already belongs to that key, so the incumbent stands and the second record is
+   * refused — awarding it by digest would let an owner replace their own registration at will and
+   * would silently mutate state on exactly the evidence Article 38 wants surfaced instead.
+   *
+   * ## The order of work, which is also security-relevant
+   *
+   *   1. The two guards above, from record fields alone. Free.
+   *   2. Compare digests. Under the convergence rule a newcomer with the larger digest cannot
+   *      win — rule 1 never favours it, since the incumbent is in our log — so this exits before
+   *      any expensive verification. An attacker wanting to make us verify an Argon2id proof at
+   *      64 MiB for a held name must first grind their digest below the incumbent's, at the cost
+   *      of a full proof of work per attempt.
+   *   3. Only then verify properly, with the incumbent set aside, to learn whether the newcomer
+   *      would have been accepted had it arrived first. `NAME_TAKEN` alone cannot answer that:
+   *      it is checked before the signature and the proof of work.
+   *   4. Only then resolve, and only then rewrite the index.
+   */
+  private mergeConflict(bytes: Uint8Array, now: number, taken: Verdict): Verdict {
+    let incoming: RegistryRecord;
+    try {
+      incoming = parseRecordBytes(bytes);
+    } catch {
+      return taken;
+    }
+    // Convergence is for a registration race. A non-REGISTER cannot reach NAME_TAKEN, but the
+    // guard is written rather than assumed: this function replaces a live name, and it must not
+    // do so on the strength of a code that happened to match.
+    if (incoming.op !== 'REGISTER' || incoming.seq !== 0) return taken;
+
+    const key = nameKey(incoming.name, incoming.tld);
+    const held = this.names.get(key);
+    if (held === undefined) return taken;
+
+    const root = this.rootEntryFor(key);
+    if (root === null) return taken;
+
+    // Step 1a. A late claim is not a concurrent claim.
+    //
+    // Without this the digest rule decays from "first valid signature wins" into "lowest digest
+    // ever produced wins", and a name held for a decade falls to anyone who grinds a lower one.
+    // The grinding is cheap: an incumbent digest is uniform over 256 bits, so beating a given one
+    // takes about two attempts on average, which would put roughly half of all names within reach
+    // of a couple of proofs of work.
+    if (incoming.notBefore - root.record.notBefore > MAX_BACKDATE_SECONDS) return taken;
+
+    // Step 1b. Equivocation is not a race.
+    //
+    // One key signing two registrations for one name is not two parties who each did the work. It
+    // is that party rewriting their own history, or a compromised key. The name already belongs to
+    // the key either way, so the incumbent stands — and the evidence stays reportable under
+    // Article 38 rather than being silently applied.
+    if (compareBytes(incoming.ownerKey, root.record.ownerKey) === 0) return taken;
+
+    const incomingHash = recordHashFromBytes(bytes);
+    if (compareHashes(incomingHash, held.rootHash) >= 0) {
+      // Step 2. It cannot win, so it is refused for the reason it was already refused for, and
+      // no proof of work is verified.
+      return taken;
+    }
+
+    // Step 3. Judge it as though the name were free.
+    const onMerits = verify(bytes, this, now, { ignoreIncumbent: true });
+    if (onMerits.outcome !== 'accept') return onMerits;
+
+    // Step 4. Both are valid and the newcomer's digest is lower, so it wins. `resolveConflict` is
+    // still called rather than the result assumed: the rule lives in one place, and a second
+    // implementation of it here is a second implementation to keep in step.
+    const incumbentRoot = root;
+
+    const resolution = resolveConflict([
+      { record: incoming, hash: incomingHash, logIndex: null, valid: true },
+      {
+        record: incumbentRoot.record,
+        hash: incumbentRoot.hash,
+        logIndex: incumbentRoot.index,
+        valid: true,
+      },
+    ]);
+    if (compareHashes(resolution.winner.hash, incomingHash) !== 0) return taken;
+
+    const chain = this.entries
+      .filter((e) => nameKey(e.record.name, e.record.tld) === key)
+      .map((e) => ({ record: e.record, hash: e.hash, logIndex: e.index, valid: true }));
+    const voided = voidedChain(
+      {
+        record: incumbentRoot.record,
+        hash: incumbentRoot.hash,
+        logIndex: incumbentRoot.index,
+        valid: true,
+      },
+      chain,
+    );
+
+    // The loser's records stay in the log. It is append-only, both parties did the work, and
+    // erasing the losing history would erase the evidence that the race happened at all.
+    this.write(bytes);
+    this.apply(bytes, incoming);
+
+    return {
+      outcome: 'accept',
+      record: incoming,
+      voided: voided
+        .map((candidate) => this.encodingOf(candidate.hash))
+        .filter((bytes): bytes is Uint8Array => bytes !== null),
+    };
+  }
+
+  /** The seq-0 REGISTER a name's chain descends from, or null. */
+  private rootEntryFor(key: string): LogEntry | null {
+    for (const entry of this.entries) {
+      if (nameKey(entry.record.name, entry.record.tld) !== key) continue;
+      if (entry.record.op === 'REGISTER' && entry.record.seq === 0) return entry;
+    }
+    return null;
+  }
+
+  private encodingOf(hash: Uint8Array): Uint8Array | null {
+    const target = hex(hash);
+    for (const entry of this.entries) if (hex(entry.hash) === target) return entry.bytes;
+    return null;
+  }
+
+  private write(bytes: Uint8Array): void {
     mkdirSync(dirname(this.path), { recursive: true });
     if (!existsSync(this.path)) closeSync(openSync(this.path, 'w'));
     appendFileSync(this.path, frame(bytes));
-
-    this.apply(bytes, verdict.record);
-    return verdict;
   }
 
   private has(bytes: Uint8Array): boolean {
@@ -265,13 +440,18 @@ export class Store implements RegistryView {
     }
 
     const key = nameKey(record.name, record.tld);
-    const wasRevoked = this.names.get(key)?.revoked ?? false;
+    const held = this.names.get(key);
+    const wasRevoked = held?.revoked ?? false;
     this.names.set(key, {
       current: predecessorFrom(record, bytes),
       logIndex: index,
       // Revocation is sticky. A REGISTER accepted after quarantine clears it, because that is a
       // new registration of a name back in the open pool rather than a continuation.
       revoked: record.op === 'REGISTER' ? false : wasRevoked || record.op === 'REVOKE',
+      // A REGISTER starts a chain, so it is its own root — whether it is the first registration
+      // of a free name, a re-registration after quarantine, or the winner of a convergence
+      // conflict displacing an incumbent. Anything else inherits the root it chains onto.
+      rootHash: record.op === 'REGISTER' ? hash : (held?.rootHash ?? hash),
     });
   }
 

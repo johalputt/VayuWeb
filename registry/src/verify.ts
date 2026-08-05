@@ -60,9 +60,52 @@ export type VerifyRejection =
 export type DeferralReason = 'CLOCK_SKEW';
 
 export type Verdict =
-  | { readonly outcome: 'accept'; readonly record: RegistryRecord }
+  | {
+      readonly outcome: 'accept';
+      readonly record: RegistryRecord;
+      /**
+       * Records voided by accepting this one, when it won a convergence conflict.
+       *
+       * Present only on that path. REGISTRY.md requires a client to surface a voided chain
+       * rather than hide it behind a silent refresh: somebody registered a name, saw it succeed,
+       * and lost it through no fault of their own. Returning the chain explicitly means a caller
+       * that wants to ignore it has to do so deliberately.
+       */
+      readonly voided?: readonly Uint8Array[];
+      /**
+       * The record was already held, so accepting it changed nothing.
+       *
+       * REGISTRY.md requires a peer receiving a record it already holds to drop it silently, and
+       * an idempotent accept is the honest verdict for that. But "accepted" and "accepted and
+       * changed something" are different facts, and replication needs the difference: a peer that
+       * resends one record forever would otherwise report progress on every batch, which a
+       * syncing loop reads as a reason to keep going. Counting a duplicate as applied turns one
+       * record into an unbounded session.
+       */
+      readonly duplicate?: true;
+    }
   | { readonly outcome: 'reject'; readonly code: VerifyRejection; readonly detail: string }
   | { readonly outcome: 'defer'; readonly reason: DeferralReason; readonly detail: string };
+
+/** Options that change what `verify` treats as prior state. */
+export interface VerifyOptions {
+  /**
+   * Judge a REGISTER as though the name were free, so a same-`seq` conflict can be assessed on
+   * its own merits.
+   *
+   * Convergence needs to know whether a newcomer would have been accepted had it arrived first —
+   * a question `NAME_TAKEN` cannot answer, because that check runs before the signature and the
+   * proof of work and so says nothing about them.
+   *
+   * A caller MUST NOT use this to accept a record. It exists so that {@link Verdict} can report
+   * "valid but for the incumbent", and `Store` only sets it after establishing that the newcomer
+   * could actually win the conflict — which, under the digest rule, means its hash is already
+   * lower. An attacker who wants to make a peer verify an Argon2id proof for a name that is
+   * already held must therefore grind their hash below the incumbent's first, at the cost of a
+   * full proof of work per attempt.
+   */
+  readonly ignoreIncumbent?: boolean;
+}
 
 /** The accepted predecessor for one `name.tld`, with the hash of its exact serialised bytes. */
 export interface Predecessor {
@@ -137,7 +180,12 @@ function clockVerdict(notBefore: number, now: number): Verdict | null {
  * bytes, and a verifier that parsed elsewhere and verified here could be handed a parsed object
  * that no longer corresponds to the bytes its hash was taken over.
  */
-export function verify(bytes: Uint8Array, state: RegistryView, now: number): Verdict {
+export function verify(
+  bytes: Uint8Array,
+  state: RegistryView,
+  now: number,
+  options: VerifyOptions = {},
+): Verdict {
   // Framing first. A record that is not the unique deterministic encoding of its own content
   // has a malleable record_hash, and record_hash is the convergence tie-break.
   if (bytes.length > MAX_RECORD_BYTES) {
@@ -171,7 +219,11 @@ export function verify(bytes: Uint8Array, state: RegistryView, now: number): Ver
     if (record.seq !== 0 || !isZeroHash(record.prevHash)) {
       return reject('BAD_CHAIN', 'REGISTER must carry seq 0 and a zero prevHash');
     }
-    if (previous !== null && !state.fullyReleased(previous, now)) {
+    // Deliberately before the signature and proof-of-work checks, so the ordinary case — someone
+    // registering a name that is plainly taken — costs a map lookup rather than an Argon2id
+    // verification at 64 MiB. That early exit is also why `NAME_TAKEN` says nothing about whether
+    // the record is otherwise valid, and why convergence needs `ignoreIncumbent` to ask.
+    if (previous !== null && !state.fullyReleased(previous, now) && !options.ignoreIncumbent) {
       return reject('NAME_TAKEN', `${record.name}.${record.tld} is held`);
     }
     if (record.notAfter - record.notBefore !== TERM_SECONDS) {

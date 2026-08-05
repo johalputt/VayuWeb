@@ -66,10 +66,27 @@ convergence rule for conflicting first-registrations with its deterministic tie-
 equivocation detection; snapshot and checkpoint format so a light client can verify without
 replaying all history.
 
-**Partly done.** The convergence rule and equivocation detection are implemented and tested in
-`registry/src/converge.ts` — they are pure logic and needed no network. Discovery, replication,
-and the snapshot/checkpoint format remain, and they are the parts that cannot be finished
-without peers to test against.
+**Mostly done.** The protocol is specified in [spec/REPLICATION.md](spec/REPLICATION.md) and
+implemented as a transport-agnostic state machine in `registry/src/replicate.ts`, exercised
+against paired peers with real stores and real proofs of work: order independence over every
+permutation of a record set, partition-and-heal convergence, hostile batches, and the message
+limits. The convergence rule, equivocation detection and the checkpoint format were already
+there. **Discovery is what remains** — a Hyperswarm/HyperDHT binding, and running the whole thing
+against peers on other machines, which is the part a sandbox cannot honestly claim.
+
+Two defects surfaced the moment the work asked what *two* peers do, and both had passed a feature
+review and their own unit tests:
+
+- The convergence rule decided conflicts by the peer's own log position, which is arrival order.
+  Two peers handed the same pair in opposite orders kept different owners, permanently, and any
+  relay could choose which — for free, with nothing detectable sent.
+- The rule was then found to be **called by nothing**. It was specified, implemented and tested
+  while the merge path did first-arrival-wins, so fixing the rule alone would have changed no
+  behaviour at all. `Store.append` now runs it.
+
+Both are recorded in the changelog and in `THREAT-MODEL.md` T6a. The lesson is the one this
+project keeps relearning: a green unit test proves the unit, and a single machine has only one
+arrival order to test with.
 
 **Depends on:** Phase 1.
 

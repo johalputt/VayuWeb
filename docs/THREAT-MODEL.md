@@ -105,6 +105,28 @@ monitors and equivocation detection under Article 38.
 experiences it as arbitrary confiscation. There is no version of this that feels fair to both
 parties.
 
+**T6b — Late grinding: taking an established name for two proofs of work.**
+*Vector:* wait until a name is well established, then grind registrations until one has a digest
+below the incumbent's and submit it. No race, no partition, no urgency.
+*Impact:* if the convergence rule is applied without a concurrency bound, the name changes hands.
+The cost is not the deterrent it looks like: an incumbent digest is uniform over 256 bits, so
+beating a *given* one takes about two attempts on average. Roughly half of every name in the
+registry would be available for a couple of proofs of work, with no record of wrongdoing anywhere
+and nothing for the owner to appeal to.
+*Mitigation:* **designed out.** A conflicting registration whose `notBefore` exceeds the
+incumbent's by more than `MAX_BACKDATE_SECONDS` is refused outright — not weighed, not compared.
+The window is the protocol's existing backdating tolerance rather than a new number, and it is
+decided from record fields, so every peer answers identically and no delivery-order rule is
+reintroduced. A second rule refuses a conflicting registration signed by the incumbent's own key,
+because equivocation is not a race.
+*Residual risk:* **Low.** Grinding still decides a genuine concurrent race, which is T6's
+acknowledged unfairness, and the window is a policy choice a longer partition could exceed — a
+partition lasting over 24 hours would leave the later side's registration refused rather than
+weighed. That is the safe direction to fail in: the incumbent keeps the name.
+*Provenance:* found by attacking the convergence merge path immediately after writing it, and
+caught in the same session by an existing store test that this change had regressed. Both halves
+are pinned by tests asserting the rejection code.
+
 **T6a — Delivery-order manipulation: choosing who owns a contested name.**
 *Vector:* a relay, or merely a better-connected peer, delivers two conflicting registrations to
 two peers in opposite orders. Nothing is forged, dropped or noticeably delayed — an order is
