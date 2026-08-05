@@ -12,7 +12,7 @@ it.
 
 ### Added
 
-- **CI grows from 14 jobs to 22**, across a new `quality.yml` and additions to the existing
+- **CI grows from 14 jobs to 23**, across a new `quality.yml` and additions to the existing
   workflows. Every new gate exists because the thing it forbids would disable a check that has
   already caught a real defect here:
   - **formatting** (Prettier, pinned) — an unformatted diff hides the change under the reflow.
@@ -152,6 +152,32 @@ it.
   an omission, and fails loudly if it matches no enumeration at all. Mutation-tested by
   reintroducing the duplicate into the charter, `RESOLUTION.md` and `FAQ.md` in turn; each is
   caught.
+
+### Escalated — needs an amendment, not an implementer
+
+- **The Constitution contradicts itself on the registration term, and the implementation matches
+  neither.** Article 11.6 sets tenure at 126,230,400 seconds (1461 days, about four years) and
+  Article 11.13 turns that exact number into a conformance test. Article 32.2 — which Article
+  11.14 names as **Article 11's own machinery** — says "The term SHALL be five years"
+  (157,680,000 s). `REGISTRY.md` requires exactly 31,536,000 s, one year, and this code enforces
+  it. Three documents, three values, and Article 11 is entrenched under Article 9.
+
+  Grace disagrees the same way: Article 11.8 gives a 90-day redemption in which only the
+  incumbent may renew; Article 32.3 gives a 180-day grace and opens the renewal window twelve
+  months before expiry; `REGISTRY.md` gives 30 days of grace plus 30 of quarantine.
+
+  **Not fixed here, deliberately.** No value can be chosen without overriding a clause that
+  endorses another, and every other duration in the design — difficulty, the renewal window,
+  grace, redemption — is expressed relative to the term. An implementer picking one by commit is
+  precisely the capture Article 9's entrenchment exists to prevent.
+
+  `scripts/check-charter-consistency.py` now records the conflict and prints it on every run. It
+  fails if the conflict *changes shape* — including if someone closes it by editing one side —
+  so the disagreement cannot be resolved except deliberately, and cannot be forgotten. Mutation-
+  tested by editing the specification to match Article 11.6; the check refuses it.
+
+  This is also why it went unnoticed: every check this project had compared prose to a list, or
+  a number to its defining source. Nothing compared two Articles to each other.
 
 ### Adversarial review — second pass
 

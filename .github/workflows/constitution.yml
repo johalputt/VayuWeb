@@ -133,12 +133,27 @@ jobs:
           print("OK — every cited Article exists.")
           PY
 
+  # The charter is supreme over the specifications and the code. That hierarchy decides nothing
+  # unless the charter agrees with itself, and a corpus audit found it does not.
+  self-consistency:
+    name: charter agrees with itself
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - name: Quantities stated in more than one place agree, or the conflict is on the record
+        # This does not decide which value is right — that is an amendment under Article 9, not a
+        # lint. It refuses to let a disagreement go unnoticed, and refuses to let one be closed
+        # by editing one side, which would be an implementer deciding what Article 9 reserves.
+        run: python3 scripts/check-charter-consistency.py
+
   constitution-pass:
     name: constitution-pass
     # One required status check instead of one per job. Branch protection points here, so
     # adding or renaming a job above does not mean editing repository settings — and a
     # skipped or cancelled dependency cannot pass for success.
-    needs: [no-privileged-writer, licensing, citations]
+    needs: [no-privileged-writer, licensing, citations, self-consistency]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
