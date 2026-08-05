@@ -144,12 +144,19 @@ network it must interoperate with rather than only against itself. An implementa
 internally perfect, round-trip everything it produces, and still address content nobody else can
 find; only an external vector catches that.
 
-**What remains, precisely.** The dag-pb UnixFS encoding for directories and multi-block files is
-**not** implemented. It is the piece that turns a tree into a root CID, so the publish flow cannot
-complete without it — and it is deliberately not guessed at, because a dag-pb encoder that is
-subtly wrong produces CIDs that look fine, resolve locally, and are invisible to every other node.
-Writing it needs ecosystem test vectors to check against, which is a different kind of work from
-the rest of this phase. Helia integration, pin-set reporting and unpublishing also remain.
+`registry/src/unixfs.ts` completes the tree-to-root-CID path: dag-pb nodes, UnixFS directory and
+file messages, raw-leaf files, multi-chunk file nodes, and recursive directory building. Six
+vectors from the reference importer are pinned, including a nested tree.
+
+The refusal to guess at this was justified within the hour. Written from a *description* of the
+format, the first encoder put the UnixFS `Data` field at protobuf field 2 and produced a
+confidently wrong CID for the empty directory. It was self-consistent, it round-tripped, and every
+site it published would have resolved on the publisher's own machine and been invisible to every
+other node.
+
+**What remains.** Helia integration and the block-exchange path; pin-set management with honest
+reporting of what is and is not being kept alive; unpublishing and its documented limits; and the
+end-to-end acceptance test, which needs two machines and a network.
 
 Starting the phase surfaced two settled-spec contradictions and one gap, all recorded in the
 changelog: the resolver preferred the frozen snapshot over the living pointer, so a conforming

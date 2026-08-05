@@ -10,6 +10,40 @@ it.
 
 ## [Unreleased]
 
+### Added — dag-pb and UnixFS, so a tree becomes a root CID
+
+- **`registry/src/unixfs.ts`** completes the publish path: a directory tree now has a root CID. It
+  implements dag-pb node encoding, UnixFS directory and file messages, raw-leaf files, multi-chunk
+  file nodes, and recursive directory building.
+
+- **It was written against vectors, not against a reading of the format, and the first attempt was
+  wrong.** Reasoning from a description of dag-pb, the initial encoder put the UnixFS `Data` field
+  at protobuf field 2 and produced `bafybeiepbj3744hbmji3sz5wqivcxj6au3jzfk54qfnki7ploa2gnsxxt4`
+  for the empty directory. The network says
+  `bafybeiczsscdsbs7ffqz55asqdf3smv6klcw3gofszvwlyarci47bgf354`.
+
+  That wrong encoder was **self-consistent**. It round-tripped. It hashed correctly. Every site it
+  published would have had a CID that resolved on the publisher's own machine and was invisible to
+  every other node on the network — and nothing in the publisher's own testing would ever have said
+  so. This is the case the previous entry declined to guess at, and the guess would have been
+  wrong.
+
+- **The two rules a reader gets wrong**, both now encoded and both mutation-tested. `PBNode`
+  numbers `Data` as field 1 and `Links` as field 2, and dag-pb requires field 2 on the wire
+  **first** — against the ascending-field-number order every protobuf encoder emits by default. And
+  a directory's links are sorted by name in **raw byte order**, so two publishers importing the
+  same files in different order produce the same root; without it the root hash depends on the
+  order a filesystem happened to list a directory in.
+
+- **Six vectors from the reference importer are pinned**: the empty directory's exact bytes, a
+  one-file site, a two-file site, a two-chunk file's node bytes and CID, and a **nested tree**. The
+  nested one earns its place — mutation-testing showed that a `Tsize` accumulated wrongly one
+  level down changes the root while every leaf stays correct, and no flat vector catches it.
+
+- **No new dependencies.** The reference libraries were installed in a scratch directory to
+  generate vectors and are not in `registry/package.json`. The implementation is independent; only
+  the expected values come from the ecosystem, which is the direction that makes them evidence.
+
 ### Added — Phase 4: content addressing
 
 - **`registry/src/content.ts`** implements the fixed import parameters HOSTING.md sets: CIDv1,
