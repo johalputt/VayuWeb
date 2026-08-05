@@ -71,7 +71,25 @@ RETIRED_PORT_ALLOWED = {
         "same, for the section that attached a normative SHALL to the forbidden transport.",
     "scripts/check-listeners.py":
         "this file.",
+    "registry/src/control.ts":
+        "assertSocketAddress names the refused address in the error it raises. A guard that "
+        "refuses a value has to be able to say which value.",
+    "registry/src/control.test.ts":
+        "proves assertSocketAddress refuses the address, which cannot be done without naming "
+        "it. This is the one test that must mention the retired port, and it is named rather "
+        "than covered by a blanket test exemption — a blanket one would let a test specify 7653 "
+        "as a live binding.",
+    "docs/ROADMAP.md":
+        "records that five documents specified the superseded address, as part of saying what "
+        "Phase 3 had to clear before it could start.",
 }
+
+# The binding rule below fires on any loopback address that is not the proxy's. That is the right
+# rule for prose and for production source, and the wrong rule for a test, whose job is to name
+# hostile inputs: `127.0.0.1:22` in an SSRF case is a destination an attacker asks for, not a
+# listener anyone opens. The sharp rule above still applies to tests, so a test naming the retired
+# control port fails; only the broad one is relaxed.
+TEST_FILE = re.compile(r"\.test\.[jt]s$|/tests?/")
 
 # Documents that describe the control API normatively enough that a reader could build it, and
 # must therefore carry the socket requirement rather than leave it to another file. This is the
@@ -126,7 +144,7 @@ def main():
             port = match.group(1)
             if port == PROXY_PORT:
                 proxy_bindings += 1
-            elif rel not in RETIRED_PORT_ALLOWED:
+            elif rel not in RETIRED_PORT_ALLOWED and not TEST_FILE.search(rel):
                 line = text[: match.start()].count("\n") + 1
                 failures.append(
                     f"{rel}:{line}: binds a loopback listener on port {port}. The browsing proxy "

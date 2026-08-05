@@ -10,6 +10,48 @@ it.
 
 ## [Unreleased]
 
+### Added — Phase 3: the browsing proxy and the control API
+
+- **`registry/src/proxy.ts`** implements LOCAL-SURFACE.md sections 2 to 4 as a pure request
+  handler. It binds nothing and does no I/O, and that is not tidiness: every rule here is a rule
+  about *what is refused*, and a handler reachable only through a real TCP connection is one whose
+  refusals get tested for the happy path and assumed for the rest. A rebound `Host`, a `CONNECT`
+  to loopback, a name crafted for header injection — all cheap to write as data, all awkward to
+  write as sockets, and the awkward ones are the ones that quietly never get written.
+
+  Three properties, each a refusal. **Not an open relay**: exactly two request shapes, both
+  requiring a VayuWeb host, everything else refused before routing — which is the DNS-rebinding
+  defence, since an attacker who rebinds their name to 127.0.0.1 still arrives carrying their own
+  `Host`. **Does not announce itself**: the headers naming VayuWeb are off unless the control API
+  turns them on, and a refusal body echoes nothing, because "this person runs VayuWeb" may be the
+  only fact an adversary in a hostile jurisdiction needs. **Nothing unbounded is reachable from a
+  page**: the negative cache is bounded, evicting and TTL'd, invalid names are not cached at all,
+  and eviction is insertion-order rather than LRU so an attacker cannot pin their own entries.
+
+- **`registry/src/control.ts`** implements the privileged surface. `assertSocketAddress` throws on
+  a TCP address rather than leaving the rule to prose — the prose already existed and five
+  documents ignored it. The browser-shaped refusals (`Origin` present, custom header absent,
+  `Upgrade`) run **before** the token comparison, so a page that somehow reached the socket is
+  turned away without its guess ever being timed. Config redaction keys on the *name* by
+  substring, so an unforeseen `apiToken` or `sessionSecret` is redacted by default: the failure
+  mode of over-redaction is an operator looking elsewhere, and of under-redaction is the token in
+  a log.
+
+- **The CSP is pinned to the specification, not copied from it.** A test reads the canonical block
+  out of `CONTENT-SECURITY.md` and compares byte for byte. A second copy of a security policy is a
+  copy that drifts, and a directive lost in transcription is a relaxation nobody chose.
+
+- **35 tests, and three of them were inadequate when first written.** All the same shape:
+  `assert.notEqual(status, 200)` passed with the defence under test deleted, because the request
+  then failed for an unrelated reason — the name simply did not resolve. A test satisfied by *any*
+  failure cannot tell you which defence is standing. Rewritten to assert the exact refusal code,
+  then re-mutated.
+
+  One further result worth recording rather than hiding: on re-mutation the explicit `CONNECT`
+  refusal turned out to be genuinely redundant — the request-shape rule and the method allowlist
+  each already cover it. It is kept for legibility and its comment now says it is a third defence
+  rather than implying it is the one holding.
+
 ### Fixed — the corpus specified a listener the security model forbids
 
 - **Five documents put the control API on `127.0.0.1:7653`. `LOCAL-SURFACE.md` section 1 forbids

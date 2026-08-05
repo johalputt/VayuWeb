@@ -103,10 +103,25 @@ a Unix domain socket; the resolution algorithm with its cache and TTL policy inc
 caching; per-name origin isolation and the default Content-Security-Policy; the numbered error
 catalogue.
 
-**Partly done.** The resolution algorithm itself — steps 1 to 10 and 13, the record-selection
-order, alias following with its hop budget, and the numbered error catalogue — is implemented and
-tested in `registry/src/resolve.ts`, with the registry, IPNS and content-fetch steps behind an
-interface. The proxy, the control API and the browser integration remain.
+**Mostly done.** The resolution algorithm — steps 1 to 10 and 13, the record-selection order,
+alias following with its hop budget, and the numbered error catalogue — is in
+`registry/src/resolve.ts`. The **browsing proxy** is in `registry/src/proxy.ts` and the
+**control API** in `registry/src/control.ts`, both as pure request handlers so that every refusal
+is exercised as data rather than assumed behind a socket. **Content fetching and the browser
+integration remain**, and so does the Article 14 outbound-connection test, which needs a real
+browser and a real network to mean anything.
+
+The two surfaces are deliberately of different kinds. The proxy is TCP because a browser must
+reach it; the control API is a Unix domain socket because a browser must never reach it, and
+`assertSocketAddress` throws on a TCP address rather than leaving that to a sentence in a
+document — the sentence already existed, in `LOCAL-SURFACE.md` section 1, and five documents went
+on specifying `127.0.0.1:7653` anyway.
+
+Three test inadequacies were found and fixed during the work, all the same shape: an assertion of
+`status !== 200` passed while the defence under test was deleted, because the request then failed
+for an unrelated reason. Asserting the *exact* refusal code is what made them able to fail. One
+guard turned out to be genuinely redundant on re-mutation, and its comment now says so rather
+than implying it is load-bearing.
 
 **Depends on:** Phase 2.
 
