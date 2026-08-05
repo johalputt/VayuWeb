@@ -52,40 +52,33 @@ def read(rel):
 
 
 def launch_tld_set():
-    """The ratified extensions themselves, as a set. Source of truth for enumeration checks."""
-    text = read("docs/spec/NAMES.md")
-    anchor = re.search(r"below are the protocol's founding extensions", text)
-    if anchor is None:
-        return None
-    run = re.search(r"(?:^- `\.[a-z0-9]+`.*\n)+", text[anchor.end():], re.M)
-    if run is None:
-        return None
-    return set(re.findall(r"^- `\.([a-z0-9]+)`", run.group(0), re.M))
+    """The ratified extensions themselves, as a set. Source of truth for enumeration checks.
+
+    The source moved when VWIP-0004 amended Article 35.1: the namespace is the Namespace Annex,
+    not a bullet list in NAMES.md. Deriving it from the Annex is also what lets the
+    anti-restatement rule below work, since that rule has to recognise a ratified extension in
+    prose wherever one appears.
+    """
+    text = read("docs/spec/NAMESPACE-CATALOGUE.md")
+    return set(re.findall(r"^\| `\.([a-z0-9]+)` \|", text, re.M))
 
 
 def count_launch_tlds():
-    """The founding extensions, enumerated as bullets in NAMES.md.
+    """The ratified extensions, enumerated as table rows in the Namespace Annex.
 
-    Counts DISTINCT extensions. A duplicated bullet is itself a defect, reported
-    separately, because the count and the list must both be right -- a list with a
-    repeat is wrong even when its length happens to match the sentence.
+    Counts DISTINCT extensions. A duplicated row is itself a defect, reported separately,
+    because the count and the list must both be right -- a list with a repeat is wrong even when
+    its length happens to match the sentence. `.vayu` was once listed twice, which made a list
+    introduced as "twelve" hold eleven distinct entries.
     """
-    text = read("docs/spec/NAMES.md")
-    anchor = re.search(r"below are the protocol's founding extensions", text)
-    if anchor is None:
-        return None, "could not locate the founding-extensions list in docs/spec/NAMES.md"
-    # Take the first unbroken run of extension bullets after the anchor. Bounding by the
-    # next paragraph does not work: the intro paragraph wraps, and a wrapped line starts
-    # at column zero just as a new paragraph does.
-    run = re.search(r"(?:^- `\.[a-z0-9]+`.*\n)+", text[anchor.end():], re.M)
-    if run is None:
-        return None, "no extension bullets follow the founding-extensions sentence"
-    found = re.findall(r"^- `\.([a-z0-9]+)`", run.group(0), re.M)
+    text = read("docs/spec/NAMESPACE-CATALOGUE.md")
+    found = re.findall(r"^\| `\.([a-z0-9]+)` \|", text, re.M)
     if not found:
-        return None, "the founding-extensions list matched no bullets -- the format changed"
+        return None, "the Namespace Annex matched no extension rows -- the table format changed"
     duplicates = sorted({t for t in found if found.count(t) > 1})
     if duplicates:
-        return None, f"docs/spec/NAMES.md lists a duplicate extension: {', '.join(duplicates)}"
+        return None, ("docs/spec/NAMESPACE-CATALOGUE.md lists a duplicate extension: "
+                      + ", ".join(duplicates))
     return len(found), None
 
 
@@ -114,13 +107,15 @@ def count_accompanying_headers():
 # must agree with it. A pattern's one capture group is the asserted quantity.
 RULES = [
     {
-        "label": "launch TLDs",
+        "label": "ratified extensions",
         "derive": count_launch_tlds,
-        "source": "docs/spec/NAMES.md (founding-extensions list)",
+        "source": "docs/spec/NAMESPACE-CATALOGUE.md (the Namespace Annex)",
         "patterns": [
-            re.compile(r"\b(\w+) launch TLDs\b", re.I),
-            re.compile(r"\b(\w+) (?:at launch|extensions so no single namespace)\b", re.I),
-            re.compile(r"\bone of the (\w+) launch TLDs\b", re.I),
+            re.compile(r"\b([\w,]+) launch TLDs\b", re.I),
+            re.compile(r"\b([\w,]+) ratified extensions\b", re.I),
+            re.compile(r"\b([\w,]+) extensions are ratified\b", re.I),
+            re.compile(r"\b([\w,]+) (?:at launch|extensions so no single namespace)\b", re.I),
+            re.compile(r"\bone of the ([\w,]+) launch TLDs\b", re.I),
         ],
     },
     {
@@ -135,43 +130,107 @@ RULES = [
 ]
 
 
+# Where an inline run of ratified extensions is legitimate, each with the reason. Everywhere
+# else, a restatement is the defect -- see check_tld_enumerations.
+#
+# Named files rather than a pattern, for the same reason EVIDENCE_FILES is: a wildcard would let
+# any future document opt out of the rule by its name, which is how a gate quietly stops gating.
+RESTATEMENT_ALLOWED = {
+    "constitution/CONSTITUTION.md":
+        "Article 35.1 names eleven in the charter's own text so the founding set survives loss "
+        "of the Annex. This is the one authoritative inline list.",
+    "docs/spec/NAMESPACE-CATALOGUE.md":
+        "the Namespace Annex itself -- the enumeration every other document defers to.",
+    "docs/spec/VWIP-0004.md":
+        "the ratification record, which must reproduce Article 35.1's full replacement text "
+        "verbatim (Article 58.1.a).",
+    "docs/spec/NAMES.md":
+        "restates the eleven charter-named extensions once, explicitly as the Article 35.1 "
+        "subset and explicitly as conferring no rank.",
+    "CHANGELOG.md":
+        "records what the namespace was before VWIP-0004, which cannot be done without "
+        "reproducing it.",
+}
+
+# How many chained extensions constitute a restatement rather than an example.
+#
+# Set from the corpus rather than picked. Every historical restatement enumerated the full
+# founding set -- eleven. The longest legitimate non-enumerating run is six: NAMESPACE.md section
+# 5.3 argues about two-letter strings and names `.io`, `.ai`, `.co`, `.me`, `.tv` and `.fm` as
+# CLEARNET examples, which happen to be ratified here too. Illustrative samples in README.md and
+# FAQ.md run to four.
+#
+# Eight sits between the two populations with room either side. A lower threshold would flag
+# every sample, and a rule that fires on good prose is a rule people learn to override -- which
+# is worse than no rule, because it also looks like a gate in CI.
+RESTATEMENT_THRESHOLD = 8
+
+
 def check_tld_enumerations(truth_set):
-    """Every ENUMERATION of the launch TLDs must match the ratified set exactly.
+    """No document may restate the namespace inline, outside a short named allowlist.
 
-    The count rules below guard sentences like "the eleven launch TLDs". They do not guard a
-    document that lists the extensions without stating how many there are -- and that is exactly
-    where the original defect survived. `.vayu` appeared twice in Article 35.1 of the charter,
-    every derived document inherited it, and correcting the ones that stated a number left the
-    charter and RESOLUTION.md still listing it twice, because neither says "eleven".
+    This rule inverted when VWIP-0004 amended Article 35.1. It used to require that every inline
+    list of extensions match the ratified set exactly, which was the right rule for a set of
+    eleven: `.vayu` appeared twice in the charter, every derived document inherited the
+    duplicate, and fixing the ones that stated a number left the charter and RESOLUTION.md still
+    listing it twice because neither said "eleven".
 
-    A list is matched by finding three or more consecutive ratified extensions on the same line
-    or the next, then reading the whole run.
+    With 1,270 ratified extensions no document can restate the set, so "must match exactly"
+    would check nothing -- it would pass on every file, forever, while looking like a gate. The
+    property worth enforcing now is the one VWIP-0004 section 4.2 states: documents REFERENCE
+    the Annex, they do not repeat it. Every restatement is a copy that can drift, and the
+    restatements in this corpus did drift by a factor of a hundred -- RESOLUTION.md hard-coded
+    eleven strings inline, NAMES.md asserted 1,267, REGISTRY.md said "the eleven launch TLDs",
+    and the verifier enforced its own list. Four copies, three answers.
+
+    A restatement is a CHAIN of at least RESTATEMENT_THRESHOLD distinct ratified extensions where
+    nothing separates each from the next but punctuation, whitespace and the words "and" or "or".
+
+    Two conditions, and both are load-bearing. Chaining distinguishes a restatement from prose: a
+    paragraph discussing `.vayu`, `.blog` and `.news` in three separate sentences is not a copy of
+    the namespace. The threshold distinguishes a restatement from an illustration: naming four
+    extensions to show a reader what the namespace feels like is good writing, and a rule that
+    fires on it is a rule people learn to override.
     """
     failures = []
     checked = 0
-    pattern = re.compile(r"\.([a-z0-9]+)")
+    extension = re.compile(r"(?<![\w.])\.([a-z0-9]{2,12})\b")
+    joiner = re.compile(r"^[\s,;`*_()\[\]/·—–-]*(?:and|or|plus)?[\s,;`*_()\[\]/·—–-]*$")
 
     for rel, path in markdown_files():
         with open(path, encoding="utf-8") as handle:
             text = handle.read()
-        # Collapse wrapped lines so a list broken across two lines is still one run.
-        for match in re.finditer(r"\.vayu[,`\s].{0,400}?\.blog", text, re.S):
-            run = match.group(0)
-            found = [m.group(1) for m in pattern.finditer(run)]
-            listed = [t for t in found if t in truth_set]
-            if len(listed) < 3:
-                continue
-            checked += 1
-            duplicates = sorted({t for t in listed if listed.count(t) > 1})
-            missing = sorted(truth_set - set(listed))
-            line = text[:match.start()].count("\n") + 1
-            if duplicates:
-                failures.append(
-                    f"{rel}:{line}: extension list repeats {', '.join(duplicates)}")
-            if missing:
-                failures.append(
-                    f"{rel}:{line}: extension list omits {', '.join(missing)}")
+
+        hits = [m for m in extension.finditer(text) if m.group(1) in truth_set]
+
+        chain = []
+        for index, match in enumerate(hits):
+            if chain:
+                gap = text[hits[index - 1].end():match.start()]
+                if len(gap) > 12 or joiner.match(gap) is None:
+                    checked += report_chain(rel, text, chain, truth_set, failures)
+                    chain = []
+            chain.append(match)
+        checked += report_chain(rel, text, chain, truth_set, failures)
+
     return checked, failures
+
+
+def report_chain(rel, text, chain, truth_set, failures):
+    """Record one candidate restatement. Returns 1 if it was a chain worth checking, else 0."""
+    del truth_set
+    listed = {match.group(1) for match in chain}
+    if len(listed) < RESTATEMENT_THRESHOLD:
+        return 0
+    if rel in RESTATEMENT_ALLOWED:
+        return 1
+    line = text[:chain[0].start()].count("\n") + 1
+    failures.append(
+        f"{rel}:{line}: restates the namespace inline ({len(listed)} ratified extensions in a "
+        f"row). Reference docs/spec/NAMESPACE-CATALOGUE.md instead -- a restatement is a copy "
+        f"that can drift, and the ones in this corpus did, by a factor of a hundred. If this "
+        f"document genuinely must carry the list, add it to RESTATEMENT_ALLOWED with the reason.")
+    return 1
 
 
 def as_number(word):
@@ -230,15 +289,18 @@ def main():
                         )
 
     truth_set = launch_tld_set()
-    if truth_set is None:
-        print("::error::could not read the founding-extension list from docs/spec/NAMES.md",
+    if not truth_set:
+        print("::error::could not read the ratified set from docs/spec/NAMESPACE-CATALOGUE.md",
               file=sys.stderr)
         return 1
     listed, list_failures = check_tld_enumerations(truth_set)
-    print(f"derived: {sorted(truth_set)} (the ratified extensions)")
-    print(f"checked {listed} extension enumeration(s)")
+    # The set itself is 1,270 entries; printing it would bury every other line of output. The
+    # size is the reviewable figure, and generate-namespace.py names the entries when they move.
+    print(f"derived: {len(truth_set)} ratified extension(s) "
+          f"(from docs/spec/NAMESPACE-CATALOGUE.md)")
+    print(f"checked {listed} inline extension chain(s)")
     if listed == 0:
-        print("::error::no extension enumerations matched -- this check is enforcing nothing",
+        print("::error::no extension chains matched -- this check is enforcing nothing",
               file=sys.stderr)
         return 1
     failures.extend(list_failures)

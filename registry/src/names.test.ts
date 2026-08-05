@@ -14,40 +14,60 @@ import {
   parseAlias,
   NameError,
 } from './names.ts';
+import { NAMESPACE_ANNEX_SIZE } from './namespace.generated.ts';
 
 /* -------------------------------------------------------------------------- */
 /* The ratified set is wire-visible and frozen                                 */
 /* -------------------------------------------------------------------------- */
 
-test('the ratified TLD set is exactly the eleven founding extensions', () => {
-  // Wire-visible: REGISTRY.md rejects any TLD outside this set. A peer whose set differs by
-  // one entry accepts names others refuse, which is a namespace fork. Adding to it requires a
-  // ratified VWIP, so an accidental edit must fail here rather than ship.
-  assert.deepEqual([...RATIFIED_TLDS].sort(), [
-    'blog',
-    'dao',
-    'decent',
-    'free',
-    'indie',
-    'libre',
-    'news',
-    'open',
-    'p2p',
-    'sov',
-    'vayu',
-  ]);
-  assert.equal(RATIFIED_TLDS.size, 11);
+test('the ratified TLD set is exactly the Namespace Annex', () => {
+  // Wire-visible: REGISTRY.md rejects any TLD outside this set. A peer whose set differs by one
+  // entry accepts names others refuse, which is a namespace fork presenting as an intermittent
+  // resolution failure. The set is generated from docs/spec/NAMESPACE-CATALOGUE.md, so this
+  // reads the Annex back and compares — a drifted generated file fails here as well as in the
+  // `generate-namespace.py --check` CI gate. Two independent detections, because this constant
+  // has already been wrong by a factor of a hundred once.
+  const annex = readFileSync(
+    new URL('../../docs/spec/NAMESPACE-CATALOGUE.md', import.meta.url),
+    'utf8',
+  );
+  const listed = [...annex.matchAll(/^\| `\.([a-z0-9]+)` \|/gm)].map((m) => m[1]);
+
+  assert.equal(listed.length, new Set(listed).size, 'the Annex must not repeat an extension');
+  assert.deepEqual([...listed].sort(), [...RATIFIED_TLDS].sort());
+  assert.equal(RATIFIED_TLDS.size, NAMESPACE_ANNEX_SIZE);
+  assert.equal(RATIFIED_TLDS.size, 1270);
 });
 
-test('the implemented set matches the founding list in NAMES.md', () => {
-  // Guards the drift this module exists downstream of: the spec list and the constant were
-  // inconsistent when this was written (.vayu duplicated, count stated as twelve).
-  const spec = readFileSync(new URL('../../docs/spec/NAMES.md', import.meta.url), 'utf8');
-  const block = spec.split('founding extensions')[1]?.split('These characterisations')[0] ?? '';
-  const listed = [...block.matchAll(/^- `\.([a-z0-9]+)`/gm)].map((m) => m[1]);
+test('the Annex contains every extension named in the text of Article 35.1', () => {
+  // Article 35.1 names eleven in the charter's own text "so that the founding set survives loss
+  // of the Annex". An Annex missing one contradicts the Article that incorporates it, and the
+  // charter wins — so this must fail rather than silently drop a namespace. That exact failure
+  // has already happened: .blog, .news and .p2p were absent from the 1,267-entry catalogue
+  // while Article 35.1 named all three.
+  const charter = readFileSync(
+    new URL('../../constitution/CONSTITUTION.md', import.meta.url),
+    'utf8',
+  );
+  const clause = charter.split('35.1 The initial top-level domains')[1]?.split('35.1.a')[0] ?? '';
+  const named = [...clause.matchAll(/(?:^|\s)\.([a-z][a-z0-9]{1,11})\b/g)].map((m) => m[1]);
 
-  assert.equal(listed.length, new Set(listed).size, 'the spec list must not repeat a TLD');
-  assert.deepEqual([...listed].sort(), [...RATIFIED_TLDS].sort());
+  assert.ok(named.length >= 11, 'Article 35.1 must still name the founding extensions');
+  for (const tld of named) {
+    assert.ok(RATIFIED_TLDS.has(tld), `.${tld} is named in Article 35.1 but not in the Annex`);
+  }
+});
+
+test('no two ratified extensions collide after case folding', () => {
+  // Two entries differing only by case would be one namespace presented as two, and whichever
+  // row lost the race would be unregistrable with no error able to explain why.
+  const folded = new Map<string, string>();
+  for (const tld of RATIFIED_TLDS) {
+    const key = tld.toLowerCase();
+    const previous = folded.get(key);
+    assert.equal(previous, undefined, `.${tld} folds onto .${previous}`);
+    folded.set(key, tld);
+  }
 });
 
 test('every ratified TLD satisfies the TLD grammar', () => {

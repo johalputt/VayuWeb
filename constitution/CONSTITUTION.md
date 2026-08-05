@@ -311,6 +311,21 @@ Name may be lost or contested, and this Constitution provides no rescue. The omi
 deliberate: every mechanism capable of restoring a Name to its rightful holder is a
 mechanism capable of handing that Name to someone else.
 
+2.30 The **Namespace Annex** is a distinct instrument from the primitives Annex of 2.26, and
+2.27 does not reach it. It is the enumeration of top-level domains incorporated by Article 35.1,
+it is normative, and it is pinned: its contents at commencement are fixed by the canonical digest
+of Article 1.7, and thereafter it changes only by a ratified Naming-category VWIP under Article
+35.6. The two Annexes are separated because they answer to opposite pressures. The primitives
+Annex must be replaceable without an amendment, or the charter dies with SHA-2. The Namespace
+Annex must not be, because an editable list of valid extensions is a mechanism for deciding
+whose Name resolves — which is the power Article 6 vests in a keypair and nowhere else.
+
+2.31 A Node MUST determine TLD validity by membership of the Namespace Annex it holds, computed
+offline, with no network access and no query to any party. An implementation that fetches,
+subscribes to, syncs or derives the valid set at run time is non-conformant under Article 4,
+whatever the source and however reputable — a namespace that arrives over the network is a
+namespace someone can withhold.
+
 ### Article 3. Normative Language and Rules of Interpretation
 
 3.1 RFC 2119 keywords are adopted under a strict usage discipline, and MUST be used only as
@@ -2121,8 +2136,33 @@ capability that only the holder ever created cannot be demanded from a party tha
 
 ### Article 35. The Namespace: TLD Equality, Creation, Freeze and Non-Removal
 
-35.1 The initial top-level domains are: .vayu, .p2p, .free, .decent, .libre, .sov, .dao,
-.indie, .open, .news and .blog.
+35.1 The initial top-level domains are the one thousand two hundred and seventy extensions
+enumerated in the Namespace Annex, which is incorporated into this Article by reference and
+fixed at commencement by the canonical digest of Article 1.7. The Annex is enumerative and
+closed: a string absent from it is not a top-level domain, and a conformant Node SHALL reject a
+Record bearing one. Eleven are named here so that the founding set survives loss of the Annex:
+.vayu, .p2p, .free, .decent, .libre, .sov, .dao, .indie, .open, .news and .blog.
+
+35.1.a Breadth at launch is a deliberate choice against a scarcity the clearnet manufactures. A
+top-level domain there cost roughly USD 185,000 to apply for in the 2012 round plus about USD
+25,000 a year to keep, in an application window that has opened roughly once a decade — a price
+that selects for capital rather than for use, and that makes the shape of the namespace a
+consequence of who could afford the fee. Here an extension costs a proposal and the
+registrations under it cost work, so there is no mechanism by which restricting the initial set
+to eleven would benefit anyone except the holders of those eleven. Where a design has no
+scarcity to ration, rationing is not prudence.
+
+35.1.b Enumeration is not a limit on breadth; it is what makes breadth safe. A set derived at
+run time from anything — a log, a feed, a quorum — is a set two honest Nodes can compute
+differently, and two Nodes disagreeing about whether an extension exists is a namespace fork
+presenting as an intermittent resolution failure. A closed list of one thousand two hundred and
+seventy is as elastic as a list of eleven, because 35.6 is how either one grows, and it is
+verifiable offline by a reader holding the text, which is the only kind of test this
+Constitution relies on.
+
+35.1.c No extension in the Annex is founding, premium, reserved or default. The eleven named in
+35.1 are named for durability, not for rank, and 35.2 governs: a client that orders, promotes,
+prices or suggests one extension over another on the strength of this Article has misread it.
 
 35.2 TLDs are flat, equal and non-hierarchical. No TLD confers status, priority, trust,
 governance weight or resolution preference over any other. There SHALL be no registry operator,

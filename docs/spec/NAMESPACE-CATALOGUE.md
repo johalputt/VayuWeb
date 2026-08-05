@@ -1,27 +1,33 @@
-# VayuWeb Candidate Catalogue
+# The VayuWeb Namespace Annex
 
-**1267 candidate extensions**, grouped by what people actually register them for.
+**1270 ratified extensions**, grouped by what people actually register them for.
 
-**None of these is ratified.** Eleven extensions exist at launch — Constitution Article 35.1
-names them, and [NAMES.md](NAMES.md) lists them. A verifier MUST reject every other TLD,
-including every extension on this page. This file is a backlog of things somebody might
-propose, not a set anyone may register in.
+This page is **normative**. Constitution Article 35.1 incorporates it by reference: these are
+the initial top-level domains, the enumeration is closed, and a conformant Node rejects a
+Record whose `tld` is not on this page. Article 2.30 pins it — its contents at commencement are
+fixed by the canonical digest of Article 1.7, and after commencement it grows only through a
+ratified Naming-category VWIP under Article 35.6. Article 2.31 requires a Node to decide TLD
+validity from the copy it holds, offline, with no query to anyone.
 
-That distinction was missing from an earlier revision, which called this the launch
-catalogue. It put this page a hundredfold at odds with the charter and with
-[REGISTRY.md](REGISTRY.md), and an implementer who believed it would have built a namespace
-no other implementation would accept.
+The ratification record is [VWIP-0004](VWIP-0004.md), which carries the collision review
+Article 35.6 demands, entry by entry.
 
-An extension moves from this page into the ratified set only through a ratified
-Naming-category VWIP, with a collision review, a public objection window of at least ninety
-days, and at least a hundred and eighty days of dormancy before it becomes available
-(Article 35.6). Proof-of-work prices a registration; it does not create an extension. See
-[NAMESPACE.md](NAMESPACE.md) for the creation process and [NAMES.md](NAMES.md) for the label
-grammar and lifecycle.
+Two earlier revisions of this page were wrong in opposite directions and both are worth
+recording, because the corpus disagreed with itself for a while and an implementer reading one
+document built a different namespace from one reading another. The first called this the launch
+catalogue while the charter named eleven extensions and the verifier enforced eleven — a
+hundredfold disagreement. The second corrected it the other way, demoting all 1,267 to
+candidates a verifier MUST reject. That was faithful to the charter as it then stood and it was
+also the wrong resolution: the eleven were never a considered decision about how large a
+namespace should be, and preserving them cost 1,256 extensions to protect an arbitrary number.
+VWIP-0004 settled it at the level where it belonged, by amending Article 35.1 rather than by
+editing a specification to disagree with it.
 
-Every extension here is equal. There is no premium tier, no reserved class, and no
-extension that is more official than another — Constitution Article 35 requires it and
-no client may present otherwise.
+Every extension here is equal. There is no premium tier, no reserved class, no founding rank
+and no default suggestion — Article 35.1.c says so in terms, Article 35.2 requires it, and no
+client may present otherwise. In particular, the eleven named in the text of Article 35.1 are
+named so the founding set survives loss of this file, not because they rank above the other
+1,259.
 
 ## Rules every entry satisfies
 
@@ -31,27 +37,38 @@ no client may present otherwise.
   such as `.india` — that reads as a claim rather than a word, and VayuWeb cannot
   adjudicate who represents a nation. See NAMESPACE.md section 5.3.
 - **No echo of a well-known ICANN generic domain.** A `vayu://` name that looks like a
-  clearnet one teaches readers that VayuWeb names mean nothing.
-- **Lowercase ASCII**, pronounceable, and meaning something.
+  clearnet one teaches readers that VayuWeb names mean nothing. Three entries are carved out
+  of this rule and the carve-out is stated rather than hidden: `.blog`, `.news` and `.p2p`
+  are named in the text of Article 35.1 itself, and `.blog` and `.news` are also clearnet
+  generics. Dropping them would delete namespaces the charter names; keeping them silently
+  would leave a rule this page claims every entry satisfies. So they stay, and the exception
+  is written down.
+- **Lowercase ASCII**, pronounceable, and meaning something. `.p2p` carries the only digit in
+  the Annex, which is why the TLD grammar in [NAMES.md](NAMES.md) admits digits after the
+  first character.
 
-**Status:** Draft — not yet implemented. No extension is registrable until the protocol
-exists and each has completed the 180-day dormancy period required by Article 35.
+**Status:** Ratified, not yet registrable. No extension accepts a registration until the
+protocol exists and the dormancy of Article 35.7 has run from the published activation epoch.
+Ratification settles *what the namespace is*; it does not open it.
 
 ---
 
 ## Founding extensions
 
-*7 extensions*
+*10 extensions*
 
 | Extension | Who registers it |
 |---|---|
+| `.blog` | Personal and independent blogs |
 | `.dao` | Collectively governed organisations publishing their rules |
 | `.decent` | Decentralisation as subject matter: research, tooling, commentary |
 | `.free` | Projects whose defining claim is that they cost nothing to use |
 | `.indie` | Independent creators, studios and small publishers |
+| `.news` | Reporting, newsletters and independent news desks |
 | `.open` | Open standards, open data and open-by-default projects |
+| `.p2p` | Peer-to-peer software, protocols and the people who run them |
 | `.sov` | Self-governing projects and sovereignty-focused publishing |
-| `.vayu` | The protocol's own namespace; general-purpose, the default suggestion |
+| `.vayu` | The protocol's own namespace; general-purpose |
 
 ## Two letters
 

@@ -202,8 +202,13 @@ supporters cannot manufacture it.
 
 **Tauri** — The desktop application framework (2.x) targeted for the VayuWeb client.
 
-**TLD** — Top-level domain, called an *extension* in user-facing copy. Eleven at launch, all
-equal in status.
+**TLD** — Top-level domain, called an *extension* in user-facing copy. 1,270 ratified at
+launch, enumerated in the Namespace Annex, all equal in status.
+
+**Namespace Annex** — `docs/spec/NAMESPACE-CATALOGUE.md`, the enumeration of ratified
+extensions incorporated into Constitution Article 35.1 by reference. Normative, closed, and
+checked offline: a Node decides whether a TLD exists from the copy it holds, never from the
+network (Article 2.31).
 
 **Title** — One of the Constitution's six top-level divisions. Titles are navigational; Articles
 and clauses are what get cited.

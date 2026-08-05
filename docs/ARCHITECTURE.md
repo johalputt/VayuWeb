@@ -113,7 +113,9 @@ dedicated to the public domain.
 ## Data Flow — Register a Name
 
 1. The client checks the label against the grammar in [docs/spec/NAMES.md](spec/NAMES.md) and
-   confirms the TLD is one of the eleven launch TLDs.
+   confirms the TLD is a member of the Namespace Annex
+   ([docs/spec/NAMESPACE-CATALOGUE.md](spec/NAMESPACE-CATALOGUE.md)), checked offline against
+   the copy the client holds.
 2. The client queries the local verified index for `name.tld`. Absent, or expired past grace
    and quarantine, means the name is a free candidate.
 3. The client generates or loads an Ed25519 keypair; the secret key goes to the OS keychain.

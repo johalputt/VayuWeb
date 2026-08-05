@@ -464,7 +464,10 @@ const USAGE = `vayuweb-registry — local name registry (Phase 1: no network)
 
 Exit codes: 0 accepted, 1 rejected or error, 2 deferred (clock skew), 3 not live.
 
---at pins the clock, so a result can be reproduced. Extensions: ${[...RATIFIED_TLDS].join(' ')}.
+--at pins the clock, so a result can be reproduced. ${RATIFIED_TLDS.size} extensions are
+ratified, enumerated in docs/spec/NAMESPACE-CATALOGUE.md — the Namespace Annex. They are not
+listed here: the list would bury every other line of this help, and a help text carrying the
+namespace is one more copy that can drift from it.
 
 This tool does not touch the network. Keys are files; back them up yourself.`;
 

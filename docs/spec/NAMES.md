@@ -189,71 +189,83 @@ Further rules:
 
 ## Launch TLDs
 
-**Eleven extensions are ratified at launch**, and a verifier rejects any other. That is
-Constitution Article 35.1, which names them, and it is what
-[REGISTRY.md](REGISTRY.md) enforces. They are listed below.
+**1,270 extensions are ratified at launch**, and a verifier rejects any other. They are
+enumerated in [NAMESPACE-CATALOGUE.md](NAMESPACE-CATALOGUE.md) — the **Namespace Annex**,
+which Constitution Article 35.1 incorporates by reference. [REGISTRY.md](REGISTRY.md)
+enforces membership of that Annex and nothing else.
 
-[NAMESPACE-CATALOGUE.md](NAMESPACE-CATALOGUE.md) holds 1,267 **candidate** extensions
-across 34 categories, including 60 two-letter ones. Those are not ratified, and a verifier
-MUST NOT accept one. An earlier revision of this section called that catalogue the launch
-set, which put this document a hundredfold at odds with both the charter and the registry
-specification: an implementer reading one built a different namespace from one reading the
-other, and each conformed to what they read. The reasoning behind eventually wanting a
-broad namespace is in [NAMESPACE.md](NAMESPACE.md).
+This is the third answer this document has given, and the two before it were wrong in
+opposite directions, so the history is worth a paragraph. An earlier revision called the
+catalogue the launch set while the charter named eleven extensions and the verifier enforced
+eleven — a hundredfold disagreement, in which an implementer reading one document built a
+different namespace from one reading the other and each conformed to what they read. The
+revision after that resolved it downward, demoting all 1,267 catalogue entries to candidates.
+That was faithful to the charter as it then stood, and it was still the wrong resolution: the
+eleven were an arbitrary starting list rather than a considered judgement about how large a
+namespace should be, and honouring them cost 1,256 extensions.
+[VWIP-0004](VWIP-0004.md) resolved it where a namespace decision belongs — by amending
+Article 35.1 — and carries the collision review for every ratified entry.
 
-The namespace is **elastic over time, not open at launch**. A new extension comes into
-being only through a ratified Naming-category VWIP carrying a collision review, a public
-objection window of at least ninety days, and a dormancy of at least a hundred and eighty
-days between ratification and availability, with the activation epoch published at least a
-hundred and eighty days ahead so that advance knowledge confers no landrush advantage
-(Articles 35.6 and 35.7). Proof-of-work prices a *registration*; it does not create an
-extension, and an earlier revision of this paragraph said it did.
+**The Annex is closed and enumerated, and that is what makes it safe to be large.** A verifier
+decides validity by membership, computed offline from the copy it holds (Article 2.31). It
+never derives the set from the log, fetches it, or accepts a string on the strength of a
+well-formed proof-of-work. Proof-of-work prices a *registration*; it has never created an
+extension, and a revision of this paragraph once said it did.
+
+**Growth after commencement is slow by construction.** A new extension comes into being only
+through a ratified Naming-category VWIP carrying a collision review, a public objection window
+of at least ninety days, and a dormancy of at least a hundred and eighty days between
+ratification and availability, with the activation epoch published at least that far ahead so
+advance knowledge confers no landrush advantage (Articles 35.6 and 35.7). Nothing shortens
+that path, and unanimity least of all — the dormancy exists to deny a head start to exactly
+the people who would be agreeing to waive it.
 
 Creating a top-level domain on the clearnet cost USD 185,000 in the 2012 application round
-plus roughly USD 25,000 a year; here it costs a ratified proposal and some CPU. That
-comparison holds. What it does not mean is that the set is unbounded on day one.
+plus roughly USD 25,000 a year, in a window that has opened about once a decade. Here it
+costs a proposal and some CPU. That is the whole argument for breadth: where a design has no
+scarcity to ration, rationing is not prudence, and a namespace restricted to eleven benefits
+nobody except the holders of those eleven.
 
 Each extension has its own reserved-label set (the common set above, plus anything
 its charter adds) and its own proof-of-work difficulty curve, driven by its
 registration rate over the trailing 30 days.
 
-The eleven below are the protocol's founding extensions, described here because
-they carry meaning specific to VayuWeb itself. They hold no privileged status:
-Constitution Article 35 requires every extension to be equal, and no client may
-present one as more official than another.
+Eleven extensions are additionally named in the text of Article 35.1 itself, so that the
+founding set survives loss of the Annex: `.vayu`, `.p2p`, `.free`, `.decent`, `.libre`,
+`.sov`, `.dao`, `.indie`, `.open`, `.news` and `.blog`. **This confers no rank.** Article
+35.1.c says so in terms and Article 35.2 requires it — no extension is founding, premium,
+reserved or default, and a client that orders, promotes or suggests one over another on the
+strength of that list has misread the Article.
 
-- `.vayu` — the protocol's own namespace; general-purpose, the default suggestion.
-- `.p2p` — peer-to-peer software, protocols and node operators.
-- `.free` — projects whose defining claim is that they cost nothing to use.
-- `.decent` — decentralisation as subject matter: research, tooling, commentary.
-- `.libre` — free-software projects and their documentation.
-- `.sov` — self-sovereign identity, personal data stores, individual homesteads.
-- `.dao` — collectively governed organisations and their public records.
-- `.indie` — independent creators, small studios, one-person operations.
-- `.open` — open data, open standards, open hardware.
-- `.news` — reporting and current affairs.
-- `.blog` — personal and topical writing.
-
-These characterisations are descriptive, not enforced. The registry answers
-whether a signature is valid and whether a name is free; it does not audit
-whether a `.news` site publishes news. A TLD MAY adopt an enforced eligibility
-rule through a VWIP, but none does at launch.
+The Annex describes what each extension is *for*. Those characterisations are descriptive,
+not enforced. The registry answers whether a signature is valid and whether a name is free;
+it does not audit whether a `.news` site publishes news. A TLD MAY adopt an enforced
+eligibility rule through a VWIP, but none does at launch, and such a rule would have to
+survive Article 25 — the protocol does not adjudicate merit or entitlement.
 
 ## Creating a TLD
 
-A new TLD requires a ratified VWIP. The proposal MUST specify the string, the
-character of the TLD, its additional reserved labels, its initial proof-of-work
-parameters, and a collision analysis against existing VayuWeb TLDs and against
-currently delegated public DNS TLDs.
+A new TLD requires a ratified **Naming-category** VWIP (Article 35.6). The proposal MUST
+specify the string, the character of the TLD, its additional reserved labels, its initial
+proof-of-work parameters, and a collision review against existing VayuWeb TLDs and against
+legacy DNS strings likely to confuse a user. It MUST carry a public objection window of not
+less than ninety days, and not less than one hundred and eighty days of dormancy between
+ratification and availability, with the activation epoch published at least that far ahead
+(Article 35.7). The shortest possible path from Draft to a registrable extension is therefore
+30 + 90 + 180 days, and nothing shortens it.
 
-Ratification requires, over a 30-day voting period, at least a two-thirds
-supermajority of ballots cast, with a quorum of ballots from at least 25 percent
-of eligible signing keys — those active in the log during the trailing 90 days.
-These figures are restated here for readability only:
-[CONSTITUTION.md](../../constitution/CONSTITUTION.md) is the normative source
-for eligibility, ballot format, quorum and threshold, and governs where the two
-differ. The VWIP process itself is described in
-[GOVERNANCE.md](../GOVERNANCE.md).
+An earlier revision of this section specified ratification by **a two-thirds supermajority of
+ballots cast over 30 days, with a quorum of 25 percent of eligible signing keys**. That was
+wrong twice over and is recorded here rather than quietly deleted. It contradicted Article
+43.1, under which consensus is the absence of unaddressed substantive technical objection and
+is expressly *not* a head count, a majority or a vote — Article 43.5.4 lists "a vote count"
+among the things that do not constitute consensus. And a quorum computed from "eligible
+signing keys active in the trailing 90 days" is a franchise anyone can mint keys to enlarge,
+which is the Sybil problem Article 40 addresses by refusing to count identities at all. There
+is no ballot, no threshold and no quorum anywhere in VayuWeb naming.
+[CONSTITUTION.md](../../constitution/CONSTITUTION.md) is the normative source and governs
+where any restatement differs; the process itself is in [VWIP-0000](VWIP-0000.md) and, in
+plain language, in [GOVERNANCE.md](../GOVERNANCE.md).
 
 A limitation worth stating plainly: VayuWeb cannot prevent ICANN from later
 delegating a string that VayuWeb already uses. The collision analysis reduces the
@@ -262,29 +274,42 @@ outside VayuWeb, and it never will.
 
 ## Retiring a TLD
 
-A TLD MAY be retired only by a ratified VWIP, and retirement MUST NOT strand its
-holders. The minimum sunset is 24 months from ratification, chosen so that every
-holder meets at least two renewal prompts inside the window; a single-cycle
-sunset would silently drop anyone who renewed the week before the vote.
+**A TLD with live names cannot be retired.** Article 35.9 permits exactly one action against
+it — **TLD-FREEZE**, under which no new registration is accepted while every existing name
+continues to resolve, renew, transfer, delegate and publish indefinitely. Not for 24 months;
+indefinitely. TLD-RETIRE becomes reachable only when no live names remain, or when every
+remaining registrant has migrated **by their own signed action** under a published migration
+path open for not less than five years (Article 35.10).
 
-- At ratification, peers MUST immediately refuse new registrations in the
-  retiring TLD.
-- The retirement VWIP MUST designate a successor TLD. For every name live at
-  ratification, the identical label in the successor TLD is reserved for that
-  name's `ownerKey` for the full 24 months, claimable by a signed registration
-  with no proof-of-work.
-- Renewals in the retiring TLD MUST continue to be accepted for the whole
-  sunset. Each renewal MUST include an `alias` record pointing at the successor
-  name; a renewal without one is invalid. Resolvers MUST follow the alias.
-- At month 24 the TLD becomes historic. Resolvers MUST keep serving the alias
-  for a further 12 months so links in the wild keep working, after which the
-  names enter QUARANTINE and then FREE.
-- Holders who never claim their successor name lose it at month 24. VayuWeb has no
-  mechanism to act on an absent holder's behalf, and inventing one would mean
-  someone other than the key holder controls the name.
+A previous revision of this section specified a 24-month sunset after which unclaimed names
+were lost. It is recorded rather than deleted because it is instructive about how this kind of
+defect gets written: every individual clause read as protective — a two-renewal window, a
+reserved successor label, a free claim, a 12-month alias tail — and the aggregate was a
+mechanism by which a name held by a key was taken from that key by the passage of time and a
+ratified proposal. Article 11 makes a Name unrevocable save by neutral mechanical Lapse, and
+Article 9.7 entrenches it. A sunset that expropriates an inattentive holder is a revocation
+with a calendar in front of it.
 
-VayuWeb cannot compel third parties to update links that point at a retired TLD.
-The 12-month alias tail is mitigation, not a fix.
+Under the charter, then:
+
+- On FREEZE, peers MUST immediately refuse new registrations in the frozen TLD, and MUST
+  continue to accept renewals, transfers, delegations and updates from existing holders for as
+  long as those holders keep renewing. There is no terminal date.
+- A retirement VWIP MAY designate a successor TLD and MAY reserve the identical label under it
+  for each existing `ownerKey`, claimable by a signed registration with no proof-of-work. The
+  reservation MUST remain open for not less than five years, and it is an offer rather than a
+  migration: no name is ever moved on a registrant's behalf.
+- A renewal MUST NOT be conditioned on including an alias to the successor name. Requiring one
+  makes continued tenure contingent on accepting a migration, which is a new condition imposed
+  on a live TLD and is void under Article 35.9.
+- The TLD becomes historic only once the log shows no live names under it. Resolvers SHOULD
+  keep serving any aliases holders chose to publish, so links in the wild keep working.
+- A holder who never migrates keeps their name. VayuWeb has no mechanism to act on an absent
+  holder's behalf, and inventing one would mean someone other than the key holder controls the
+  name — which is the thing this protocol exists to make impossible.
+
+VayuWeb cannot compel third parties to update links that point at a frozen or historic TLD.
+Voluntary aliases are mitigation, not a fix.
 
 ## Deferred: internationalised labels and homograph defence
 

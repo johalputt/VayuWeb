@@ -242,8 +242,52 @@ export function buildVectors(): Vector[] {
     },
     {
       name: 'schema/unratified-tld',
-      rule: 'NAMES.md: the TLD must be one of the eleven ratified extensions',
+      rule: 'NAMES.md: the TLD must be a member of the Namespace Annex',
       record: toHex(registration({ tld: 'example' })),
+      now: VECTOR_NOW,
+      state: FRESH,
+      expect: rejectWith('UNKNOWN_TLD'),
+    },
+    {
+      // VWIP-0004 vectors. `example` above proves a well-shaped non-member is refused; these
+      // prove the Annex is enforced across its range rather than only at its famous entries.
+      // Sort-order endpoints specifically: an off-by-one in a generated list truncates at an end,
+      // and a spot check in the middle passes against exactly that bug.
+      name: 'schema/annex-first-entry',
+      rule: 'VWIP-0004: the first Annex entry in sort order is ratified',
+      record: toHex(registration({ tld: 'abacus' })),
+      now: VECTOR_NOW,
+      state: FRESH,
+      expect: accept,
+    },
+    {
+      name: 'schema/annex-last-entry',
+      rule: 'VWIP-0004: the last Annex entry in sort order is ratified',
+      record: toHex(registration({ tld: 'zine' })),
+      now: VECTOR_NOW,
+      state: FRESH,
+      expect: accept,
+    },
+    {
+      name: 'schema/annex-two-letter-entry',
+      rule: 'VWIP-0004: two-letter extensions are ratified despite colliding with ccTLD strings',
+      record: toHex(registration({ tld: 'io' })),
+      now: VECTOR_NOW,
+      state: FRESH,
+      expect: accept,
+    },
+    {
+      // A badly shaped TLD is refused as UNKNOWN_TLD rather than by a separate shape code.
+      // REGISTRY.md's verify() has one TLD rule — `if rec.tld not in RATIFIED_TLDS` — and
+      // membership subsumes shape, because nothing malformed can be in the Annex. NAMES.md's
+      // BAD_TLD_SHAPE exists for the VWIP path, where a *proposed* string must satisfy the
+      // grammar before it can be considered; it is deliberately not a wire code. Pinned as a
+      // vector because a second implementation that re-derives the grammar on the wire would
+      // report a different code for the same record, and two verifiers disagreeing about why
+      // they refused something is how a conformance suite stops being a contract.
+      name: 'schema/malformed-tld-is-unknown-not-malformed',
+      rule: 'REGISTRY.md: the wire has one TLD rule — membership — and it subsumes shape',
+      record: toHex(registration({ tld: '2p2' })),
       now: VECTOR_NOW,
       state: FRESH,
       expect: rejectWith('UNKNOWN_TLD'),

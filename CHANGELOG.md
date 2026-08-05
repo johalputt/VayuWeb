@@ -10,9 +10,83 @@ it.
 
 ## [Unreleased]
 
+### Changed — the launch namespace is 1,270 extensions, by amendment
+
+- **[VWIP-0004](docs/spec/VWIP-0004.md) amends Constitution Article 35.1.** The initial top-level
+  domains are now the **1,270 extensions of the Namespace Annex** — the 1,267 catalogue entries
+  plus `.p2p`, `.news` and `.blog`, which the charter named but the catalogue omitted. Eleven are
+  still named in the Article's own text so the founding set survives loss of the Annex, and
+  35.1.c says in terms that this confers no rank.
+
+  This reverses the resolution recorded further down this file, and the reversal is the point.
+  Deferring to the charter is right for resolving *ambiguity*; it is not right for laundering an
+  arbitrary number into a decision nobody made. Nothing in the corpus argued for eleven — no
+  analysis, no threat it mitigated, no cost it avoided. The catalogue was 1,267 entries with a
+  stated purpose each, in 34 categories, against published admission rules. The corpus held a
+  considered enumeration and an unconsidered one, and the unconsidered one had won on where it
+  sat rather than on what it said.
+
+  Where the charter is unclear, an implementer must not decide. Where the charter is clear and
+  wrong, an implementer must not decide *either* — which is why this is an amendment carrying
+  full replacement text, a rights-impact analysis, a capture analysis and an Objection Register,
+  and not an edit to a specification.
+
+- **The collision review Article 35.6 requires was run over all 1,270 entries**, mechanically,
+  and its uncomfortable results are published rather than summarised. **35 of the 60 two-letter
+  extensions share a string with a legacy ccTLD** (`.io`, `.me`, `.co`, `.in` and 31 others), and
+  five entries echo a well-known ICANN generic. They are ratified anyway, with the reasoning
+  stated: the collision is of strings, not of resolution, since a VayuWeb name never reaches a DNS
+  resolver. The review also states what it does **not** prove — the generic-collision figure is a
+  floor, checked against a hand-maintained list rather than the ~1,200-entry ICANN root zone.
+
+- **Articles 2.30 and 2.31 are added.** 2.30 defines the Namespace Annex as an instrument
+  distinct from the primitives Annex, and disapplies 2.27 to it: the primitives Annex must be
+  replaceable without an amendment or the charter dies with SHA-2, and the Namespace Annex must
+  not be, because an editable list of valid extensions is a mechanism for deciding whose Name
+  resolves. 2.31 requires a Node to decide TLD validity **offline**, from the copy it holds — a
+  namespace that arrives over the network is a namespace someone can withhold.
+
+- **The ratified set is generated, not written.** `scripts/generate-namespace.py` parses the
+  Annex into `registry/src/namespace.generated.ts`, validating every entry against the TLD
+  grammar, rejecting duplicates, and requiring the per-section counts to sum to the stated total
+  and every charter-named extension to be present. CI runs it with `--check`, so editing either
+  side alone fails the build; a test reads the Annex back independently. Both detections were
+  mutation-tested by drifting the generated file one entry, and both named the entry.
+
+- **`NAMES.md` specified a ratification procedure the charter forbids.** It required "a two-thirds
+  supermajority of ballots cast" over 30 days with "a quorum of 25 percent of eligible signing
+  keys". Article 43.1 defines consensus as the absence of unaddressed substantive technical
+  objection and 43.5.4 lists a vote count among the things that are *not* consensus — and a
+  franchise of "signing keys active in the trailing 90 days" is one anyone can mint keys to
+  enlarge, which is the Sybil problem Article 40 answers by refusing to count identities at all.
+  Replaced with the actual Article 35.6 path, and the old text recorded rather than deleted.
+
+- **`NAMES.md`'s TLD retirement was a revocation with a calendar in front of it.** It specified a
+  24-month sunset after which unclaimed names were lost. Article 35.9 permits exactly one action
+  against a TLD with live names — FREEZE, under which every existing name keeps resolving
+  *indefinitely* — and 35.10 makes retirement reachable only when no live names remain or every
+  holder has migrated by their own signed action over at least five years. Every clause of the
+  old text read as protective; the aggregate took a name from a key by the passage of time.
+
+- **The anti-drift check inverted, because the old one would have stopped checking anything.**
+  `check-counts.py` used to require every inline extension list to match the ratified set
+  exactly. With 1,270 extensions no document can restate the set, so that rule would have passed
+  on every file forever while still looking like a gate. It now enforces what VWIP-0004 section
+  4.2 requires — documents *reference* the Annex, they do not repeat it — with the threshold set
+  from the corpus rather than picked, and mutation-tested by reintroducing a restatement.
+
+- **`VWIP-0000` declared neither of the two things it already relied on.** Line 159 referenced a
+  "Constitutional Amendment" review duration and Article 35.6 requires a "Naming-category VWIP",
+  while the header block declared only three types and seven categories. Neither existed, so a
+  correctly headed Naming or amendment proposal could not be written at all. Both are now
+  declared, with their durations, their extra mandatory sections, and — for amendments — the rule
+  that one reaching an entrenched Article 9 clause is inadmissible at the completeness check
+  rather than merely unlikely to pass.
+
 ### Added
 
-- **CI grows from 14 jobs to 23**, across a new `quality.yml` and additions to the existing
+- **CI grows from 14 jobs to 24** — 23 declared across five workflows, one of which is a
+  two-version Node matrix — via a new `quality.yml` and additions to the existing
   workflows. Every new gate exists because the thing it forbids would disable a check that has
   already caught a real defect here:
   - **formatting** (Prettier, pinned) — an unformatted diff hides the change under the reflow.
@@ -155,17 +229,22 @@ it.
 
 ### Fixed — the namespace, where the charter *is* self-consistent
 
-- **The namespace was defined twice, a hundredfold apart.** `REGISTRY.md` restricted `tld` to
-  eleven ratified extensions and the verifier enforced it; `NAMES.md` called
-  `NAMESPACE-CATALOGUE.md` the "launch catalogue" of **1,267 extensions**, and the catalogue said
-  the same. An implementer reading one built a different namespace from one reading the other,
-  and each conformed to what they read.
+- **The namespace was defined twice, a hundredfold apart.** `REGISTRY.md` restricted `tld` to the
+  founding set and the verifier enforced it; `NAMES.md` called `NAMESPACE-CATALOGUE.md` the
+  "launch catalogue" of **1,267 extensions**, and the catalogue said the same. An implementer
+  reading one built a different namespace from one reading the other, and each conformed to what
+  they read.
 
-  Unlike the registration term, the charter does not contradict itself here: Article 35.1 names
-  eleven, and Article 35.6 says a new extension comes into being **only** by a ratified
-  Naming-category VWIP with a ninety-day objection window and a hundred-and-eighty-day dormancy.
-  So the specifications were simply wrong and are corrected: eleven are ratified, the 1,267 are
-  **candidates** that a verifier MUST reject, and the catalogue is reframed rather than deleted.
+  The charter did not contradict itself here, so the specifications were corrected to match it:
+  the founding set was ratified, the 1,267 became **candidates** a verifier MUST reject, and the
+  catalogue was reframed rather than deleted.
+
+  **This resolution was superseded within the same release cycle, and it was the wrong one.** See
+  the namespace entry above: deferring to the charter is correct for resolving ambiguity, not for
+  laundering an arbitrary number into a decision nobody made. The count in the charter had no
+  analysis behind it anywhere in the corpus. VWIP-0004 settled it at the level where a namespace
+  decision belongs, by amendment. The entry is left here rather than rewritten because a
+  changelog that quietly deletes the answer it gave last week is not a record.
 
 - **`NAMESPACE.md` 2.3 required the opposite of what is implementable.** It said an
   implementation "MUST NOT hard-code the extension list" and that the valid set is "derived from
@@ -204,6 +283,27 @@ it.
 
   This is also why it went unnoticed: every check this project had compared prose to a list, or
   a number to its defining source. Nothing compared two Articles to each other.
+
+- **The Constitution has never been anchored, so it has not commenced.** Article 1.7 requires
+  exactly one canonical text, "byte-exact, content-addressed and signed", whose digest any reader
+  can recompute offline. Article 1.9 requires that digest to be carried "in every published
+  distribution of the specification" until a registry exists. **No digest is published anywhere
+  in this repository.** Article 60.3 makes commencement conditional on publication of the
+  anchored canonical text together with the first conformance suite and the first VWIP archive —
+  the latter two exist, the anchor does not.
+
+  The consequence is larger than a missing file, and it cuts both ways. The charter is not yet in
+  force, which is exactly the state Articles 1.13–1.15 describe ("VayuWeb is specified here, not
+  shipped") — and it is the state VWIP-0004 relies on to amend Article 35.1 without Article 58's
+  twelve-month machinery, which is stated openly in that proposal rather than assumed quietly.
+  It also means the README badge reading `charter: ratified` overstates the position under
+  Article 21's duty of honest claiming.
+
+  **Not fixed here.** Anchoring is a signing operation over a text that is still being amended,
+  and doing it mid-amendment would anchor a document about to change. It is the last step before
+  the first release, not a step to take while VWIP-0004 is in Draft. Recorded now because after
+  the anchor is published this defect becomes unfixable in the cheap way: every subsequent change
+  to charter text costs twelve months, two readings and double ratification.
 
 ### Adversarial review — second pass
 

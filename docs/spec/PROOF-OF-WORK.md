@@ -238,9 +238,10 @@ generating keys, which is free.
 
 The real defences are structural, not computational. Names are cheap to abandon: a hoarded
 name expires after one year, and its holder must pay fresh work every year to keep it, so a
-portfolio decays unless it is continuously funded. The namespace is plural: eleven launch
-TLDs mean a squatter cannot corner "the" name for anything, and the VWIP process can ratify
-more. And the resolution layer is not scarce — nothing about holding a name grants
+portfolio decays unless it is continuously funded. The namespace is plural, and deliberately
+very plural: 1,270 ratified extensions mean a squatter cannot corner "the" name for anything,
+because cornering `atlas` costs 1,270 registrations renewed forever rather than eleven, and
+the VWIP process can ratify more. And the resolution layer is not scarce — nothing about holding a name grants
 attention, links or traffic. A more complete accounting of what this defends against and
 what it does not is in [THREAT-MODEL.md](../THREAT-MODEL.md).
 

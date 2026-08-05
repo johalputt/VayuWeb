@@ -148,12 +148,30 @@ jobs:
         # by editing one side, which would be an implementer deciding what Article 9 reserves.
         run: python3 scripts/check-charter-consistency.py
 
+  # Article 35.1 incorporates the Namespace Annex by reference and Article 2.31 forbids fetching
+  # the valid set at run time, so every implementation carries a copy — and a copy can drift. A
+  # copy wrong by one entry accepts names other implementations reject, which is a namespace fork
+  # presenting as an intermittent resolution failure rather than as an error.
+  namespace-annex:
+    name: the namespace annex and its compiled copy agree
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - name: The generated TLD set is exactly the Annex
+        # Also validates the Annex itself on the way through: every entry against the TLD grammar
+        # of NAMES.md, no duplicates, per-section counts summing to the stated total, and every
+        # extension named in the text of Article 35.1 present. A count that disagrees with its own
+        # enumeration is how the previous namespace defect went unnoticed.
+        run: python3 scripts/generate-namespace.py --check
+
   constitution-pass:
     name: constitution-pass
     # One required status check instead of one per job. Branch protection points here, so
     # adding or renaming a job above does not mean editing repository settings — and a
     # skipped or cancelled dependency cannot pass for success.
-    needs: [no-privileged-writer, licensing, citations, self-consistency]
+    needs: [no-privileged-writer, licensing, citations, self-consistency, namespace-annex]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

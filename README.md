@@ -32,7 +32,8 @@
 
 <p align="center">
   <a href="constitution/CONSTITUTION.md"><img
-    src="https://img.shields.io/badge/charter-ratified-2dd4bf" alt="charter: ratified"></a>
+    src="https://img.shields.io/badge/charter-drafted%2C%20not%20anchored-f59e0b"
+    alt="charter: drafted, not anchored"></a>
   <a href="docs/ROADMAP.md"><img
     src="https://img.shields.io/badge/roadmap-phase%203-f59e0b" alt="roadmap: phase 3"></a>
   <a href="LICENSE"><img
@@ -78,7 +79,7 @@ term, are recorded there as unresolved rather than quietly decided.
 |---|---|
 | **Status** | Specification complete; implementation started at [Phase 1](docs/ROADMAP.md) |
 | **Code** | `registry/` holds the record format, verification, proof-of-work, lifecycle, merkle tree, convergence and the resolution algorithm, with a command-line tool. `proxy/` and `client/` are still placeholders |
-| **Charter** | [The VayuWeb Constitution](constitution/CONSTITUTION.md) — ratified, in force |
+| **Charter** | [The VayuWeb Constitution](constitution/CONSTITUTION.md) — drafted and governing this work, but **not yet in force**: Article 60.3 makes commencement conditional on publishing the canonical digest of Article 1.7, and that anchor does not exist yet |
 | **Licence** | CC0 for the charter, specifications and artwork · MIT for code · no CLA |
 | **Home** | Long-term development moves to **Radicle**; GitHub is a temporary public mirror |
 
@@ -109,14 +110,15 @@ running alongside, reachable from the same browser, owned by nobody.
 
 ## Core design
 
-- **An elastic namespace — eleven extensions at launch, 1,267 candidates, and no ceiling.**
-  Creating a top-level
-  domain on the clearnet cost USD 185,000 in the 2012 application round, plus roughly USD 25,000
-  a year, in a window that opens about once a decade. Here it costs a ratified proposal and some
-  CPU, so the namespace can be as broad as the people using it want. See the
-  [catalogue](docs/spec/NAMESPACE-CATALOGUE.md) — from `.folio` and `.zine` to `.dissent`,
-  `.allodial`, `.ghazal` and `.chai`. Every extension is equal; there is no premium tier and
-  nothing is sold.
+- **1,270 extensions at launch, and no ceiling.** Creating a top-level domain on the clearnet
+  cost USD 185,000 in the 2012 application round, plus roughly USD 25,000 a year, in a window
+  that opens about once a decade — a price that selects for capital rather than for use. Here it
+  costs a ratified proposal and some CPU, so the namespace is as broad as the people using it
+  want. See the [Namespace Annex](docs/spec/NAMESPACE-CATALOGUE.md) — from `.folio` and `.zine`
+  to `.dissent`, `.allodial`, `.ghazal` and `.chai`. Every extension is equal; there is no
+  premium tier, no reserved class and nothing is sold. The set is **closed and enumerated**,
+  which is what makes it safe to be large: a client decides whether an extension exists offline,
+  from the copy it holds, so two honest nodes can never compute different namespaces.
 
 - **Peer-to-peer registry.** A Hypercore append-only log with a Hyperbee index over it. Every
   record is signed; every peer holds the whole history and verifies it without trusting anyone.

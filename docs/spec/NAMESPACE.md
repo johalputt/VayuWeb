@@ -28,14 +28,23 @@ This is the single clearest example of the project's thesis: the chokepoint was 
 
 ## 2. The namespace is elastic, not a list
 
-VayuWeb ships a **small ratified set that grows by process**, not a fixed set and not an open
-one. Both of the latter were claimed by earlier revisions of this section, and neither matched
+VayuWeb ships a **broad ratified set that grows by process**, not a fixed small set and not an
+open one. Both of those were claimed by earlier revisions of this section, and neither matched
 the charter.
 
-2.1 **Eleven extensions are ratified at launch**, named in Constitution Article 35.1 and listed
-in [NAMES.md](NAMES.md). A verifier MUST reject any other. A **candidate catalogue** of curated
-extensions exists in [NAMESPACE-CATALOGUE.md](NAMESPACE-CATALOGUE.md) so that a proposer has good
-starting points, organised by category; nothing in it is registrable until it is ratified.
+2.1 **1,270 extensions are ratified at launch.** They are enumerated in the **Namespace Annex**,
+[NAMESPACE-CATALOGUE.md](NAMESPACE-CATALOGUE.md), which Constitution Article 35.1 incorporates
+by reference; eleven of them are additionally named in the Article's own text so the founding
+set survives loss of the Annex, which confers no rank on those eleven (Article 35.1.c). A
+verifier MUST reject any string outside the Annex. [VWIP-0004](VWIP-0004.md) is the ratification
+record and carries the Article 35.6 collision review entry by entry.
+
+2.1.a The set is large *and* closed, and the combination is the design rather than a compromise
+between two others. Closed is what makes large safe: membership is decidable offline by a reader
+holding the text, so two honest Nodes cannot compute different namespaces, and a namespace two
+Nodes disagree about is a fork presenting as an intermittent resolution failure. Large is what
+makes closed honest: an enumeration of eleven is not a namespace policy, it is a placeholder,
+and the only parties served by keeping it small are the holders of the eleven.
 
 2.2 Any participant MAY propose a new extension at any time through the process in section 4,
 which is a ratified Naming-category VWIP under Article 35.6 — collision review, a public
@@ -44,14 +53,26 @@ before availability. There is no cap on the number of extensions and no manufact
 but there is a deliberate delay, and it exists so that advance knowledge of a new extension
 confers no landrush advantage (Article 35.7).
 
-2.3 An implementation MUST reject any extension outside the ratified set, and MUST update that
-set only when a Naming VWIP ratifies one. An earlier revision required the opposite — that the
-set be "derived from the registry log" and never hard-coded — which cannot be implemented as
-written: the record format has no TLD-creation operation, so the log carries nothing to derive
-the set from, and Article 35.6 vests creation in a ratified proposal rather than in a record
-anyone can append. A client that has
-replicated the log knows every extension without an update, an announcement, or a configuration
-file.
+2.3 An implementation MUST reject any extension outside the Annex, MUST decide membership
+offline against the copy it holds, and MUST update that copy only when a Naming VWIP ratifies an
+addition (Constitution Article 2.31). An implementation MUST NOT fetch, subscribe to, sync or
+otherwise derive the valid set at run time, whatever the source and however reputable: a
+namespace that arrives over the network is a namespace someone can withhold, which fails
+Article 4.
+
+2.3.a An earlier revision required the opposite — that the set be "derived from the registry
+log" and never hard-coded. It cannot be implemented as written, because the record format has
+no TLD-creation operation and the log therefore carries nothing to derive a set from, and it
+would be wrong if it could: Article 35.6 vests creation in a ratified proposal rather than in a
+record anyone can append, so a log-derived namespace would let whoever can append define what
+exists.
+
+2.3.b Compiling the Annex in creates a copy, and a copy can drift. That is a real cost of this
+design and it is paid rather than argued away: the reference implementation generates its set
+from the Annex with `scripts/generate-namespace.py` and CI re-runs the generator with `--check`,
+so editing either the Annex or the generated module alone fails the build. Any independent
+implementation needs an equivalent discipline. A namespace copy wrong by one entry accepts names
+others reject, which is the failure this whole section exists to prevent.
 
 2.4 A client MUST NOT treat any extension as more legitimate than another. There is no premium
 tier, no reserved class sold at a higher price, and no "real" extension. Constitution Article 35

@@ -18,29 +18,30 @@
  *   2. `.vayu` was listed twice with two different descriptions, so a list introduced as
  *      "twelve" held eleven distinct entries. The duplicate was an editing error; the count
  *      was corrected rather than a twelfth namespace invented.
+ *
+ * A third, larger one was found afterwards and corrected at the charter rather than here: the
+ * corpus defined the namespace twice, a hundredfold apart, and the version this module first
+ * implemented — eleven extensions — was the arbitrary one. VWIP-0004 amended Article 35.1 to
+ * incorporate the Namespace Annex, so the ratified set is now 1,270 and lives in
+ * `namespace.generated.ts`, generated from the Annex and checked in CI for drift.
  */
 
+import { NAMESPACE_ANNEX } from './namespace.generated.ts';
+
 /**
- * The ratified TLDs at launch.
+ * The ratified TLDs at launch — the Namespace Annex of Constitution Article 35.1.
  *
  * REGISTRY.md validates by membership of this set — `if rec.tld not in RATIFIED_TLDS: reject
- * UNKNOWN_TLD` — so this constant is wire-visible. Adding to it requires a ratified VWIP with
- * a two-thirds supermajority and a collision analysis, per NAMES.md. It is frozen here so that
- * an accidental edit is a failing test rather than a silent namespace change.
+ * UNKNOWN_TLD` — so this constant is wire-visible, and an implementation whose set differs by
+ * one entry accepts names others reject. It is therefore not written here: it is generated from
+ * `docs/spec/NAMESPACE-CATALOGUE.md` by `scripts/generate-namespace.py`, which CI re-runs with
+ * `--check` so that editing either side alone fails the build.
+ *
+ * Growing it after commencement takes a ratified Naming-category VWIP carrying a collision
+ * review, a ninety-day objection window and a hundred-and-eighty-day dormancy (Article 35.6),
+ * and the change lands in the Annex — never here.
  */
-export const RATIFIED_TLDS: ReadonlySet<string> = new Set([
-  'vayu',
-  'p2p',
-  'free',
-  'decent',
-  'libre',
-  'sov',
-  'dao',
-  'indie',
-  'open',
-  'news',
-  'blog',
-]);
+export const RATIFIED_TLDS: ReadonlySet<string> = new Set(NAMESPACE_ANNEX);
 
 /** Maximum label length in characters, which for ASCII is also bytes. */
 export const MAX_LABEL_LENGTH = 63;

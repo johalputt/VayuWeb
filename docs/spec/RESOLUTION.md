@@ -55,9 +55,15 @@ for `http://example.vayu/` arriving at the proxy.
    `Host` header. Split the host into label and TLD at the last dot. Reject a
    host with more than two dot-separated components (subdomains are deferred;
    see the limitations section).
-2. **TLD classification.** If the TLD is in the VayuWeb launch set — `.vayu .p2p
-   .free .decent .libre .sov .dao .indie .open .news .blog` — continue at
-   step 4; otherwise go to step 3.
+2. **TLD classification.** If the TLD is a member of the Namespace Annex — the
+   1,270 ratified extensions enumerated in
+   [NAMESPACE-CATALOGUE.md](NAMESPACE-CATALOGUE.md), incorporated into
+   Constitution Article 35.1 by reference — continue at step 4; otherwise go to
+   step 3. The set is not restated here. An earlier revision of this step
+   hard-coded eleven strings inline, which made a resolver's namespace a copy
+   able to drift from the Annex and from every other document that also restated
+   it. The restatements did drift, by a factor of a hundred, and each
+   implementer conformed to whichever one they happened to read.
 3. **Non-VayuWeb host.** In the default `vayu-only` mode the proxy MUST return
    error 1403 `TLD_UNKNOWN`. In `passthrough` mode it MAY forward the request
    to the operating system's networking stack. In neither mode is a VayuWeb TLD

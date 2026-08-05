@@ -55,9 +55,13 @@ Generate an Ed25519 keypair, do the proof-of-work, sign a registration record, a
 valid signature wins.
 
 **What extensions are there?**
-Eleven at launch: `.vayu`, `.p2p`, `.free`, `.decent`, `.libre`, `.sov`, `.dao`,
-`.indie`, `.open`, `.news`, `.blog`. Plural on purpose — a single namespace is a single thing
-worth capturing. All extensions are equal; none is the "real" one.
+1,270 at launch, across 34 categories — everything from `.folio` and `.zine` to `.dissent`,
+`.allodial`, `.ghazal` and `.chai`. They are enumerated in the
+[Namespace Annex](spec/NAMESPACE-CATALOGUE.md), which the Constitution incorporates by
+reference; the list is deliberately not repeated anywhere else, because a restatement is a copy
+that can drift and the ones this project used to keep did. Plural on purpose — a single
+namespace is a single thing worth capturing. All extensions are equal; none is the "real" one,
+and no client may present one as more official than another.
 
 **How long does a registration last?**
 One year. The renewal window opens 60 days before expiry. After expiry there is a 30-day grace
@@ -67,8 +71,9 @@ expiries is not a profitable business.
 
 **What stops squatting?**
 Proof-of-work makes bulk registration expensive, renewal requires fresh work so hoarding has an
-ongoing cost, and there are eleven extensions so no single namespace is the only prize. This is a
-speed bump, not a wall — [spec/PROOF-OF-WORK.md](spec/PROOF-OF-WORK.md) says so explicitly.
+ongoing cost, and there are 1,270 extensions so no single namespace is the only prize — cornering
+a desirable string costs 1,270 registrations renewed forever rather than eleven. This is a speed
+bump, not a wall — [spec/PROOF-OF-WORK.md](spec/PROOF-OF-WORK.md) says so explicitly.
 
 **What if I lose my key?**
 You lose the name. There is no recovery, no support desk, no override.
