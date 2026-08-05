@@ -31,9 +31,17 @@ A site is a directory tree. The tree is the unit of publication; there is no
 archive format, no manifest requirement and no build step imposed by the
 protocol.
 
-The tree MUST contain `index.html` at its root. Every subdirectory intended to
-be addressable as a path MUST contain its own `index.html`, because a resolver
-maps a trailing `/` to that filename and has nothing to fall back on.
+The tree MUST contain `index.html` at its root, unless the manifest declares a
+different `index`. Every subdirectory intended to be addressable as a path
+SHOULD contain its own `index.html`, because a resolver maps a trailing `/` to
+that filename.
+
+An earlier revision made the per-directory file a `MUST` and justified it by
+saying a resolver "has nothing to fall back on". That was true of this document
+and false of the specification set: [PUBLISHING.md](PUBLISHING.md) 2.3 defines
+exactly the fallback it said did not exist. Requiring a file on the strength of
+a capability another document mandates is the kind of reasoning that only looks
+sound while each document is read alone.
 
 Filenames MUST be NFC-normalised UTF-8, MUST NOT exceed 255 bytes, and MUST NOT
 contain `/`, `\`, a control character below U+0020, or a leading `.` for any
@@ -41,10 +49,34 @@ file intended to be served. Symbolic links MUST NOT be followed; a publisher
 SHALL either dereference them at build time or refuse the import, since a
 followed link can silently pull a private key into a public CID.
 
-A publisher MAY include a manifest at `.vayu/manifest.json` carrying `title`,
-`description`, `entry` (default `index.html`) and `generator`. The manifest is
-advisory. A resolver MUST render a site that has none, and MUST NOT trust the
-manifest over the actual tree.
+A publisher MAY include a manifest at `.vayu/manifest.json`. **Its schema is
+defined once, in [PUBLISHING.md](PUBLISHING.md) section 2, and is not restated
+here.** A resolver MUST render a site that has none.
+
+An earlier revision of this paragraph defined a competing schema —
+`title`, `description`, `entry` (default `index.html`), `generator` — disjoint
+from PUBLISHING.md's `version` / `index` / `fallback` / `notFound` / `inline` /
+`csp`. Two normative schemas for one wire-visible file, in which `entry` and
+`index` were two names for one field, so two implementers reading two documents
+built two incompatible readers of the same bytes. Article 44.6 requires the
+specification set to be sufficient to build a conformant client from text alone;
+two disjoint schemas defeat that on their own.
+
+The same revision called the manifest "advisory" while PUBLISHING.md gave it a
+`SHALL`. Neither was quite right, and the distinction that resolves it is worth
+stating rather than splitting the difference:
+
+- **The manifest is authoritative about routing** — which file answers `/`, what
+  to serve on no match. Those are decisions the site's owner is entitled to make
+  about their own site, and the manifest is inside the CID-verified tree, signed
+  along with everything else, so trusting it is trusting the owner exactly as
+  much as trusting the content is.
+- **The manifest is not evidence about the tree.** A resolver MUST NOT take a
+  digest, a file's existence, or a content property from it. PUBLISHING.md 2.1
+  already says this in the sharpest form — digests "MUST be computed by the
+  resolver from the verified content, never taken on trust from the manifest…
+  The manifest declares intent; it does not confer permission" — and that rule
+  generalises to everything else the manifest says about the bytes.
 
 Modification times, owner IDs and Unix permission bits MUST NOT be recorded in
 the imported DAG. They break reproducibility and they leak the author's build
@@ -133,6 +165,19 @@ A record MAY carry both. The recommended pattern is an `ipns` entry for the
 living site and a `cid` entry for the last snapshot the owner is willing to
 have served if the pointer cannot be resolved. Resolver preference order is
 specified in [RESOLUTION.md](RESOLUTION.md) and is not restated here.
+
+That cross-reference was carrying more weight than it appeared to. RESOLUTION.md
+selected `cid` first for a period, so a publisher following the recommendation
+above and a resolver following that order **both conformed** while every reader
+saw the frozen snapshot forever — the `ipns` entry this section exists to
+recommend was never consulted, and the author never noticed, because an author
+resolves their own pointer. The order there is now `ipns` before `cid`, with the
+reasoning under "Why the pointer is preferred over the snapshot".
+
+The lesson for this document is narrower and worth keeping: a recommendation
+about which entries to *publish* is only meaningful alongside the rule about
+which entry is *read*, and "specified elsewhere and not restated here" is how
+the two stopped agreeing without either one looking wrong on its own.
 
 ## Availability
 

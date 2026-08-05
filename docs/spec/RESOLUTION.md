@@ -103,9 +103,20 @@ for `http://example.vayu/` arriving at the proxy.
     VayuWeb's transport authenticity story — there is no certificate authority to
     consult.
 13. **Path mapping.** Treat the CID as a directory root and map the request
-    path onto it, resolving `/` and directory paths to `index.html` when
-    present. No match returns 1414 `PATH_NOT_FOUND` — an ordinary 404, the
-    site's problem rather than the network's.
+    path onto it, resolving `/` and directory paths to the manifest's `index`
+    when one is declared and to `index.html` otherwise. On no match, consult
+    `.vayu/manifest.json` from the **verified** tree: serve `notFound` with 404
+    if declared, else serve `fallback` with 200 if declared so the site's own
+    router can handle the path, else return 1414 `PATH_NOT_FOUND` — an ordinary
+    404, the site's problem rather than the network's. The manifest's schema is
+    in [PUBLISHING.md](PUBLISHING.md) section 2; a declared file that is not
+    present in the verified tree is discarded rather than reported, because the
+    manifest declares intent and is never evidence about the tree.
+
+    An earlier revision of this step consulted no manifest at all, which left
+    PUBLISHING.md 2.3's `SHALL` with no counterpart in the document that says
+    what a resolver does: a publisher declaring `notFound` got an ordinary 404,
+    and every site with client-side routing 404'd on every deep link.
 14. **Response.** Emit the bytes with the security headers below and a
     `Content-Type` from the file extension. Emit the diagnostic `X-VayuWeb-*`
     headers **if and only if they have been enabled through the control API**;
@@ -120,20 +131,53 @@ timings through the control API, never in the served response.
 ## Record selection
 
 With several content entries present the resolver SHALL select in this order:
-`cid`, `ipns`, `peer`, `alias`. Immutable content is preferred because it is
-verifiable without any liveness assumption; `alias` is last because it costs
-another full resolution. A `txt` entry is never a content source. A `peer`
-entry is the only option whose availability depends on one specific host being
-online, so it ranks below both content-addressed forms.
+`ipns`, `cid`, `peer`, `alias`. A `txt` entry is never a content source. A
+`peer` entry is the only option whose availability depends on one specific host
+being online, so it ranks below both content-addressed forms; `alias` is last
+because it costs another full resolution.
 
-If the chosen entry fails, the resolver MAY fall back to the next and MUST
-record the fallback in the control API's per-request diagnostics — and in the
-`X-VayuWeb-*` response headers only when those have been enabled, since they are
-off by default. Recording it is mandatory; disclosing it to the page is not, and
-an earlier revision of this paragraph required the header unconditionally, which
-contradicted that default. It MUST NOT fall back across a
-`CONTENT_INTEGRITY` failure, which signals an attack rather than an
-availability problem.
+If the chosen entry fails, the resolver **SHOULD** fall back to the next, MUST
+record the fallback in the control API's per-request diagnostics, and MUST mark
+the answer stale. It MUST NOT fall back across a `CONTENT_INTEGRITY` failure,
+which signals an attack rather than an availability problem. Disclosure to the
+page through the `X-VayuWeb-*` headers happens only when those have been
+enabled, since they are off by default — recording is mandatory, disclosing is
+not.
+
+### Why the pointer is preferred over the snapshot
+
+An earlier revision of this section selected `cid` first, unconditionally, on
+the reasoning that immutable content is verifiable without any liveness
+assumption. That reasoning is sound. The conclusion was still wrong, because it
+was drawn without reading what [HOSTING.md](HOSTING.md) tells a publisher to do.
+
+HOSTING.md recommends carrying **both**: an `ipns` entry for the living site and
+a `cid` for "the last snapshot the owner is willing to have served if the
+pointer cannot be resolved", so that "the registry record stays still while the
+site behind it changes, which is what an author republishing weekly actually
+wants". Under the old order a publisher following HOSTING and a resolver
+following this document would **both conform**, and every reader would be served
+the frozen snapshot forever while the author published into a pointer nobody
+consulted.
+
+Three things made it worse than an ordinary bug. It is **silent** — no error, no
+staleness signal. It is **permanent** — nothing later revisits the choice. And
+it is **invisible to the author**, who resolves their own pointer and sees a
+current site. Only readers see the frozen one.
+
+The fallback rule contributed: it was `MAY`, so a conforming resolver need never
+fall back at all, and the entry that never fails is precisely the pinned
+snapshot. It is now `SHOULD`, and a fallback answer MUST be marked stale. Not
+`MUST`, because forcing a resolver to serve older content whenever a pointer is
+momentarily unreachable hands a network-level attacker a downgrade primitive —
+but the snapshot is owner-signed, so serving it is a staleness problem rather
+than an authenticity one, and refusing to serve anything is worse.
+
+Preferring the pointer costs no verifiability. An IPNS record is signed by the
+same key that controls the name, and what it yields is a CID, hash-verified
+exactly as an inline one is. What it costs is a resolution step and a liveness
+dependency, which is the right price for showing a reader what the author
+actually published.
 
 ## The local HTTP proxy
 

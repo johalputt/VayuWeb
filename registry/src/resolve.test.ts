@@ -144,16 +144,55 @@ test('a name whose term has not started yet is not found rather than served', ()
 /* Step 9: record selection                                                    */
 /* -------------------------------------------------------------------------- */
 
-test('sources are preferred immutable first, and txt is never a source', () => {
-  // cid before ipns before peer before alias: immutable content is verifiable without any
-  // liveness assumption, and peer is the only option depending on one host being online.
+test('a weekly publisher is not frozen at their first snapshot', () => {
+  // The defect, stated as what a reader experiences.
+  //
+  // HOSTING.md recommends carrying both entries: an `ipns` pointer for the living site, and a
+  // `cid` for "the last snapshot the owner is willing to have served if the pointer cannot be
+  // resolved". The registry record then stays still while the site behind it changes, which
+  // HOSTING says in terms is "what an author republishing weekly actually wants".
+  //
+  // An earlier revision of this specification selected `cid` first, unconditionally, with both
+  // entries present. So the publisher follows HOSTING, the resolver follows RESOLUTION, both
+  // conform — and every reader is served the frozen snapshot forever while the author publishes
+  // into a pointer nobody consults. The escape hatch made it worse rather than better: fallback
+  // was `MAY`, and the entry that never fails is precisely the pinned snapshot.
+  //
+  // Nothing surfaces this. There is no error, no staleness signal on the default path, and the
+  // author sees their own site correctly because they resolve their own pointer. It is a silent,
+  // permanent failure produced by two documents that each looked right.
+  const livingSite = rec('atlas', [
+    entry('txt', 'v=vayuweb1'),
+    entry('peer', new Uint8Array(32).fill(1)),
+    entry('ipns', 'k51qzi5uqu5d'),
+    entry('cid', CID),
+  ]);
+  assert.equal(
+    selectSource(livingSite)?.type,
+    'ipns',
+    'with both present the living pointer wins; the snapshot is the fallback HOSTING says it is',
+  );
+});
+
+test('sources are preferred owner-signed-and-current first, and txt is never a source', () => {
+  // ipns before cid before peer before alias. The content is CID-addressed and hash-verified
+  // either way — an IPNS pointer yields a CID — so preferring the pointer costs no
+  // verifiability. What it costs is a resolution step and a liveness assumption, which is the
+  // right price for showing the reader what the author actually published.
   const all = rec('atlas', [
     entry('txt', 'v=vayuweb1'),
     entry('peer', new Uint8Array(32).fill(1)),
     entry('ipns', 'k51qzi5uqu5d'),
     entry('cid', CID),
   ]);
-  assert.equal(selectSource(all)?.type, 'cid');
+  assert.equal(selectSource(all)?.type, 'ipns');
+  assert.equal(
+    selectSource(
+      rec('atlas', [entry('txt', 'x'), entry('cid', CID), entry('peer', new Uint8Array(32))]),
+    )?.type,
+    'cid',
+    'without a pointer the snapshot is the content source',
+  );
 
   assert.equal(
     selectSource(
@@ -170,7 +209,7 @@ test('sources are preferred immutable first, and txt is never a source', () => {
     null,
     'txt is not a source',
   );
-  assert.deepEqual([...SOURCE_ORDER], ['cid', 'ipns', 'peer', 'alias']);
+  assert.deepEqual([...SOURCE_ORDER], ['ipns', 'cid', 'peer', 'alias']);
 });
 
 test('an unknown entry type is never acted upon, however it is ordered', () => {

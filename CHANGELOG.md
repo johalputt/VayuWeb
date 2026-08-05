@@ -10,6 +10,59 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a conforming publisher and a conforming resolver froze every site
+
+- **`SOURCE_ORDER` selected `cid` before `ipns`, so nobody ever saw an update.** `HOSTING.md`
+  recommends carrying both entries: an `ipns` pointer for the living site and a `cid` for "the
+  last snapshot the owner is willing to have served if the pointer cannot be resolved", so that
+  "the registry record stays still while the site behind it changes, which is what an author
+  republishing weekly actually wants". `RESOLUTION.md` said the resolver **SHALL** select `cid`
+  first, unconditionally, with both present.
+
+  Both documents were normative. A publisher following one and a resolver following the other
+  **both conformed**, and every reader was served the frozen first snapshot forever while the
+  author published into a pointer nobody consulted.
+
+  Three things make this worse than an ordinary bug. It is **silent** — no error, no staleness
+  signal. It is **permanent** — nothing later revisits the choice. And it is **invisible to the
+  author**, who resolves their own pointer and sees a current site; only readers see the frozen
+  one. The escape hatch made it worse rather than better: fallback was `MAY`, so a conforming
+  resolver need never fall back at all, and the entry that never fails is precisely the pinned
+  snapshot.
+
+  The order is now `ipns`, `cid`, `peer`, `alias`. Preferring the pointer costs no verifiability:
+  an IPNS record is signed by the same key that controls the name, and what it yields is a CID,
+  hash-verified exactly as an inline one is. Fallback is now `SHOULD` and a fallback answer must
+  be marked stale — not `MUST`, because forcing older content whenever a pointer is momentarily
+  unreachable hands a network attacker a downgrade primitive, and the honest note is that the
+  snapshot is owner-signed, so serving it is a staleness problem rather than an authenticity one.
+
+  Written as a failing test in the reader's terms, mutation-tested by restoring the old order.
+  `WHITEPAPER.md` carried the order in a diagram and is corrected too.
+
+- **`.vayu/manifest.json` had two disjoint normative schemas and a third document that ignored
+  it.** `HOSTING.md` defined `title`/`description`/`entry`/`generator` and called the manifest
+  advisory; `PUBLISHING.md` defined `version`/`index`/`fallback`/`notFound`/`inline`/`csp` and
+  gave it a `SHALL`. `entry` and `index` were two names for one field. `RESOLUTION.md` step 13
+  consulted no manifest at all, so PUBLISHING's `SHALL` about deep links had no counterpart in the
+  document describing what a resolver does — every site with client-side routing 404'd on every
+  deep link, exactly as the spec's own text says it would without a fallback.
+
+  One normative home now: `PUBLISHING.md` section 2, with the descriptive fields merged in.
+  `HOSTING.md` defers to it. `RESOLUTION.md` step 13 consults it.
+
+  The authority question is settled rather than split. **The manifest is authoritative about
+  routing** — which file answers `/`, what to serve on no match — because those are decisions the
+  owner is entitled to make about their own site, and the manifest is inside the CID-verified
+  tree, signed by the same key. **It is never evidence about the tree**: a resolver takes no
+  digest, no file's existence and no content property from it. PUBLISHING 2.1 already said this
+  for digests — "the manifest declares intent; it does not confer permission" — and that rule is
+  now general.
+
+  `HOSTING.md` also required an `index.html` in every addressable subdirectory, justified by
+  saying a resolver "has nothing to fall back on". That was true of that document and false of the
+  specification set, since PUBLISHING 2.3 defines the fallback. Relaxed to `SHOULD`.
+
 ### Added — Phase 3: the browsing proxy and the control API
 
 - **`registry/src/proxy.ts`** implements LOCAL-SURFACE.md sections 2 to 4 as a pure request

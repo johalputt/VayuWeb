@@ -49,12 +49,19 @@ account with anybody at any step.
 An optional `.vayu/manifest.json` inside the published tree, covered by the root CID and therefore
 signed along with everything else. It cannot be tampered with independently of the content.
 
+**This is the only normative definition of the manifest.** [HOSTING.md](HOSTING.md) once carried a
+second, disjoint one — `title`, `description`, `entry`, `generator` — in which `entry` and `index`
+were two names for one field. It now defers here; section 2.4 records what that cost.
+
 ```json
 {
   "version": 1,
   "index": "index.html",
   "fallback": "index.html",
   "notFound": "404.html",
+  "title": "Atlas Observatory",
+  "description": "Field notes",
+  "generator": "vayu-cli/0.2",
   "inline": {
     "style":  ["sha256-K7gNU3sdo+OL0wNhqoVWhr3g6s1xYv72ol/pe/Unols="],
     "script": []
@@ -65,6 +72,10 @@ signed along with everything else. It cannot be tampered with independently of t
   }
 }
 ```
+
+Every field is optional except `version`. `title`, `description` and `generator` are descriptive
+and drive no resolver behaviour; they are here so a publisher has one place to put them rather
+than two documents disagreeing about which.
 
 ### 2.1 Inline content, made safe by addressing
 
@@ -104,6 +115,33 @@ are treated as such — see [CONTENT-SECURITY.md](CONTENT-SECURITY.md) section 2
 A site with client-side routing 404s on every deep link unless a fallback exists. On no path
 match the resolver SHALL serve `notFound` with HTTP 404 if present; otherwise, if `fallback` is
 declared, serve it with HTTP 200 so the site's own router can handle the path.
+
+[RESOLUTION.md](RESOLUTION.md) step 13 implements this. It did not for a period — it mapped
+directories to `index.html` and returned `1414 PATH_NOT_FOUND` on no match, consulting no
+manifest at all — so a `SHALL` here had no counterpart in the document that describes what a
+resolver does, and a publisher declaring `notFound` got an ordinary 404 instead.
+
+### 2.4 What the manifest may decide, and what it may not
+
+The manifest is inside the published tree, covered by the root CID, and signed along with
+everything else, so it cannot be tampered with independently of the content. That fact settles the
+authority question that a competing definition in HOSTING.md left open for a period — one document
+called the manifest "advisory" while this one gave it a `SHALL`.
+
+Neither was quite right, and splitting the difference would have been worse than either:
+
+- **It is authoritative about routing.** Which file answers `/`, and what to serve on no match,
+  are decisions the site's owner is entitled to make about their own site. Trusting the manifest
+  about them is trusting the owner exactly as much as trusting the content is — the same key
+  signed both.
+- **It is not evidence about the tree.** A resolver MUST NOT take a digest, a file's existence, or
+  any content property from it. Section 2.1 states this in the sharpest form for digests, and the
+  rule generalises: **the manifest declares intent; it does not confer permission.**
+
+The `csp` relaxations of section 2.2 sit on the permission side of that line, not the routing
+side, and are therefore constrained twice over. They are declared here, but they take effect only
+under [CONTENT-SECURITY.md](CONTENT-SECURITY.md) section 2.3 — per-site, never global, and visible
+to the reader, because a widening the reader cannot see is a widening that will be abused.
 
 ## 3. `vayu doctor`
 

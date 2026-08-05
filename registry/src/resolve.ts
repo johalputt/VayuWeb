@@ -88,10 +88,30 @@ export type ResolveErrorName = keyof typeof RESOLVE_ERRORS;
 export const ALIAS_BUDGET = 3;
 
 /**
- * Content-source preference: immutable first, then the mutable pointer, then the one that needs
- * a specific host online, then the one that costs another full resolution.
+ * Content-source preference: the living pointer, then the snapshot, then the one that needs a
+ * specific host online, then the one that costs another full resolution.
+ *
+ * ## Why `ipns` comes before `cid`, having once come after
+ *
+ * An earlier revision preferred `cid` first, reasoning that immutable content is verifiable
+ * without a liveness assumption. That reasoning is sound and the conclusion was still wrong,
+ * because it was drawn without reading what a publisher is told to do.
+ *
+ * HOSTING.md recommends carrying both entries: an `ipns` pointer for the living site and a `cid`
+ * for "the last snapshot the owner is willing to have served if the pointer cannot be resolved",
+ * so that "the registry record stays still while the site behind it changes, which is what an
+ * author republishing weekly actually wants". With `cid` selected first and unconditionally, a
+ * publisher following HOSTING and a resolver following RESOLUTION both conform — and every
+ * reader is served the frozen snapshot forever, while the author publishes into a pointer nobody
+ * consults. Silent, permanent, and invisible to the author, who resolves their own pointer.
+ *
+ * Preferring the pointer costs no verifiability. An IPNS record is signed by the same key that
+ * controls the name, and what it yields is a CID, hash-verified exactly as an inline one is. What
+ * it costs is a resolution step and a liveness dependency — the right price for showing a reader
+ * what the author actually published. The snapshot then serves the purpose HOSTING always said
+ * it had: the fallback for when the pointer cannot be resolved.
  */
-export const SOURCE_ORDER = ['cid', 'ipns', 'peer', 'alias'] as const;
+export const SOURCE_ORDER = ['ipns', 'cid', 'peer', 'alias'] as const;
 export type SourceType = (typeof SOURCE_ORDER)[number];
 
 export interface ParsedHost {

@@ -173,7 +173,7 @@ The resolution path, end to end:
   |  + Hyperbee index         |        (append-only, signed, fully verified)
   +---------------------------+
      |  3. verify sig / seq / prevHash / PoW; check notBefore..notAfter
-     |  4. read records: cid | ipns | peer | alias | txt
+     |  4. read records: ipns | cid | peer | alias | txt
      v
   +---------------------------+
   |  content layer (Helia)    |  <---->  IPFS peers, owner pin, volunteer pins
