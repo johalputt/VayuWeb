@@ -10,6 +10,52 @@ it.
 
 ## [Unreleased]
 
+### Added — Phase 4: content addressing
+
+- **`registry/src/content.ts`** implements the fixed import parameters HOSTING.md sets: CIDv1,
+  lowercase unpadded base32, sha2-256, 256 KiB fixed-size chunks, raw leaves. Every value is
+  pinned by the specification rather than left to a library default, because two publishers
+  importing the same directory must produce the same CID — and when they do not, **both CIDs
+  resolve and both sites work**, so nothing surfaces until someone tries to verify a third
+  party's copy.
+
+- **It is checked against the IPFS network, not only against itself.** The tests pin the published
+  reference CIDs for the empty file and `hello world`
+  (`bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku` and
+  `bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e`). An implementation can be
+  internally perfect, round-trip everything it produces, and still address content nobody else can
+  find; only an external vector catches that.
+
+- **The decoder refuses every form the specification does not use** — CIDv0, base58 multibase, a
+  dag-json codec, a BLAKE3 multihash — rather than accommodating them. Accepting one would mean a
+  registry record could point at content this resolver cannot address the way the specification
+  says it must, and "we accepted it and did something reasonable" is how two implementations stop
+  agreeing. The varint encoder handles multi-byte values even though every value in use is below
+  128, because a hard-coded single byte passes every happy-path test and fails the first time a
+  codec exceeds 127.
+
+### Fixed — the specification said "sign an IPNS record" without saying what gets signed
+
+- **HOSTING.md step 5 could not be built against.** It required a publisher to "sign an IPNS
+  record binding the site key to `/ipfs/<root CID>`" with a stated validity and sequence rule, and
+  said nothing about which bytes are signed. Article 44.6 requires the specification set to be
+  sufficient to build a conformant client without reading any implementation's source, and a
+  signature scheme is the sharpest test of that: two implementers who guess differently produce
+  records neither can verify, and the failure presents as "the name does not resolve" with nothing
+  to point at.
+
+  Now pinned to **IPNS Record V2**, with the signature input, the CBOR field set and the scheme
+  written out. VayuWeb defines nothing of its own here, and the reason is the same one that fixed
+  sha2-256 for content hashing: a record ordinary IPFS nodes cannot validate is a record the DHT
+  will not usefully carry.
+
+  Three rules are VayuWeb's own, each closing a way a record could be honest and still wrong: a
+  V1-only record is rejected, because accepting both schemes means accepting the weaker one; a
+  record whose sequence is not strictly greater is rejected, because equal-sequence records with
+  different values are the site key equivocating and no non-arbitrary choice exists; and a
+  publisher must never reuse a sequence, because the 168-hour validity leaves a superseded record
+  servable for a week.
+
 ### Fixed — a conforming publisher and a conforming resolver froze every site
 
 - **`SOURCE_ORDER` selected `cid` before `ipns`, so nobody ever saw an update.** `HOSTING.md`

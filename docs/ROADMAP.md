@@ -137,6 +137,27 @@ Helia integration; the publish flow (build the tree, add to IPFS, obtain the CID
 record, write the pointer into the registry); pin-set management with honest reporting of what is
 and is not being kept alive; unpublishing and its documented limits.
 
+**Started.** `registry/src/content.ts` implements the fixed import parameters — CIDv1, lowercase
+unpadded base32, sha2-256, 256 KiB fixed chunks, raw leaves — and its tests pin the **published
+IPFS reference CIDs** for the empty file and `hello world`, so the module is checked against the
+network it must interoperate with rather than only against itself. An implementation can be
+internally perfect, round-trip everything it produces, and still address content nobody else can
+find; only an external vector catches that.
+
+**What remains, precisely.** The dag-pb UnixFS encoding for directories and multi-block files is
+**not** implemented. It is the piece that turns a tree into a root CID, so the publish flow cannot
+complete without it — and it is deliberately not guessed at, because a dag-pb encoder that is
+subtly wrong produces CIDs that look fine, resolve locally, and are invisible to every other node.
+Writing it needs ecosystem test vectors to check against, which is a different kind of work from
+the rest of this phase. Helia integration, pin-set reporting and unpublishing also remain.
+
+Starting the phase surfaced two settled-spec contradictions and one gap, all recorded in the
+changelog: the resolver preferred the frozen snapshot over the living pointer, so a conforming
+publisher and a conforming resolver together froze every site; `.vayu/manifest.json` had two
+disjoint normative schemas and a third document that ignored it; and step 5 said "sign an IPNS
+record" without saying which bytes are signed, which Article 44.6 makes a defect rather than an
+omission.
+
 **Depends on:** Phase 3.
 
 **Done when:** a site published on one machine is fetched and rendered by a second machine that

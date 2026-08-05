@@ -144,6 +144,45 @@ The site key SHALL be a distinct Ed25519 keypair from the registry owner key.
 Separating them means a build machine can be given the ability to publish new
 content without being given the ability to transfer or release the name.
 
+### What step 5 signs
+
+Step 5 said "sign an IPNS record" without saying which bytes are signed, which
+is not enough to build against. Article 44.6 requires the specification to be
+sufficient to build a conformant client **without reading any implementation's
+source**, and a signature scheme is the sharpest possible test of that: two
+implementers who guess differently produce records neither can verify, and the
+failure appears as "the name does not resolve" with nothing to point at.
+
+VayuWeb does not define its own scheme here. It uses **IPNS Record V2**, and the
+choice is forced by the same reasoning that fixed sha2-256 for content hashing:
+an IPNS record that ordinary IPFS nodes cannot validate is a record the DHT will
+not usefully carry, and a parallel web that no existing node can help serve is
+lonelier than intended.
+
+```text
+Signature input   "ipns-signature:" || dag-cbor(data)
+data              a CBOR map carrying, at minimum:
+                    Value        bytes  "/ipfs/<root CID>" as UTF-8
+                    Validity     bytes  RFC 3339 UTC, nanosecond precision
+                    ValidityType uint   0 (end-of-life)
+                    Sequence     uint   strictly greater than the previous record
+                    TTL          uint   nanoseconds
+Signature scheme  Ed25519 over that input, under the SITE key
+```
+
+Three rules are VayuWeb's own, and each closes a way the record could be honest
+and still wrong:
+
+- A resolver MUST reject a V1-only record. V1 signed a different, weaker input,
+  and accepting both means accepting the weaker one.
+- A resolver MUST reject a record whose `Sequence` is not strictly greater than
+  one it already holds for that key. Equal-sequence records with different values
+  are the site key equivocating, and the resolver has no way to choose between
+  them that is not arbitrary.
+- A publisher MUST NOT reuse a `Sequence`. The 168-hour validity means an old
+  record stays servable for a week after it is superseded, so a reused sequence
+  is a week of two live answers.
+
 ## Pins and pointers
 
 The two content entry types answer different questions and are not
