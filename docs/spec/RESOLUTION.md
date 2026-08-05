@@ -156,7 +156,24 @@ resource into an unbounded memory commitment.
 
 ## The control API
 
-The control API on `127.0.0.1:7653` is JSON over HTTP. Every endpoint MUST
+**The control API is not a TCP listener.** It MUST be served over a Unix domain
+socket (POSIX) or a named pipe (Windows), mode `0600`, owned by the invoking
+user, in a directory owned by that user with mode `0700`. It MUST NOT listen on
+TCP on any address, including loopback.
+[LOCAL-SURFACE.md](LOCAL-SURFACE.md) section 1 is normative and carries the
+reasoning; a build offering a TCP control listener is non-conformant, including
+opt-in and including "for development", because a development affordance is an
+attack surface that ships.
+
+An earlier revision of this section specified `127.0.0.1:7653` and is recorded
+here rather than quietly replaced. The change landed in `LOCAL-SURFACE.md` and
+nowhere else, so the corpus told an implementer to build a TCP listener in one
+document and forbade it in another — and the one that said "127.0.0.1:7653" was
+the one with the endpoint table, so it was the one an implementer would work
+from. `scripts/check-listeners.py` now fails if any document reattaches a TCP
+address to the control API.
+
+The API is JSON over HTTP carried on that socket. Every endpoint MUST
 require an `Authorization: Bearer <token>` header. The token is 32 bytes from
 the OS CSPRNG, base64url-encoded, generated at first run, stored in the
 resolver's config directory with mode `0600`, and compared in constant time. A
@@ -183,11 +200,21 @@ PATCH  /v1/config            mode, timeouts, cache sizes
 POST   /v1/token/rotate      issue a new bearer token
 ```
 
-The API MUST reject any request carrying an `Origin` header and MUST require
-the custom header `X-VayuWeb-Control: 1`. A custom header forces a CORS preflight
-that the API answers with a denial, so no browser page — VayuWeb or clearnet — can
-reach these endpoints even if it learns the port. The API MUST NOT set
-`Access-Control-Allow-Origin` for any origin, ever.
+The API MUST reject any request carrying an `Origin` header, MUST require the
+custom header `X-VayuWeb-Control: 1`, MUST reject `Upgrade` or
+`Connection: Upgrade` with 400, and MUST NOT set `Access-Control-Allow-Origin`
+for any origin, ever.
+
+These are kept, and the honest reason has changed. They were originally the
+*primary* defence: a custom header forces a CORS preflight the API answers with
+a denial, so no browser page could reach the endpoints even if it learned the
+port. On a Unix socket that defence is redundant, because a browser cannot
+address the socket at all — there is no `fetch`, form, `img`, WebSocket or
+`XMLHttpRequest` that names one. They remain mandatory as defence in depth
+against the one failure they still cover: an operator or a future refactor
+putting an HTTP proxy, a socket-activation shim or a container port-forward in
+front of the socket. Belt and braces cost nothing here; the braces are the
+socket.
 
 Signed registry writes (register, update, transfer, release) are not part of
 this surface; see [REGISTRY.md](REGISTRY.md). They are performed by the client

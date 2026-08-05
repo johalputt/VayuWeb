@@ -74,7 +74,7 @@ an invalid operation never becomes an ownership fact.
 | `localhost` | Special-use in RFC 6761. A resolver MUST treat it as loopback and MUST NOT resolve it through VayuWeb. |
 | `example`, `invalid`, `test` | RFC 2606 reserves these for documentation and testing. Documentation that uses a live name eventually points somewhere its author did not intend. |
 | `vayu` | Protocol identity. It is withheld in every TLD, including `.vayu`, so that no holder can speak as the protocol. |
-| `control`, `api`, `resolver`, `proxy`, `pac`, `wpad`, `_vayu` | These collide with the resolver's control surface on `127.0.0.1:7653` or with proxy auto-configuration conventions. `wpad` in particular is a long-standing proxy-hijack vector; a name that a browser might fetch as configuration MUST NOT be registrable by a stranger. |
+| `control`, `api`, `resolver`, `proxy`, `pac`, `wpad`, `_vayu` | These collide with the resolver's control surface or with proxy auto-configuration conventions. `wpad` in particular is a long-standing proxy-hijack vector; a name that a browser might fetch as configuration MUST NOT be registrable by a stranger. |
 
 Reserved labels are not permanently unregistrable. A VWIP MAY release a class of
 them under an allocation policy, but until one is ratified the class stays

@@ -10,6 +10,46 @@ it.
 
 ## [Unreleased]
 
+### Fixed — the corpus specified a listener the security model forbids
+
+- **Five documents put the control API on `127.0.0.1:7653`. `LOCAL-SURFACE.md` section 1 forbids
+  a TCP control listener on any address, including loopback, and calls a build that offers one —
+  even opt-in, even "for development" — non-conformant.**
+
+  The socket decision is the strongest single piece of hardening in the design, and the reasoning
+  is that a browser *cannot address a Unix domain socket*: no `fetch`, form, `img`, WebSocket or
+  `XMLHttpRequest` can name one. That deletes DNS rebinding, CSRF, WebSocket `Upgrade` reach and
+  browser port-scanning against the privileged surface outright, rather than requiring a correct
+  defence against each one forever.
+
+  It landed in `LOCAL-SURFACE.md` and nowhere else. `RESOLUTION.md` — which carries the endpoint
+  table an implementer would actually build from — still said "The control API on
+  `127.0.0.1:7653` is JSON over HTTP", and `ARCHITECTURE.md` attached a normative **SHALL** to the
+  forbidden transport. A competent implementer reading top-to-bottom would have built the listener
+  the security model exists to prevent.
+
+  Corrected in `RESOLUTION.md`, `ARCHITECTURE.md`, `WHITEPAPER.md`, `GLOSSARY.md`, `ROADMAP.md`
+  and `NAMES.md`. The `Origin`-rejection and custom-header rules are kept but re-justified: they
+  were the *primary* defence when the surface was TCP, and on a socket they are defence in depth
+  against an operator or refactor putting a proxy, a socket-activation shim or a container
+  port-forward in front of it.
+
+- **A new gate, `scripts/check-listeners.py`, and a CI job — 25 jobs now.** It is deliberately
+  three exact string rules rather than something cleverer, and the reason is worth recording.
+
+  The first version tried prose analysis: find each control-API mention, look for an address
+  nearby, and infer from the surrounding words whether the sentence was specifying the binding or
+  retiring it. It was mutation-tested three times and survived none of them cleanly. Proximity
+  cannot separate "specifies" from "retires" when a document contains both in one paragraph —
+  which every corrected document now does, because correcting them meant writing down what they
+  used to say. Each patch made it worse in the usual way: the escape hatch that stopped the false
+  positive also opened the door for the mutation.
+
+  So the shape changed rather than the thresholds. The rules now are: the retired port may appear
+  only in files whose job is recording history; four named documents must state that the control
+  API is a Unix socket; and no loopback binding other than the proxy's may appear anywhere. All
+  three mutation-tested and caught. The docstring states what the check does **not** prove.
+
 ### Added — Phase 2: the replication protocol
 
 - **[REPLICATION.md](docs/spec/REPLICATION.md)** specifies how many machines reach one registry

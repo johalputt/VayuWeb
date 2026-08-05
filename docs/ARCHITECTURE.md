@@ -80,9 +80,18 @@ resolution, not availability. See [docs/spec/HOSTING.md](spec/HOSTING.md).
 
 ## Surface 1 — Resolver Proxy
 
-A small local daemon that any browser can be pointed at. It listens on loopback only:
-`127.0.0.1:7654` for the HTTP proxy and `127.0.0.1:7653` for the control API. Two ports, not
-one, so that the control API can be firewalled or disabled without disabling resolution.
+A small local daemon that any browser can be pointed at. It exposes **two surfaces of different
+kinds, deliberately**: the HTTP proxy on `127.0.0.1:7654`, which must be TCP because a browser has
+to reach it, and the control API on a **Unix domain socket** (a named pipe on Windows), mode
+`0600`, which must not be TCP because a browser must never reach it.
+
+An earlier revision of this section put the control API on `127.0.0.1:7653` and argued for "two
+ports, not one, so that the control API can be firewalled or disabled without disabling
+resolution". The separation was right and the mechanism was wrong. A browser cannot address a Unix
+socket — no `fetch`, form, `img`, WebSocket or `XMLHttpRequest` can name one — so moving the
+privileged surface off TCP deletes DNS rebinding, CSRF, WebSocket `Upgrade` reach and browser port
+scanning against it outright, rather than requiring a correct defence against each one forever.
+[LOCAL-SURFACE.md](spec/LOCAL-SURFACE.md) section 1 is normative.
 
 The proxy holds the verified registry index in memory, so a `.vayu` lookup is a local B-tree
 read — no network round trip and no query leaves the machine. An optional browser extension
@@ -101,7 +110,7 @@ private capability.
 | Path | Contents |
 | --- | --- |
 | `registry/` | Record schema, canonical serialisation, signature and chain verification, Hypercore/Hyperbee wiring, Hyperswarm replication, proof-of-work verification. |
-| `proxy/` | Local resolver: HTTP proxy on 7654, control API on 7653, Helia fetch, response caching, browser extension source. |
+| `proxy/` | Local resolver: HTTP proxy on 7654 (TCP), control API on a Unix socket, Helia fetch, response caching, browser extension source. |
 | `client/` | Tauri 2.x desktop application: UI, keychain-backed key management, proof-of-work worker, site publishing. |
 | `scripts/` | Build, reproducible-release and test-network scripts. No production logic. |
 | `docs/` | This file and its siblings, including `docs/spec/` for the normative specifications. |
@@ -207,8 +216,10 @@ the CID before being served, so a lying content peer is detected rather than bel
 
 The browser trusts the proxy on loopback, which is the weakest link in the chain: anything
 with local user privileges can bind or hijack that port. VayuWeb does not solve local compromise
-and does not pretend to. The control API on 7653 SHALL require a token generated at first run
-and stored with user-only permissions, which raises the bar without eliminating the risk.
+and does not pretend to. The control API SHALL be served on a Unix domain socket with mode `0600`, and SHALL
+additionally require a token generated at first run and stored with user-only permissions. Two
+controls rather than one: a socket permission is a control a misconfigured umask can weaken, and a
+token is not. Neither eliminates the risk from a local compromise, and nothing here claims to.
 
 ## State on Disk
 

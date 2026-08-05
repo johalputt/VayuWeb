@@ -99,7 +99,7 @@ conformance suite.
 **Goal:** VayuWeb names work in a browser nobody modified.
 
 The loopback HTTP proxy on `127.0.0.1:7654`; the token-authenticated control API on
-`127.0.0.1:7653`; the resolution algorithm with its cache and TTL policy including negative
+a Unix domain socket; the resolution algorithm with its cache and TTL policy including negative
 caching; per-name origin isolation and the default Content-Security-Policy; the numbered error
 catalogue.
 

@@ -44,9 +44,11 @@ A CID names *what* something is, never *where* it is.
 **Clause** — A numbered sentence in the Constitution, cited as `Article 30.2`. Clauses are
 operative; headings are not.
 
-**Control API** — The resolver's local management interface on `127.0.0.1:7653`, separate from
-the browsing proxy. It binds loopback only and requires a per-install bearer token, and a VayuWeb
-page must never be able to reach it.
+**Control API** — The resolver's local management interface, served on a **Unix domain socket**
+(a named pipe on Windows) with mode `0600` and a per-install bearer token — never on TCP, on any
+address, including loopback. Separate from the browsing proxy, and separate in *kind* rather than
+merely by port: a page can address a TCP port and cannot address a socket, so "a VayuWeb page must
+never be able to reach it" becomes a property of the transport rather than a rule to be enforced.
 
 **Convergence rule** — The deterministic rule resolving two conflicting first-registrations of the
 same name: if exactly one is valid it wins, otherwise the smaller record digest wins. There is no

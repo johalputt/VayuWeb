@@ -189,9 +189,24 @@ jobs:
       - name: Workflows declare permissions, pin third-party actions and use no extra secrets
         run: python3 scripts/check-workflows.py
 
+  # The privileged local surface is a Unix socket, not a TCP port, because a browser can address a
+  # port and cannot address a socket. That decision was made in one document and landed in no
+  # other, so five documents went on telling an implementer to build the listener the security
+  # model forbids — and every check the project had passed throughout, because each compares prose
+  # to a list or a number to its source and none asked what KIND of thing a listener is.
+  listener-kind:
+    name: the control API is a socket, not a port
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - name: No document reattaches a TCP address to the control API
+        run: python3 scripts/check-listeners.py
+
   security-pass:
     name: security-pass
-    needs: [secret-scan, supply-chain, content-security, workflow-security]
+    needs: [secret-scan, supply-chain, content-security, workflow-security, listener-kind]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

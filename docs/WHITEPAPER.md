@@ -140,9 +140,12 @@ often. Pinning is by the owner and by any volunteer. There is no obligatory pinn
 service and no built-in payment for pinning — the honest cost described in section 8.
 See [docs/spec/HOSTING.md](spec/HOSTING.md).
 
-**Resolution.** A lightweight local proxy listens on 127.0.0.1:7654 for HTTP and
-127.0.0.1:7653 for its control API. Loopback is not a detail: the query never leaves
-the machine, so there is no resolver operator to subpoena and no query log to leak. Any
+**Resolution.** A lightweight local proxy listens on 127.0.0.1:7654 for HTTP, and
+serves its control API on a Unix domain socket rather than a second port — a browser
+can address a TCP port and cannot address a socket, so the privileged surface is
+unreachable from any page by construction. Loopback is not a detail: the query never
+leaves the machine, so there is no resolver operator to subpoena and no query log to
+leak. Any
 browser can be pointed at the proxy without an extension; an optional extension makes
 address-bar entry feel native. Resolution consults the locally replicated Hyperbee
 index, so the common case is a B-tree lookup with no network round trip at all.
@@ -160,7 +163,7 @@ The resolution path, end to end:
   +---------------------------+
   |  local VayuWeb resolver      |
   |  127.0.0.1:7654 (proxy)   |
-  |  127.0.0.1:7653 (control) |
+  |  unix socket   (control)  |
   +---------------------------+
      |  1. parse + NFC-normalise label, check grammar
      |  2. look up "example.vayu" in the local Hyperbee index
