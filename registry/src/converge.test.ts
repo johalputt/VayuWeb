@@ -136,22 +136,74 @@ test('rule 1: if exactly one is valid, that one wins whatever its hash', () => {
   assert.equal(r.losers.length, 1);
 });
 
-test('rule 2: the earlier linearised position wins, even with a larger hash', () => {
-  const earlyHighHash = cand(9, {}, 3, true);
-  const lateLowHash = cand(1, { ownerKey: OWNER_B }, 7, true);
-  const r = resolveConflict([lateLowHash, earlyHighHash]);
-  assert.equal(r.rule, 'EARLIER_IN_LOG');
-  assert.deepEqual(r.winner.hash, hash(9));
+test('I choose who owns the name, by choosing who hears about it first', () => {
+  // The attack, in the attacker's voice.
+  //
+  // Two strangers register the same free name on either side of a partition. Both records are
+  // valid; neither did anything wrong. I am a peer they both replicate through, or I am simply
+  // better connected than they are. I deliver A to peer one before B, and B to peer two before
+  // A. Nothing I send is forged, dropped, or delayed beyond plausibility: I chose an order,
+  // which is a thing every relay does by existing.
+  //
+  // Both peers now hold both records and both have linearised them, so both are "positioned" and
+  // rule 2 fires on each. Peer one's log puts A earlier; peer two's puts B earlier. They award
+  // the name to different keys, and neither can tell it has forked, because each applied the
+  // rule correctly to the evidence it holds.
+  //
+  // This does not heal. No later event revisits it: the loser's chain is void on one peer and
+  // live on the other, permanently, and every subsequent UPDATE deepens the split. Ownership of
+  // any contested name becomes a function of network position.
+  //
+  // Constitution 3.13 decides it, and is entrenched under 9.15: where two readings remain open,
+  // the one leaving fewer parties able to compel the operation prevails. Reading "log order" as
+  // each peer's own arrival order lets every relay compel outcomes. Reading it as a globally
+  // agreed order needs a coordinator, which Articles 4 and 9.2 forbid outright. The reading
+  // under which no party can compel anything is the one where a same-`seq` conflict is decided
+  // by the record digest — a pure function of bytes both peers already hold.
+  const recordA = cand(9, {}, null, true);
+  const recordB = cand(1, { ownerKey: OWNER_B }, null, true);
+
+  const peerOne = resolveConflict([
+    { ...recordA, logIndex: 3 },
+    { ...recordB, logIndex: 7 },
+  ]);
+  const peerTwo = resolveConflict([
+    { ...recordA, logIndex: 7 },
+    { ...recordB, logIndex: 3 },
+  ]);
+
+  assert.deepEqual(
+    peerOne.winner.hash,
+    peerTwo.winner.hash,
+    'two honest peers holding the same two records must award the name to the same key, ' +
+      'whatever order they received them in — Article 30.3 claims exactly this property',
+  );
+  assert.equal(peerOne.rule, 'SMALLER_HASH');
+  assert.equal(peerTwo.rule, 'SMALLER_HASH');
+  assert.deepEqual(peerOne.winner.hash, hash(1), 'the smaller digest wins on both');
 });
 
-test('rule 2 is skipped when any candidate has no linearised position', () => {
-  // A peer that has not linearised both cannot know the order agrees everywhere. Guessing from
-  // arrival order is exactly how two peers reach different answers about the same pair.
-  const positioned = cand(9, {}, 3, true);
-  const unpositioned = cand(1, { ownerKey: OWNER_B }, null, true);
-  const r = resolveConflict([positioned, unpositioned]);
-  assert.equal(r.rule, 'SMALLER_HASH');
-  assert.deepEqual(r.winner.hash, hash(1));
+test('a linearised position never decides a same-seq conflict, however it is supplied', () => {
+  // The general form. `logIndex` is arrival order wearing the costume of authority, and there is
+  // no arrangement of it two peers are guaranteed to share for records at the same `seq`.
+  // Whatever positions a caller supplies, the digest must decide.
+  const positions: Array<[number | null, number | null]> = [
+    [3, 7],
+    [7, 3],
+    [4, 4],
+    [null, 2],
+    [2, null],
+    [null, null],
+    [0, 1_000_000],
+  ];
+  for (const [left, right] of positions) {
+    const r = resolveConflict([
+      cand(9, {}, left, true),
+      cand(1, { ownerKey: OWNER_B }, right, true),
+    ]);
+    assert.equal(r.rule, 'SMALLER_HASH', `positions ${left}/${right} must not decide`);
+    assert.deepEqual(r.winner.hash, hash(1), `positions ${left}/${right} must not decide`);
+  }
 });
 
 test('rule 2 requires STRICTLY earlier: a tie falls through to the hash', () => {

@@ -99,11 +99,31 @@ here is a specification-conformance failure, which is why the conformance suite 
 **T6 — Equivocation: two conflicting first-registrations.**
 *Vector:* a partitioned network where two peers each see a different "first" claim.
 *Impact:* two parties each believe they own a name.
-*Mitigation:* the convergence rule — earliest valid registration by log ordering with a
-deterministic hash tie-break — plus monitors and equivocation detection under Article 38.
+*Mitigation:* the convergence rule — sole valid claim, else the smaller record digest — plus
+monitors and equivocation detection under Article 38.
 *Residual risk:* **Moderate.** Convergence is deterministic, but the loser of a tie-break
 experiences it as arbitrary confiscation. There is no version of this that feels fair to both
 parties.
+
+**T6a — Delivery-order manipulation: choosing who owns a contested name.**
+*Vector:* a relay, or merely a better-connected peer, delivers two conflicting registrations to
+two peers in opposite orders. Nothing is forged, dropped or noticeably delayed — an order is
+chosen, which is a thing every relay does by existing.
+*Impact:* under an ordering-based convergence rule, the two peers award the name to different
+keys, both correctly, and nothing later revisits it. A permanent namespace fork, with the winner
+selected by whoever controls the wire.
+*Mitigation:* **designed out rather than defended.** The convergence rule takes no ordering input
+at all: a conflict is decided by the record digest, a pure function of bytes both peers already
+hold. `ConflictRule` does not contain an ordering verdict, so an implementation cannot report one
+without changing the type, and `converge.test.ts` pins the property against seven arrangements of
+local log position including the two that produced the fork.
+*Residual risk:* **Low, and honestly bounded.** The digest tie-break is grindable — an attacker
+expecting a tie can vary `powProof.nonce` to lower their hash — but each attempt costs a full
+proof-of-work and buys a chance at a coin flip in a case that was undecidable anyway. That is
+strictly narrower than the vector it replaces, which cost nothing and won outright. This entry
+exists because the ordering rule was implemented and shipped before it was attacked; it survived
+a feature review and its own unit tests, which supplied log positions consistent with a single
+order because a single-machine test has only one.
 
 ### 3.3 Network
 

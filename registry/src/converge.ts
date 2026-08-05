@@ -10,15 +10,41 @@
  * The rule, applied to any conflicting pair at the same `seq` for one `name.tld`:
  *
  *   1. If exactly one is valid, that one wins.
- *   2. Otherwise, if the linearised order places one strictly before the other on every peer
- *      holding both, the earlier wins.
- *   3. Otherwise, the smaller `record_hash` as a big-endian unsigned integer wins.
+ *   2. Otherwise, the smaller `record_hash` as a big-endian unsigned integer wins.
  *
- * Rule 3 is grindable in principle: an attacker expecting a tie can vary `powProof.nonce` to
+ * ## Why there is no ordering rule, when Article 30.3 appears to state one
+ *
+ * Article 30.3 reads: "the earlier position in log order prevails. Where log order does not
+ * separate them, the claim whose record digest is lower ... prevails. Two honest implementations
+ * therefore always agree." An earlier revision of this module implemented the first sentence
+ * against the peer's own log, and that is a permanent namespace fork with an attack behind it.
+ *
+ * A conflict is by definition two records at the same `seq` for one name. There is no order two
+ * peers are guaranteed to share for such a pair: each peer's log position is its arrival order,
+ * and arrival order is chosen by whoever relays. So a peer that received A then B awards the
+ * name to A, a peer that received B then A awards it to B, both apply the rule correctly, and
+ * nothing later revisits it. Ownership of any contested name becomes a function of network
+ * position — and the party who chose the order never had to forge, drop or delay anything.
+ *
+ * The charter's own entrenched canons resolve this rather than an implementer's judgement.
+ * Article 3.12 forbids inferring a power from silence, which rules out reading in the coordinator
+ * a globally agreed order would require — and Articles 4 and 9.2 forbid that coordinator outright
+ * in any case. Article 3.13 then decides between what remains: "the reading that leaves the
+ * smaller number of parties able to prevent or compel the operation prevails". Local arrival
+ * order lets every relay compel an outcome; the digest lets nobody, because it is a pure function
+ * of bytes both peers already hold. So "log order does not separate them" is the operative branch
+ * for every conflict this function can be given, and the digest decides.
+ *
+ * That reading is also the only one under which Article 30.3's closing sentence is true. An
+ * interpretation that falsifies the clause it interprets is the wrong interpretation.
+ *
+ * Rule 2 is grindable in principle: an attacker expecting a tie can vary `powProof.nonce` to
  * lower their hash. Each attempt costs a full proof of work, and it only matters in the case
  * that is genuinely undecidable, so the cost is paid for a chance at a coin flip. It is recorded
  * as a weakness in docs/THREAT-MODEL.md rather than defended against here, because there is no
- * defence that does not reintroduce a coordinator.
+ * defence that does not reintroduce a coordinator. Note that this weakness is *narrower* than
+ * the one it replaces: grinding costs work per attempt and wins a coin flip, whereas choosing
+ * delivery order costs nothing and wins outright.
  *
  * ## The loser is void, not absent
  *
@@ -51,7 +77,15 @@ export interface Candidate {
   readonly valid: boolean;
 }
 
-export type ConflictRule = 'SOLE_VALID' | 'EARLIER_IN_LOG' | 'SMALLER_HASH';
+/**
+ * Which rule decided a conflict.
+ *
+ * `EARLIER_IN_LOG` is not a member and must never be added back. It named a rule that decided by
+ * the local peer's arrival order, which two peers are not guaranteed to share — see the module
+ * comment. Leaving it in the union would let a caller switch on a verdict this function cannot
+ * produce, and would make the removed rule look like a live branch to anyone reading the type.
+ */
+export type ConflictRule = 'SOLE_VALID' | 'SMALLER_HASH';
 
 export interface Resolution {
   readonly winner: Candidate;
@@ -143,19 +177,18 @@ export function resolveConflict(candidates: readonly Candidate[]): Resolution {
     return { winner: valid[0]!, losers: others(candidates, valid[0]!), rule: 'SOLE_VALID' };
   }
 
-  // Rule 2: the earlier in the linearised order, but only when every candidate has a position.
-  // A missing position means this peer cannot know the order agrees everywhere, and guessing
-  // from arrival order is how two peers reach different answers about the same pair.
-  const positioned = valid.every((c) => c.logIndex !== null);
-  if (positioned) {
-    const sorted = [...valid].sort((a, b) => a.logIndex! - b.logIndex!);
-    // "strictly before": a tie in position is not an ordering, and falls through to rule 3.
-    if (sorted[0]!.logIndex! < sorted[1]!.logIndex!) {
-      return { winner: sorted[0]!, losers: others(candidates, sorted[0]!), rule: 'EARLIER_IN_LOG' };
-    }
-  }
+  // Rule 2 is deliberately absent, and `logIndex` is deliberately ignored. See the module
+  // comment: for a conflict — same name, same `seq` — there is no linearised order two peers are
+  // guaranteed to share, so any use of a local position lets whoever controls delivery order
+  // choose the winner. Article 30.3's "where log order does not separate them" is always the
+  // operative branch here.
+  //
+  // The field is kept on {@link Candidate} rather than deleted because callers legitimately know
+  // where a record sits in their own log and the resolution is worth explaining against it. It
+  // is an input to the *explanation*, never to the *decision*.
 
-  // Rule 3: the smaller record_hash. Total and deterministic, which is why it is last.
+  // Rule 3: the smaller record_hash. Total and deterministic, and the only rule that reaches a
+  // conflict at all.
   const byHash = [...valid].sort((a, b) => compareHashes(a.hash, b.hash));
   return { winner: byHash[0]!, losers: others(candidates, byHash[0]!), rule: 'SMALLER_HASH' };
 }

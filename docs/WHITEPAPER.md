@@ -214,14 +214,22 @@ partition can each accept a valid-looking first registration of the same free na
 Both entries are individually valid. Something must decide, and it must decide the
 same way on every peer, forever, without a vote.
 
-The convergence rule is: **the earliest valid registration by log ordering wins; where
-log ordering does not establish precedence, the entry whose hash is numerically
-smaller, compared as a big-endian unsigned integer over its full digest, wins.** Log
-ordering decides the ordinary case, including nearly all real races, because the log is
-a total order once the partition heals and the entries share a common prefix. The hash
-tie-break covers the genuinely undecidable case and has one virtue: it is deterministic
-and requires no judgement. Every peer holding both entries reaches the same verdict
-with no communication.
+The convergence rule is: **if exactly one entry is valid, it wins; otherwise the entry
+whose hash is numerically smaller, compared as a big-endian unsigned integer over its
+full digest, wins.** It has one virtue, and that virtue is the entire design: it is a
+pure function of bytes every peer already holds, so every peer holding both entries
+reaches the same verdict with no communication and no judgement.
+
+An earlier draft of this paper put an ordering rule ahead of the hash — the earliest
+registration by log ordering — and justified it by saying "the log is a total order once
+the partition heals". That is the error, and it is worth naming because it is seductive.
+There is no *the* log. Each peer keeps its own, and a peer's position for an entry is
+simply the order it happened to receive that entry in, chosen by whoever relayed it. Two
+peers fed the same pair in opposite orders would award the name to different keys, both
+correctly, permanently. Ownership of a contested name would have been a function of
+network position, decidable by any relay, at no cost, with nothing detectable sent. The
+[registry specification](spec/REGISTRY.md) records the full reasoning, which rests on the
+charter's own entrenched interpretive canons rather than on a judgement call.
 
 Three consequences follow, and all three are costs.
 

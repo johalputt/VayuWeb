@@ -234,15 +234,51 @@ free name. The rule, stated for the whole project in [docs/WHITEPAPER.md](../WHI
 applies to any conflicting pair at the same `seq` for one `name.tld`:
 
 1. If exactly one is valid, that one wins.
-2. Otherwise, if the linearised order places one strictly before the other on every peer holding
-   both, the earlier wins.
-3. Otherwise, the smaller `record_hash`, as a big-endian unsigned integer, wins.
+2. Otherwise, the smaller `record_hash`, as a big-endian unsigned integer, wins.
+
+A peer MUST NOT use its own log position, arrival order, receipt timestamp, or any other locally
+observed ordering to decide a conflict. There is no third rule, and an implementation that adds
+one has forked the namespace.
+
+### Why there is no ordering rule
+
+Constitution Article 30.3 reads: "the earlier position in log order prevails. Where log order
+does not separate them, the claim whose record digest is lower ... prevails. Two honest
+implementations therefore always agree." An earlier revision of this specification restated the
+first sentence as a rule of its own, and the reference implementation implemented it against the
+peer's own log. That is a permanent namespace fork with an attack behind it.
+
+A conflict is, by definition, two records at the same `seq` for one `name.tld`. **No order two
+peers are guaranteed to share exists for such a pair.** Each peer's log position is its arrival
+order, and arrival order is chosen by whoever relays. A peer that received A then B awards the
+name to A; a peer that received B then A awards it to B; both applied the rule correctly to the
+evidence they hold; nothing later revisits it. The loser's chain is void on one peer and live on
+the other, permanently, and every subsequent `UPDATE` deepens the split. Ownership of any
+contested name becomes a function of network position — and the party who chose the delivery
+order never had to forge, drop or even noticeably delay anything.
+
+The charter's own entrenched canons resolve this, so it is an interpretation rather than an
+implementer's choice:
+
+- **Article 3.12** forbids inferring a power from silence, which rules out reading in the
+  coordinator that a globally agreed order would need. **Articles 4 and 9.2** forbid that
+  coordinator outright in any case, so the reading is not merely unsupported but void.
+- **Article 3.13** decides between what remains: "the reading that leaves the smaller number of
+  parties able to prevent or compel the operation prevails". Local arrival order lets **every
+  relay** compel an outcome. The digest lets **nobody**, because it is a pure function of bytes
+  both peers already hold.
+
+So "where log order does not separate them" is the operative branch for every conflict, and the
+digest decides. That reading is also the only one under which Article 30.3's closing sentence is
+true; an interpretation that falsifies the clause it interprets is the wrong interpretation.
 
 The loser's record and everything chained onto it become void on merge, and a client MUST
-surface that rather than hide it behind a silent refresh. Rule 3 is grindable in principle — an
+surface that rather than hide it behind a silent refresh. Rule 2 is grindable in principle — an
 attacker expecting a tie can vary `powProof.nonce` to lower their hash — but each attempt costs
 a full proof-of-work and it only matters in the undecidable case. It is recorded as a weakness
-in [docs/THREAT-MODEL.md](../THREAT-MODEL.md).
+in [docs/THREAT-MODEL.md](../THREAT-MODEL.md). It is also strictly narrower than the weakness it
+replaces: grinding costs work per attempt and buys a coin flip, whereas choosing delivery order
+cost nothing and won outright.
 
 ## Verification
 

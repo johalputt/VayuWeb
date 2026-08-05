@@ -49,8 +49,10 @@ the browsing proxy. It binds loopback only and requires a per-install bearer tok
 page must never be able to reach it.
 
 **Convergence rule** — The deterministic rule resolving two conflicting first-registrations of the
-same name: earliest valid registration by log ordering, with a deterministic hash tie-break.
-Deterministic is not the same as feeling fair to the loser.
+same name: if exactly one is valid it wins, otherwise the smaller record digest wins. There is no
+ordering rule, and a peer MUST NOT decide by its own arrival order — see
+[REGISTRY.md](spec/REGISTRY.md), "Why there is no ordering rule". Deterministic is not the same as
+feeling fair to the loser.
 
 **Conformance suite** — The public, offline-runnable, forkable test set that defines what
 "correct implementation" means. Under Article 44 it carries both wire vectors and executable tests

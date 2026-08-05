@@ -10,6 +10,43 @@ it.
 
 ## [Unreleased]
 
+### Fixed — convergence decided by arrival order, which is a permanent namespace fork
+
+- **The convergence rule let any relay choose who owns a contested name.** Rule 2 awarded a
+  conflict to "the earlier position in the linearised order", and the implementation evaluated
+  that against **the peer's own log** — which is arrival order, chosen by whoever relays.
+
+  The attack costs nothing and sends nothing detectable. Two strangers register the same free
+  name across a partition; both records are valid. A relay delivers A to peer one before B, and B
+  to peer two before A. Both peers now hold and have linearised both, so rule 2 fires on each,
+  and they award the name to different keys — both correctly, against the evidence each holds.
+  Nothing later revisits it: the loser's chain is void on one peer and live on the other,
+  permanently, and every subsequent `UPDATE` deepens the split. Ownership of any contested name
+  was a function of network position.
+
+  **The charter's own entrenched canons decide this, so it is an interpretation and not an
+  implementer's choice.** Article 3.12 forbids inferring a power from silence, which rules out
+  reading in the coordinator a globally agreed order would need — and Articles 4 and 9.2 forbid
+  that coordinator outright anyway. Article 3.13 then decides between what remains: the reading
+  leaving fewer parties able to compel the operation prevails. Local arrival order lets every
+  relay compel an outcome; the record digest lets nobody, because it is a pure function of bytes
+  both peers already hold. So Article 30.3's "where log order does not separate them" is the
+  operative branch for every conflict, and the digest decides. That is also the only reading
+  under which 30.3's own closing sentence — "two honest implementations therefore always agree" —
+  is true, and an interpretation that falsifies the clause it interprets is the wrong one.
+
+  Fixed by deleting the ordering rule outright. `EARLIER_IN_LOG` is gone from `ConflictRule`, so
+  an implementation cannot report an ordering verdict without changing the type, and the removal
+  is documented in the union rather than left as an absence someone helpfully restores. Written
+  as a failing test first, in the attacker's voice, and mutation-tested by reinstating the rule —
+  both tests fail. `THREAT-MODEL.md` gains T6a.
+
+  **Why it survived until now:** it passed a feature review and its own unit tests, because those
+  tests supplied log positions consistent with a single order. A single-machine test has only one
+  order to supply. The defect is only visible from the question Phase 2 forces — *what do two
+  peers do* — which is the same lesson as every other real defect found in this project: test the
+  artifact, not the transport.
+
 ### Changed — the launch namespace is 1,270 extensions, by amendment
 
 - **[VWIP-0004](docs/spec/VWIP-0004.md) amends Constitution Article 35.1.** The initial top-level
