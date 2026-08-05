@@ -29,6 +29,15 @@ ROOT = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else
                        os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SKIP_DIRS = {".git", "node_modules", "target", "dist", "build", ".venv", "venv"}
 
+# Files that quote historical, known-wrong text as evidence. An audit record has to reproduce the
+# defect verbatim to be worth anything, so checking it for the defect fails on the document
+# reporting it -- the same mistake the CLA check made, where a grep for "contributor licence
+# agreement" failed on four documents promising there would never be one.
+#
+# This is deliberately a short, named list rather than a pattern. A wildcard here would let any
+# future file opt out of the check by its name, which is how a gate quietly stops gating.
+EVIDENCE_FILES = {"docs/AUDIT-FINDINGS.md"}
+
 NUMBER_WORDS = {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
     "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
@@ -181,7 +190,10 @@ def markdown_files():
         for name in sorted(filenames):
             if name.endswith(".md"):
                 path = os.path.join(dirpath, name)
-                yield os.path.relpath(path, ROOT), path
+                rel = os.path.relpath(path, ROOT).replace(os.sep, "/")
+                if rel in EVIDENCE_FILES:
+                    continue
+                yield rel, path
 
 
 def main():
