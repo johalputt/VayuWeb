@@ -1,12 +1,23 @@
-# VayuWeb Launch Catalogue
+# VayuWeb Candidate Catalogue
 
-**1267 extensions**, grouped by what people actually register them for.
+**1267 candidate extensions**, grouped by what people actually register them for.
 
-This is a starting point, not a boundary. The VayuWeb namespace is **elastic**: anyone may
-propose a new extension at any time, it costs proof-of-work rather than a fee, and the
-valid set is derived from the registry log rather than hard-coded in any client. See
-[NAMESPACE.md](NAMESPACE.md) for the creation process and
-[NAMES.md](NAMES.md) for the label grammar and lifecycle.
+**None of these is ratified.** Eleven extensions exist at launch — Constitution Article 35.1
+names them, and [NAMES.md](NAMES.md) lists them. A verifier MUST reject every other TLD,
+including every extension on this page. This file is a backlog of things somebody might
+propose, not a set anyone may register in.
+
+That distinction was missing from an earlier revision, which called this the launch
+catalogue. It put this page a hundredfold at odds with the charter and with
+[REGISTRY.md](REGISTRY.md), and an implementer who believed it would have built a namespace
+no other implementation would accept.
+
+An extension moves from this page into the ratified set only through a ratified
+Naming-category VWIP, with a collision review, a public objection window of at least ninety
+days, and at least a hundred and eighty days of dormancy before it becomes available
+(Article 35.6). Proof-of-work prices a registration; it does not create an extension. See
+[NAMESPACE.md](NAMESPACE.md) for the creation process and [NAMES.md](NAMES.md) for the label
+grammar and lifecycle.
 
 Every extension here is equal. There is no premium tier, no reserved class, and no
 extension that is more official than another — Constitution Article 35 requires it and

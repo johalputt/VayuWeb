@@ -34,7 +34,7 @@
   <a href="constitution/CONSTITUTION.md"><img
     src="https://img.shields.io/badge/charter-ratified-2dd4bf" alt="charter: ratified"></a>
   <a href="docs/ROADMAP.md"><img
-    src="https://img.shields.io/badge/roadmap-phase%201-f59e0b" alt="roadmap: phase 1"></a>
+    src="https://img.shields.io/badge/roadmap-phase%203-f59e0b" alt="roadmap: phase 3"></a>
   <a href="LICENSE"><img
     src="https://img.shields.io/badge/licence-CC0%20docs%20%C2%B7%20MIT%20code-blue"
     alt="licence: CC0 docs, MIT code"></a>
@@ -43,7 +43,7 @@
   <a href="docs/spec/PRIVACY.md"><img
     src="https://img.shields.io/badge/telemetry-zero-2dd4bf" alt="telemetry: zero"></a>
   <a href="registry/"><img
-    src="https://img.shields.io/badge/registry%20tests-69-blue" alt="registry tests: 69"></a>
+    src="https://img.shields.io/badge/registry%20tests-267-blue" alt="registry tests: 267"></a>
   <a href="docs/THREAT-MODEL.md"><img
     src="https://img.shields.io/badge/threat%20model-published-2dd4bf"
     alt="threat model: published"></a>
@@ -57,22 +57,27 @@
 
 There is no binary to download, no network to join, and no name to register. Implementation
 began only after the **Constitution**, the **specifications** and the **threat model** were
-written — and what exists so far is a handful of registry primitives, not a registry.
+written — and what exists so far is a registry core that runs on one machine, with no network.
 
 That order is deliberate. A naming system inherits whatever politics it was built with, and
 retrofitting governance onto shipped infrastructure has never once worked. So the rules came
 first, in public, where they could be attacked while changing them was still cheap.
 
-It is already earning its keep. Building against the specifications has found three
-consensus-critical defects in them — a wrong domain-separation prefix length, a founding TLD
-that violated its own grammar, and a duplicated entry in the launch namespace. Each would have
-produced a silent fork rather than a visible error, and each was found by implementing rather
-than by re-reading.
+It is already earning its keep. Building against the specifications keeps finding
+consensus-critical defects in them: a wrong domain-separation prefix length, a founding TLD that
+violated its own grammar, a duplicated namespace entry that originated in the charter itself,
+proof-of-work parameters an attacker could choose for themselves, a resolver required to emit
+the fingerprint the same document forbids, and a registration term the Constitution states two
+incompatible ways. Each would have produced a silent fork or a silent weakness rather than a
+visible error, and each was found by implementing or by attacking rather than by re-reading.
+
+Every one is recorded in [CHANGELOG.md](CHANGELOG.md); the ones still unresolved, including the
+term, are recorded there as unresolved rather than quietly decided.
 
 | | |
 |---|---|
 | **Status** | Specification complete; implementation started at [Phase 1](docs/ROADMAP.md) |
-| **Code** | `registry/` holds the serialisation, hashing, signature and naming primitives. `proxy/` and `client/` are still placeholders |
+| **Code** | `registry/` holds the record format, verification, proof-of-work, lifecycle, merkle tree, convergence and the resolution algorithm, with a command-line tool. `proxy/` and `client/` are still placeholders |
 | **Charter** | [The VayuWeb Constitution](constitution/CONSTITUTION.md) — ratified, in force |
 | **Licence** | CC0 for the charter, specifications and artwork · MIT for code · no CLA |
 | **Home** | Long-term development moves to **Radicle**; GitHub is a temporary public mirror |
@@ -104,7 +109,8 @@ running alongside, reachable from the same browser, owned by nobody.
 
 ## Core design
 
-- **An elastic namespace — 1,267 extensions at launch, and no ceiling.** Creating a top-level
+- **An elastic namespace — eleven extensions at launch, 1,267 candidates, and no ceiling.**
+  Creating a top-level
   domain on the clearnet cost USD 185,000 in the 2012 application round, plus roughly USD 25,000
   a year, in a window that opens about once a decade. Here it costs a ratified proposal and some
   CPU, so the namespace can be as broad as the people using it want. See the

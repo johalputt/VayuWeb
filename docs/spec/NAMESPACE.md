@@ -28,16 +28,28 @@ This is the single clearest example of the project's thesis: the chokepoint was 
 
 ## 2. The namespace is elastic, not a list
 
-VayuWeb does **not** ship a fixed set of extensions.
+VayuWeb ships a **small ratified set that grows by process**, not a fixed set and not an open
+one. Both of the latter were claimed by earlier revisions of this section, and neither matched
+the charter.
 
-2.1 A **launch catalogue** of curated extensions exists so that a new user has good choices
-immediately, organised by category. It is a starting point, not a boundary.
+2.1 **Eleven extensions are ratified at launch**, named in Constitution Article 35.1 and listed
+in [NAMES.md](NAMES.md). A verifier MUST reject any other. A **candidate catalogue** of curated
+extensions exists in [NAMESPACE-CATALOGUE.md](NAMESPACE-CATALOGUE.md) so that a proposer has good
+starting points, organised by category; nothing in it is registrable until it is ratified.
 
-2.2 Any participant MAY propose a new extension at any time through the process in section 4.
-There is no cap on the number of extensions, and no scarcity is manufactured.
+2.2 Any participant MAY propose a new extension at any time through the process in section 4,
+which is a ratified Naming-category VWIP under Article 35.6 — collision review, a public
+objection window of at least ninety days, and at least a hundred and eighty days of dormancy
+before availability. There is no cap on the number of extensions and no manufactured scarcity,
+but there is a deliberate delay, and it exists so that advance knowledge of a new extension
+confers no landrush advantage (Article 35.7).
 
-2.3 An implementation MUST NOT hard-code the extension list. The set of valid extensions is
-**derived from the registry log**, exactly like every other piece of state, so a client that has
+2.3 An implementation MUST reject any extension outside the ratified set, and MUST update that
+set only when a Naming VWIP ratifies one. An earlier revision required the opposite — that the
+set be "derived from the registry log" and never hard-coded — which cannot be implemented as
+written: the record format has no TLD-creation operation, so the log carries nothing to derive
+the set from, and Article 35.6 vests creation in a ratified proposal rather than in a record
+anyone can append. A client that has
 replicated the log knows every extension without an update, an announcement, or a configuration
 file.
 

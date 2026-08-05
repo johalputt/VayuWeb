@@ -189,17 +189,29 @@ Further rules:
 
 ## Launch TLDs
 
-**The launch catalogue holds 1,267 extensions across 34 categories**, including 60
-two-letter extensions. It is listed in
-[NAMESPACE-CATALOGUE.md](NAMESPACE-CATALOGUE.md), and the reasoning behind a broad
-namespace — why breadth is safe here and expensive on the clearnet — is in
-[NAMESPACE.md](NAMESPACE.md).
+**Eleven extensions are ratified at launch**, and a verifier rejects any other. That is
+Constitution Article 35.1, which names them, and it is what
+[REGISTRY.md](REGISTRY.md) enforces. They are listed below.
 
-The catalogue is a starting point, not a boundary. The namespace is **elastic**:
-anyone may propose a new extension at any time, it costs proof-of-work rather than
-a fee, and no implementation hard-codes the list. Creating a top-level domain on
-the clearnet cost USD 185,000 in the 2012 application round plus roughly USD
-25,000 a year; here it costs a ratified proposal and some CPU.
+[NAMESPACE-CATALOGUE.md](NAMESPACE-CATALOGUE.md) holds 1,267 **candidate** extensions
+across 34 categories, including 60 two-letter ones. Those are not ratified, and a verifier
+MUST NOT accept one. An earlier revision of this section called that catalogue the launch
+set, which put this document a hundredfold at odds with both the charter and the registry
+specification: an implementer reading one built a different namespace from one reading the
+other, and each conformed to what they read. The reasoning behind eventually wanting a
+broad namespace is in [NAMESPACE.md](NAMESPACE.md).
+
+The namespace is **elastic over time, not open at launch**. A new extension comes into
+being only through a ratified Naming-category VWIP carrying a collision review, a public
+objection window of at least ninety days, and a dormancy of at least a hundred and eighty
+days between ratification and availability, with the activation epoch published at least a
+hundred and eighty days ahead so that advance knowledge confers no landrush advantage
+(Articles 35.6 and 35.7). Proof-of-work prices a *registration*; it does not create an
+extension, and an earlier revision of this paragraph said it did.
+
+Creating a top-level domain on the clearnet cost USD 185,000 in the 2012 application round
+plus roughly USD 25,000 a year; here it costs a ratified proposal and some CPU. That
+comparison holds. What it does not mean is that the set is unbounded on day one.
 
 Each extension has its own reserved-label set (the common set above, plus anything
 its charter adds) and its own proof-of-work difficulty curve, driven by its

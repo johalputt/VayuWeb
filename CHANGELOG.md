@@ -153,6 +153,32 @@ it.
   reintroducing the duplicate into the charter, `RESOLUTION.md` and `FAQ.md` in turn; each is
   caught.
 
+### Fixed — the namespace, where the charter *is* self-consistent
+
+- **The namespace was defined twice, a hundredfold apart.** `REGISTRY.md` restricted `tld` to
+  eleven ratified extensions and the verifier enforced it; `NAMES.md` called
+  `NAMESPACE-CATALOGUE.md` the "launch catalogue" of **1,267 extensions**, and the catalogue said
+  the same. An implementer reading one built a different namespace from one reading the other,
+  and each conformed to what they read.
+
+  Unlike the registration term, the charter does not contradict itself here: Article 35.1 names
+  eleven, and Article 35.6 says a new extension comes into being **only** by a ratified
+  Naming-category VWIP with a ninety-day objection window and a hundred-and-eighty-day dormancy.
+  So the specifications were simply wrong and are corrected: eleven are ratified, the 1,267 are
+  **candidates** that a verifier MUST reject, and the catalogue is reframed rather than deleted.
+
+- **`NAMESPACE.md` 2.3 required the opposite of what is implementable.** It said an
+  implementation "MUST NOT hard-code the extension list" and that the valid set is "derived from
+  the registry log". The record format has no TLD-creation operation, so the log carries nothing
+  to derive the set from, and Article 35.6 vests creation in a ratified proposal rather than in a
+  record anyone can append. It now requires the ratified set to be enforced and updated only by a
+  Naming VWIP.
+
+- **`README.md` carried stale claims**: a 69-test badge against 267 tests, "three
+  consensus-critical defects" against a list that has grown well past three, a Phase 1 roadmap
+  badge, and a code summary describing "a handful of registry primitives". Corrected, and the
+  defect sentence no longer states a count it would have to keep updating.
+
 ### Escalated — needs an amendment, not an implementer
 
 - **The Constitution contradicts itself on the registration term, and the implementation matches
