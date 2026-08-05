@@ -10,6 +10,41 @@ it.
 
 ## [Unreleased]
 
+### Added — pin sets, availability reporting, and unpublishing
+
+- **`registry/src/pins.ts`** implements HOSTING.md's availability section and Constitution
+  Articles 19, 21 and 23. Almost everything in it exists to stop a **true number being reported in
+  a way that means something false**, which is an unusual job for a module and is the point.
+
+  Three ways a correct count lies, each closed by construction rather than by careful wording:
+
+  - **Silence is not absence.** A peer that did not answer is not a peer that lacks the content,
+    and a client cannot distinguish "no peer holds this" from "no peer told me". The report carries
+    how many peers were *asked* alongside how many answered, and the zero case says "No peer
+    answered out of 40 asked. That is not the same as nobody holding it."
+  - **Your own pin is not redundancy.** "1 peer holds this site" reads as reassurance and means
+    nothing when that peer is you — and self-pinning-only is the most common self-inflicted failure
+    in content-addressed publishing, because from the publisher's own machine the site always
+    loads. Self pins cannot be summed in by accident, because there is no total to sum them into.
+  - **A snapshot is not a forecast.** There is no `total`, `percentage`, `durability` or `uptime`
+    field, so a dashboard cannot bind to one. Article 23 forbids the figure and HOSTING.md says any
+    document quoting an uptime number is wrong; the defence is that the number does not exist.
+
+  A peer answering twice counts once, so apparent redundancy cannot be manufactured by repetition,
+  and more answers than peers asked is **refused** rather than reported — a wrong denominator
+  presented with the authority of a measurement is worse than no report.
+
+- **Unpublishing is enumerated as data, not prose.** Article 19.1 opens by saying it is "stated
+  with deliberate precision, because unpublishing is where charters lie", and 19.6 requires the
+  limits to be stated plainly *everywhere*. `UNPUBLISH_EFFECTS` holds the six acts Article 19.2
+  guarantees and the four things 19.6 says cannot be guaranteed, as lists — so an interface has to
+  render them or deliberately drop them, rather than simply never having had them. A test asserts
+  that no string in the module claims erasure, per 19.7.
+
+- Four mutation tests, one per honesty guarantee: counting self as a peer, rendering silence as
+  absence, reintroducing a `total` field, and moving the tombstone cache bound off the charter's
+  3600 seconds. Each is caught by exactly its own test.
+
 ### Added — dag-pb and UnixFS, so a tree becomes a root CID
 
 - **`registry/src/unixfs.ts`** completes the publish path: a directory tree now has a root CID. It

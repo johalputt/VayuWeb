@@ -154,9 +154,16 @@ confidently wrong CID for the empty directory. It was self-consistent, it round-
 site it published would have resolved on the publisher's own machine and been invisible to every
 other node.
 
-**What remains.** Helia integration and the block-exchange path; pin-set management with honest
-reporting of what is and is not being kept alive; unpublishing and its documented limits; and the
-end-to-end acceptance test, which needs two machines and a network.
+`registry/src/pins.ts` covers availability reporting and unpublishing. It is written to refuse to
+overstate: silence is reported as silence rather than as absence, a self-pin is never counted as
+redundancy, and there is no total, percentage or uptime field for an interface to bind to —
+Article 23 forbids the figure, so the number does not exist. Article 19's limits on unpublishing
+are held as a list rather than as prose, so a user interface has to render them or deliberately
+drop them.
+
+**What remains.** Helia integration and the block-exchange path, and the end-to-end acceptance
+test — which needs two machines and a network, and which this repository cannot honestly claim
+from a sandbox.
 
 Starting the phase surfaced two settled-spec contradictions and one gap, all recorded in the
 changelog: the resolver preferred the frozen snapshot over the living pointer, so a conforming
