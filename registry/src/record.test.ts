@@ -1,9 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { readFileSync } from 'node:fs';
+
 import {
   parseRecord,
   parseRecordBytes,
+  OPERATIONS,
   RecordError,
   MAX_RECORD_ENTRIES,
   MAX_ENTRY_VALUE_BYTES,
@@ -249,4 +252,40 @@ test('bytes must be deterministic CBOR and within the size cap', () => {
 test('unknown top-level fields are preserved for downstream verification', () => {
   const parsed = parseRecord(record({ futureField: 'kept' }));
   assert.equal(parsed.map.get('futureField'), 'kept');
+});
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT FINDING: the operation set is not the one the charter closed          */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: every implemented operation is a name Article 29.4 closed the set to', () => {
+  // Article 29.4 does not merely list record types, it CLOSES the list: "There SHALL be no
+  // administrative record type, no operator record type, no reserved opcode and no side channel.
+  // A record bearing an unrecognised type MUST be rejected rather than ignored." So an operation
+  // name outside that set is not a naming preference — it is a record every conformant peer is
+  // required to refuse, which makes it total non-interoperation on a core operation.
+  //
+  // `RELEASE` was such a name. The charter calls the same act "relinquish the name" (19.2) and
+  // names the record RELINQUISH (29.4); nothing in the charter says "release". Article 3.7 voids
+  // the specification to the extent of the conflict, so the specification was the defective
+  // party and the operation is renamed.
+  const charter = readFileSync(
+    new URL('../../constitution/CONSTITUTION.md', import.meta.url),
+    'utf8',
+  );
+  const clause = /29\.4 The record types are a closed set: ([^.]+)\./.exec(charter);
+  assert.ok(clause, 'Article 29.4 no longer states a closed set — this check is enforcing nothing');
+  const closed = new Set(clause[1]!.split(/,\s*/).map((s) => s.trim().replace(/\s+/g, ' ')));
+  assert.equal(closed.size, 11, 'Article 29.4 named eleven types when this check was written');
+
+  // RENEW is the recorded exception, and it is the charter contradicting itself rather than the
+  // specification overreaching: 11.6 and 11.8 make a RENEW record normative by name ("the latest
+  // REGISTER or RENEW record"; "the only record a conformant implementation MAY accept ... is a
+  // RENEW") and 31.1 requires a renewal record to carry proof-of-work, while 29.4 omits it. An
+  // implementer cannot obey both, and no value can be chosen here — 29.4 is the higher-precedence
+  // instrument as written, so removing RENEW would break Article 11 and adding it to 29.4 is an
+  // amendment. scripts/check-charter-consistency.py holds it; this asserts it is still the ONLY
+  // exception, so a second one cannot arrive unnoticed.
+  const outside = OPERATIONS.filter((op) => !closed.has(op));
+  assert.deepEqual(outside, ['RENEW'], 'a new operation outside Article 29.4 appeared');
 });

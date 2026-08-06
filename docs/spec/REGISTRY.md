@@ -1,8 +1,9 @@
 # VayuWeb Registry Specification
 
 This document specifies the VayuWeb registry: the append-only log that holds name ownership, the
-index over it, the record format, the signed bytes, the six operations, and the rules by which
-every peer independently reaches the same answer. Nothing here has been implemented.
+index over it, the record format, the signed bytes, the six operations it implements of the
+eleven Article 29.4 names, and the rules by which every peer independently reaches the same
+answer. Nothing here has been implemented.
 
 Label grammar lives in [docs/spec/NAMES.md](NAMES.md), difficulty derivation in
 [docs/spec/PROOF-OF-WORK.md](PROOF-OF-WORK.md), resolver behaviour in
@@ -44,7 +45,7 @@ marked otherwise. JSON renderings encode byte strings as unpadded base64url.
 | Field | Type | Encoding | Constraints |
 | --- | --- | --- | --- |
 | `version` | uint | CBOR uint | `1` at launch; a verifier MUST reject a major version it does not implement. |
-| `op` | text | ASCII | `REGISTER`, `UPDATE`, `RENEW`, `TRANSFER`, `RELEASE` or `REVOKE`. |
+| `op` | text | ASCII | `REGISTER`, `UPDATE`, `RENEW`, `TRANSFER`, `RELINQUISH` or `REVOKE`. |
 | `name` | text | NFC, lowercase ASCII | 1-63 bytes from `[a-z0-9-]`, per [docs/spec/NAMES.md](NAMES.md). |
 | `tld` | text | ASCII, no leading dot | A member of the Namespace Annex — the 1,270 ratified extensions of [NAMESPACE-CATALOGUE.md](NAMESPACE-CATALOGUE.md); any other is rejected. Membership is decided offline against the copy the verifier holds, never fetched or derived from the log (Constitution Art. 2.31). |
 | `ownerKey` | bstr | 32 bytes | Ed25519 public key: incoming owner for `TRANSFER`, current owner otherwise. |
@@ -131,6 +132,53 @@ strings for one record.
 
 ## Operations
 
+### The operation set, and Article 29.4
+
+Constitution Article 29.4 closes the record set to **eleven** types and requires "a record
+bearing an unrecognised type MUST be rejected rather than ignored". This document implements
+**six**. That is not a summary of the eleven, and the divergence is stated here rather than left
+for an implementer to discover, because under 29.4 an operation outside the set is a record every
+conformant peer must refuse — total non-interoperation on whichever operation is wrong.
+
+| Article 29.4 | Here | Status |
+| --- | --- | --- |
+| `REGISTER` | `REGISTER` | Implemented |
+| `UPDATE` | `UPDATE` | Implemented |
+| `TRANSFER` | `TRANSFER` | Implemented |
+| `REVOKE` | `REVOKE` | Implemented, and named again by Article 34.6 |
+| `RELINQUISH` | `RELINQUISH` | Implemented. This document called it `RELEASE`, which appears nowhere in the charter; Article 19.2 says "relinquish the name" and 29.4 names the record. Renamed, since Article 3.7 voids the specification to the extent of a conflict |
+| — | `RENEW` | **Implemented against 29.4.** See below |
+| `DELEGATE` | — | Absent. Article 34.2 mandates it: an operational key with explicit scope and an expiry not exceeding twenty-four months, unable to transfer, relinquish, rotate ownership or extend its own scope |
+| `KEY-ROTATE` | — | Absent. Article 34.1 makes rotation a signature by the incumbent alone. `TRANSFER` moves a name to a different key and so covers the mechanics, but not the intent, and Article 33.4's fourteen-day settlement now applies to it — which for a rotation after suspected compromise is a materially different thing |
+| `TOMBSTONE` | — | Absent. Articles 19.2, 19.3 and 19.4 mandate it, with a conformance test at 19.9. An `UPDATE` carrying no entries breaks the binding, but 19.4's one-hour cache bound and 19.3's "signed by any other key MUST be refused" have no record to attach to |
+| `TLD-FREEZE` | — | Absent. Article 35.9 makes it the only available action against a TLD with live names |
+| `TLD-RETIRE` | — | Absent. Article 35.10 gates it on no live names remaining |
+| `TLD-CREATE` | — | **Absent deliberately.** See below |
+
+**`RENEW` is the charter contradicting itself, and the specification takes a side.** Articles
+11.6 and 11.8 make a `RENEW` record normative by name — "the epoch of the latest REGISTER or
+RENEW record"; "the only record a conformant implementation MAY accept for that name is a RENEW"
+— and Article 31.1 requires a renewal record to carry proof-of-work. Article 29.4 omits it.
+Article 11 is entrenched under Article 9, so 29.4 is the erroneous clause; but 29.4 is also the
+higher-precedence instrument as written, and adding a type to it is an amendment under Article
+58. This document implements `RENEW`, because the alternative is a registry in which no name can
+ever be renewed. The choice is recorded rather than silent.
+
+**`TLD-CREATE` is the same contradiction pointing the other way.** 29.4 makes it a record, so an
+extension would come into being by someone appending one. Article 35.6 vests creation in a
+ratified Naming-category VWIP instead. Both cannot hold: if a record creates a TLD the
+ratification is decorative, and if ratification creates it the record type has nothing to do.
+`NAMESPACE.md` already inherited this once — it required an implementation to derive the valid
+set "from the registry log" when the log carries nothing to derive it from — and was corrected;
+the charter is where it originated, and that is not correctable here.
+
+`scripts/check-charter-consistency.py` tracks both and fails if either is closed by editing one
+side. The five genuinely absent types are specification work, named with the Article that
+mandates each so the gap is sized rather than gestured at; until they exist, every claim resting
+on them is qualified where it is made — Article 33.4's settlement delay, which vests the power to
+revoke a pending transfer in an Article 34 recovery path that `DELEGATE` and pre-declared
+succession material would carry, is the worked example.
+
 Common preconditions, checked before any operation-specific rule: deterministic CBOR encoding;
 at most 4096 bytes; `version` implemented; `name` and `tld` satisfying the grammar and the
 ratified TLD set; `sig` verifying against the relevant key.
@@ -197,14 +245,14 @@ Effect: the term is unchanged, and **ownership moves `1,209,600` seconds (fourte
 this record's `notBefore`, not on acceptance.** See "Settlement" below — a TRANSFER is the one
 operation whose effect and its acceptance are separated in time.
 
-### RELEASE
+### RELINQUISH
 
 Preconditions: a live `prev`; `records` empty; `notAfter == notBefore`; `powProof` null.
 
 Validation order: common preconditions, chain rules, empty `records`, `notAfter` equality.
 Effect: the name expires at once, enters the 30-day quarantine, then returns to the open pool.
 Grace is skipped, since the owner has said they are done; quarantine is not, because its purpose
-is to stop a watcher front-running the release.
+is to stop a watcher front-running the relinquishment.
 
 ### REVOKE
 
@@ -382,7 +430,7 @@ verify(rec, bytes, state):
               and rec.notAfter == prev.notAfter
               and rec.notAfter - rec.notBefore >= 1209600   // else reject UNSETTLED
               and ed25519_strict(rec.ownerKey, input, rec.coSig)
-    RELEASE:  require rec.records == [] and rec.notAfter == rec.notBefore
+    RELINQUISH: require rec.records == [] and rec.notAfter == rec.notBefore
     REVOKE:   require rec.records == [] and rec.notAfter == prev.notAfter
   return accept
 ```
@@ -459,8 +507,8 @@ The line falls in two places, matching the per-operation preconditions:
 
 - `RENEW` may act while the name is live **or in grace**. That is what grace is for: a missed
   renewal is meant to be recoverable.
-- `UPDATE`, `TRANSFER`, `RELEASE` and `REVOKE` require a **live** predecessor. There is nothing
-  to update, transfer or release once the term has run out.
+- `UPDATE`, `TRANSFER`, `RELINQUISH` and `REVOKE` require a **live** predecessor. There is
+  nothing to update, transfer or relinquish once the term has run out.
 
 For the second group the requirement is close to implied — `notAfter == prev.notAfter` together
 with `notAfter >= notBefore` already forces the term start below the old expiry — but "close to

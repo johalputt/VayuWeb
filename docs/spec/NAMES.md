@@ -116,7 +116,7 @@ disagreement.
                                       +------------+
                                              ^
                                              |
-                                    release (signed by owner)
+                                  relinquish (signed by owner)
                                     from REGISTERED or RENEWABLE
 ```
 
@@ -143,9 +143,9 @@ State definitions:
   expiries and appending a registration in the same second grace ends; when
   nobody can win the race, there is no race to run.
 
-A holder MAY end a registration early by appending a signed release. A released
-name enters QUARANTINE for 30 days, not FREE, so that "release" cannot become a
-tool for coordinated re-registration by a confederate.
+A holder MAY end a registration early by appending a signed `RELINQUISH`. A
+relinquished name enters QUARANTINE for 30 days, not FREE, so that giving a name
+up cannot become a tool for coordinated re-registration by a confederate.
 
 Lifecycle timestamps are evaluated against the record's own `notBefore` and
 `notAfter` as validated by [REGISTRY.md](./REGISTRY.md). Peers with badly skewed
@@ -177,7 +177,7 @@ cost is attached to acquiring term, not to moving an existing term between keys.
 Throughout the fourteen days, the **outgoing** key still controls the name.
 
 - Only a further `TRANSFER` is accepted for that name in the window. An
-  `UPDATE`, `RENEW`, `RELEASE` or `REVOKE` is refused `UNSETTLED`.
+  `UPDATE`, `RENEW`, `RELINQUISH` or `REVOKE` is refused `UNSETTLED`.
 - The outgoing owner cancels by appending a `TRANSFER` back to their own key,
   signed and countersigned by themselves. No separate cancel operation exists,
   because Article 29.4's record set is closed and contains none.
@@ -205,7 +205,7 @@ Further rules:
   33.2 forbids the protocol to provide an "offer channel" by name, and the
   lowercase `revoke` collided with `REVOKE` — an operation that freezes a name
   for the rest of its term with no appeal, which a reader following the
-  precedent this document set elsewhere (`release` for `RELEASE`) could
+  precedent this document set elsewhere (lowercase prose for a record type) could
   reasonably have reached for while trying to call a transfer off.
 - A `TRANSFER` MUST be rejected if the name is in GRACE. A recipient should not
   inherit a name with days left on it; the owner renews first, then transfers.

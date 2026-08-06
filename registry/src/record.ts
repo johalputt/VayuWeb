@@ -23,8 +23,25 @@ import { PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH, isSmallOrderKey } from './signatur
 import { RECORD_HASH_LENGTH } from './domain.ts';
 import { POW_ALGORITHM, POW_NONCE_LENGTH } from './pow.ts';
 
-/** The six operations. Order is irrelevant; membership is what validation asks. */
-export const OPERATIONS = ['REGISTER', 'UPDATE', 'RENEW', 'TRANSFER', 'RELEASE', 'REVOKE'] as const;
+/**
+ * The six operations this specification implements. Order is irrelevant; membership is what
+ * validation asks.
+ *
+ * Constitution Article 29.4 closes the record set to eleven types, and these six are not a subset
+ * of those eleven: `RENEW` is absent from 29.4 while Articles 11.6, 11.8 and 31.1 each make it
+ * normative by name. REGISTRY.md, "The operation set, and Article 29.4", states which of the
+ * eleven are implemented, which are absent and which Article mandates each; a test in this
+ * module's suite asserts that RENEW is still the only name outside the closed set, so a second
+ * divergence cannot arrive quietly.
+ */
+export const OPERATIONS = [
+  'REGISTER',
+  'UPDATE',
+  'RENEW',
+  'TRANSFER',
+  'RELINQUISH',
+  'REVOKE',
+] as const;
 export type Operation = (typeof OPERATIONS)[number];
 
 /** Protocol version implemented here. A verifier must reject a major version it lacks. */

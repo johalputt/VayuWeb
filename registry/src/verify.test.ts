@@ -185,7 +185,7 @@ test('AUDIT: the same bound applies to every operation, not just RENEW', () => {
       records: [] as CborValue,
     },
     {
-      op: 'RELEASE',
+      op: 'RELINQUISH',
       notBefore: NOW + 10 * TERM_SECONDS,
       notAfter: NOW + 10 * TERM_SECONDS,
       records: [] as CborValue,
@@ -644,16 +644,16 @@ test('UPDATE, TRANSFER and REVOKE may not move the expiry', () => {
   );
 });
 
-test('RELEASE expires the name at once and carries no entries', () => {
+test('RELINQUISH expires the name at once and carries no entries', () => {
   const at = NOW + 600;
   assert.equal(
-    code(verify(successor({ op: 'RELEASE', records: [], notAfter: at }), prevView(), at)),
+    code(verify(successor({ op: 'RELINQUISH', records: [], notAfter: at }), prevView(), at)),
     'accept',
   );
   assert.equal(
     code(
       verify(
-        successor({ op: 'RELEASE', records: [entry('txt', 'x')], notAfter: at }),
+        successor({ op: 'RELINQUISH', records: [entry('txt', 'x')], notAfter: at }),
         prevView(),
         at,
       ),

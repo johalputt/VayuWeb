@@ -785,8 +785,8 @@ export function buildVectors(): Vector[] {
     },
     {
       name: 'lifecycle/release-expires-immediately',
-      rule: 'REGISTRY.md RELEASE: records empty and notAfter == notBefore',
-      record: toHex(successor({ op: 'RELEASE', records: [], notAfter: VECTOR_NOW + 600 })),
+      rule: 'REGISTRY.md RELINQUISH: records empty and notAfter == notBefore',
+      record: toHex(successor({ op: 'RELINQUISH', records: [], notAfter: VECTOR_NOW + 600 })),
       now: VECTOR_NOW + 600,
       state: HELD,
       expect: accept,

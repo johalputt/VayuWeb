@@ -20,7 +20,7 @@
  *
  * Two operations change the shape:
  *
- * - RELEASE skips grace, because the owner has said they are done, but NOT quarantine, whose
+ * - RELINQUISH skips grace, because the owner has said they are done, but NOT quarantine, whose
  *   purpose is front-running rather than protecting the owner.
  * - REVOKE freezes the name for the remainder of its term and then quarantines it. A revoked
  *   name accepts no further record from anyone, which is what makes it a deadman switch for a
@@ -55,9 +55,9 @@ export interface Lifecycle {
 export function lifecycleOf(record: RegistryRecord): Lifecycle {
   const op: Operation = record.op;
 
-  // RELEASE sets notAfter == notBefore, so the name expires at the moment of the act. Grace is
+  // RELINQUISH sets notAfter == notBefore, so the name expires at the moment of the act. Grace is
   // skipped; quarantine still runs from that instant.
-  if (op === 'RELEASE') {
+  if (op === 'RELINQUISH') {
     const at = record.notAfter;
     return {
       liveFrom: record.notBefore,

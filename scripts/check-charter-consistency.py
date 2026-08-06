@@ -11,13 +11,23 @@ show a clause that endorses them.
 That defect survived every check this project had, because every existing check compares prose
 to a list or a number to its source. Nothing compared two Articles to each other.
 
-Each quantity below names every place that states it. The check does not decide which value is
-correct — deciding that is an amendment, not a lint — it only refuses to let the disagreement go
-unnoticed again.
+Three kinds of disagreement are tracked, because three kinds have been found:
+
+- **QUANTITIES** — one number stated in several places. The registration term, the renewal window
+  and the post-expiry interval each have three disagreeing sources.
+- **TERMS** — one word defined as two different KINDS of thing. "Epoch" is an interval under
+  Article 2.5 and an instant under Article 11.5; those cannot be compared, only shown.
+- **MEMBERSHIPS** — one name a closed set excludes while another clause depends on it, or
+  includes while another clause forbids it. `RENEW` and `TLD-CREATE`, both against Article 29.4.
+
+None of them decides anything. Deciding is an amendment, not a lint; this refuses to let the
+disagreement go unnoticed again, and fails if one is closed by editing whichever side is
+convenient.
 
     python3 scripts/check-charter-consistency.py [root]
 
-Exits non-zero listing every quantity whose sources disagree.
+Exits non-zero when a tracked conflict changes shape, disappears, or a source stops saying what
+it was recorded as saying.
 """
 import os
 import re
@@ -155,6 +165,64 @@ TERMS = [
     },
 ]
 
+# A name the charter both requires and excludes. Not a number and not a definition: a question of
+# MEMBERSHIP in a closed set, where one clause enumerates and another clause depends on something
+# the enumeration leaves out — or forbids something it lets in.
+#
+# `check_membership` proves the excluding clause still excludes and every requiring clause still
+# requires. Like the terms above it deliberately does not decide, because both sides are inside
+# the Constitution and Article 3.7 ranks the Constitution above everything, not above itself.
+MEMBERSHIPS = [
+    {
+        "name": "RENEW",
+        "set": (CHARTER, r"29\.4 The record types are a closed set: ([^.]+)\.", "Article 29.4"),
+        # The name must be ABSENT from the set the pattern above captures.
+        "expect": "absent",
+        "verdict": ("Article 29.4 omits it and requires unrecognised types to be REJECTED; "
+                    "Articles 11.6, 11.8 and 31.1 each make a RENEW record normative by name"),
+        "against": [
+            (CHARTER, r"from the epoch\s+of the latest REGISTER or RENEW record", "Article 11.6"),
+            (CHARTER, r"the only record a\s+conformant implementation MAY accept for that name is "
+                      r"a RENEW", "Article 11.8"),
+            (CHARTER, r"31\.1 A REGISTER record and a renewal record MUST each carry a "
+                      r"proof-of-work", "Article 31.1"),
+        ],
+        "note": (
+            "Article 29.4 closes the record set to eleven types and requires an unrecognised type "
+            "to be REJECTED rather than ignored — so a peer obeying 29.4 literally must refuse "
+            "every RENEW. Articles 11.6, 11.8 and 31.1 each make a RENEW record normative by "
+            "name, and Article 11 is entrenched under Article 9. 29.4 is therefore the erroneous "
+            "clause, but it is also the higher-precedence instrument as written, and removing "
+            "RENEW from the implementation would break the entrenched Article while adding it to "
+            "29.4 is an amendment under Article 58. The specification implements RENEW, because "
+            "the alternative is a registry in which no name can ever be renewed; this is recorded "
+            "so that the choice is visible rather than silent."
+        ),
+    },
+    {
+        "name": "TLD-CREATE",
+        "set": (CHARTER, r"29\.4 The record types are a closed set: ([^.]+)\.", "Article 29.4"),
+        # Here the name must be PRESENT in the set, and the conflict is what another Article says
+        # about it.
+        "expect": "present",
+        "against": [
+            (CHARTER, r"35\.6 A new TLD comes into being only by a ratified Naming-category VWIP",
+             "Article 35.6"),
+        ],
+        "verdict": "Article 29.4 makes it a record; Article 35.6 makes it a ratified proposal",
+        "note": (
+            "29.4 makes TLD-CREATE a record type, which means an extension comes into existence "
+            "by someone appending a record. Article 35.6 vests creation in a ratified proposal "
+            "instead. The two cannot both hold: if a record creates a TLD then the ratification "
+            "is decorative, and if ratification creates it then the record type has nothing to "
+            "do. This is the same defect that already reached NAMESPACE.md, which required an "
+            "implementation to derive the valid set 'from the registry log' when the log carries "
+            "nothing to derive it from — corrected there, uncorrected here, and the charter is "
+            "where it originated."
+        ),
+    },
+]
+
 WORD_NUMBERS = {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
@@ -222,6 +290,62 @@ def check_terms(failures):
     return checked
 
 
+def check_membership(failures):
+    """The excluding clause must still exclude, and every requiring clause must still require.
+
+    Not a decision, for the same reason as `check_terms`: both sides are Articles, and precedence
+    ranks the Constitution above the specifications rather than above itself. What this proves is
+    that the disagreement is still exactly where it was recorded — so it cannot be closed by
+    quietly editing whichever side is inconvenient.
+    """
+    checked = 0
+    for item in MEMBERSHIPS:
+        rel, pattern, label = item["set"]
+        text = read(rel)
+        if text is None:
+            failures.append(f"{item['name']}: source file {rel} is missing")
+            continue
+        match = re.search(pattern, text)
+        if match is None:
+            failures.append(
+                f"{item['name']}: {label} no longer states a closed set "
+                f"(pattern did not match in {rel}) — update this check or restore the clause")
+            continue
+        members = {m.strip() for m in re.split(r",\s*", match.group(1))}
+        present = item["name"] in members
+        want_present = item["expect"] == "present"
+        if present != want_present:
+            failures.append(
+                f"{item['name']}: {label} now {'lists' if present else 'omits'} it, where this "
+                f"check recorded the opposite. If an amendment resolved this, update the check in "
+                f"the same commit; if a clause was edited to make the conflict go away, that is an "
+                f"implementer deciding what Article 58 reserves to an amendment.")
+            continue
+        checked += 1
+
+        others = []
+        for orel, opattern, olabel in item["against"]:
+            otext = read(orel)
+            if otext is None:
+                failures.append(f"{item['name']}: source file {orel} is missing")
+                continue
+            if re.search(opattern, otext) is None:
+                failures.append(
+                    f"{item['name']}: {olabel} no longer conflicts with that "
+                    f"(pattern did not match in {orel}) — update this check or restore the clause")
+                continue
+            others.append(olabel)
+            checked += 1
+
+        if len(others) == len(item["against"]):
+            print(f"UNRESOLVED — {item['name']}")
+            print(f"    {item['verdict']}")
+            print(f"    sources: {label}, {', '.join(others)}")
+            print(f"    {item['note']}")
+            print()
+    return checked
+
+
 def main():
     failures = []
     checked = 0
@@ -275,6 +399,7 @@ def main():
             print()
 
     checked += check_terms(failures)
+    checked += check_membership(failures)
 
     if checked == 0:
         print("::error::no quantities checked — this check is enforcing nothing", file=sys.stderr)
@@ -287,8 +412,8 @@ def main():
         return 1
 
     print(f"OK — {checked} charter/specification source(s) read; "
-          f"{len(QUANTITIES)} quantity(ies) and {len(TERMS)} term(s) tracked, "
-          f"unresolved conflicts printed above.")
+          f"{len(QUANTITIES)} quantity(ies), {len(TERMS)} term(s) and {len(MEMBERSHIPS)} "
+          f"membership(s) tracked, unresolved conflicts printed above.")
     return 0
 
 

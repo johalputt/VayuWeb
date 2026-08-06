@@ -405,12 +405,12 @@ function verifyOperation(
       break;
     }
 
-    case 'RELEASE':
+    case 'RELINQUISH':
       if (record.entries.length !== 0) {
-        return reject('BAD_RECORD_ENTRY', 'RELEASE must carry no entries');
+        return reject('BAD_RECORD_ENTRY', 'RELINQUISH must carry no entries');
       }
       if (record.notAfter !== record.notBefore) {
-        return reject('BAD_TERM', 'RELEASE must expire immediately');
+        return reject('BAD_TERM', 'RELINQUISH must expire immediately');
       }
       break;
 

@@ -58,7 +58,7 @@ because settling them is an amendment rather than a commit.
 
 Hypercore log with a Hyperbee index over it; the record schema; deterministic CBOR canonical
 serialisation with domain separation; Ed25519 sign and verify; Argon2id proof-of-work generation
-and verification; the six operations (`REGISTER`, `UPDATE`, `RENEW`, `TRANSFER`, `RELEASE`,
+and verification; the six operations (`REGISTER`, `UPDATE`, `RENEW`, `TRANSFER`, `RELINQUISH`,
 `REVOKE`) with their validation ordering; the lifecycle state machine including grace and
 quarantine.
 

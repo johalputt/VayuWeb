@@ -92,12 +92,12 @@ test('quarantine is not skippable, which is the point of it', () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* RELEASE                                                                     */
+/* RELINQUISH                                                                     */
 /* -------------------------------------------------------------------------- */
 
-test('RELEASE skips grace but not quarantine', () => {
+test('RELINQUISH skips grace but not quarantine', () => {
   const at = NOW + 600;
-  const r = make('RELEASE', { notBefore: at, notAfter: at });
+  const r = make('RELINQUISH', { notBefore: at, notAfter: at });
   const life = lifecycleOf(r);
 
   assert.equal(life.graceUntil, at, 'grace is skipped: the owner said they are done');
@@ -111,7 +111,7 @@ test('RELEASE skips grace but not quarantine', () => {
 
 test('a released name stops resolving immediately', () => {
   const at = NOW + 600;
-  const r = make('RELEASE', { notBefore: at, notAfter: at });
+  const r = make('RELINQUISH', { notBefore: at, notAfter: at });
   assert.equal(resolves(r, at), false);
   assert.equal(acceptsSuccessor(r, at, 'RENEW'), false);
 });

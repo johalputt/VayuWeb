@@ -10,6 +10,56 @@ it.
 
 ## [Unreleased]
 
+### Fixed — `RELEASE` was an operation the charter closed the set against
+
+- **Article 29.4 does not list record types, it closes the list.** "There SHALL be no
+  administrative record type, no operator record type, no reserved opcode and no side channel. A
+  record bearing an unrecognised type MUST be rejected rather than ignored." So an operation name
+  outside that set is not a spelling preference — it is a record every conformant peer is
+  required to refuse, which is total non-interoperation on a core operation.
+
+  `RELEASE` was such a name. It appears nowhere in the Constitution: Article 19.2 says
+  "relinquish the name" and 29.4 names the record `RELINQUISH`. Article 3.7 voids the
+  specification to the extent of the conflict, so the specification was the defective party.
+  Renamed throughout — schema, pseudocode, lifecycle, vectors, CLI, `NAMES.md`. A test now reads
+  Article 29.4 out of the charter and asserts that every implemented operation is a name it
+  closed the set to. Mutation-tested by reverting the rename and by adding an `ADMIN` opcode;
+  both refused.
+
+- **`REGISTRY.md` now states the whole operation set against 29.4's eleven**, with the Article
+  that mandates each of the five it does not implement: `DELEGATE` (34.2), `KEY-ROTATE` (34.1),
+  `TOMBSTONE` (19.2/19.3/19.4, with a conformance test at 19.9), `TLD-FREEZE` (35.9) and
+  `TLD-RETIRE` (35.10). Leaving that gap implicit is what let the settlement-delay work land with
+  a protection it could only half deliver — Article 33.4 vests the power to revoke a pending
+  transfer in an Article 34 recovery path that `DELEGATE` and pre-declared succession material
+  would carry, and neither exists. The gap is now sized rather than gestured at.
+
+### Escalated — two names the charter both requires and excludes
+
+- **`RENEW` is normative in Articles 11.6, 11.8 and 31.1 and absent from 29.4's closed set.** A
+  peer obeying 29.4 literally must refuse every renewal. Article 11 is entrenched under Article
+  9, so 29.4 is the erroneous clause — but it is also the higher-precedence instrument as
+  written, and adding a type to it is an amendment under Article 58. The specification implements
+  `RENEW`, because the alternative is a registry in which no name can ever be renewed. **Recorded
+  rather than silent**, which is the whole point: a specification that quietly does the sensible
+  thing against a clause of the charter is indistinguishable, to a second implementer, from one
+  that overlooked the clause.
+
+- **`TLD-CREATE` is the same contradiction pointing the other way.** 29.4 makes it a record, so
+  an extension would come into being by someone appending one; Article 35.6 vests creation in a
+  ratified Naming-category VWIP. If a record creates a TLD the ratification is decorative, and if
+  ratification creates it the record type has nothing to do. `NAMESPACE.md` inherited this once
+  already — it required deriving the valid set "from the registry log" when the log carries
+  nothing to derive it from — and was corrected there; the charter is where it originated.
+
+  `check-charter-consistency.py` gains a third kind of tracked item for **membership**: a name one
+  clause excludes and another depends on, or includes and another forbids. It is deliberately not
+  a decision, for the same reason as the epoch entry — both sides are Articles, and Article 3.7
+  ranks the Constitution above the specifications rather than above itself. Mutation-tested five
+  ways: adding `RENEW` to 29.4, dropping `TLD-CREATE` from it, deleting Article 11.8's dependency,
+  rewriting 35.6 so a record does create a TLD, and removing the word "closed" from 29.4. All
+  five refused; an unmutated corpus passes.
+
 ### Fixed — a transfer took effect the instant it was signed, and the charter forbids that
 
 - **Article 33.4 mandates a fourteen-day settlement delay. Nothing implemented one.** "A TRANSFER

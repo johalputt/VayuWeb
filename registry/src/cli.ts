@@ -237,7 +237,7 @@ function cmdSuccessor(op: string, args: Args): number {
   let nonce: Uint8Array | null = null;
   let bits = 0;
 
-  if (op === 'RELEASE') notAfter = now;
+  if (op === 'RELINQUISH') notAfter = now;
 
   const ownerKey = op === 'TRANSFER' ? fromHex(required(args, 'to')) : prev.ownerKey;
 
@@ -511,7 +511,7 @@ export function main(argv: readonly string[]): number {
       case 'transfer':
         return cmdSuccessor('TRANSFER', args);
       case 'release':
-        return cmdSuccessor('RELEASE', args);
+        return cmdSuccessor('RELINQUISH', args);
       case 'revoke':
         return cmdSuccessor('REVOKE', args);
       case 'resolve':
