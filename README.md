@@ -189,10 +189,11 @@ VayuWeb/
 ├── constitution/       # The VayuWeb Constitution — the founding charter
 ├── docs/               # Specifications, threat model, governance, roadmap
 │   └── spec/           # Normative protocol specifications and VWIP-0000
-├── registry/           # Hypercore + Hyperbee registry        (not yet implemented)
-├── proxy/              # Local resolution proxy                (not yet implemented)
-├── client/             # Tauri desktop application             (not yet implemented)
-├── scripts/            # Build, release and asset tooling
+├── registry/           # Registry, replication, resolution, proxy  (built, no network)
+├── conformance/        # vectors.json — the interoperability contract
+├── proxy/              # Reserved; the proxy lives in registry/src (not started)
+├── client/             # Tauri desktop application                (not started)
+├── scripts/            # Build, release and corpus-consistency gates
 └── assets/             # Brand artwork
 ```
 

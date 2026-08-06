@@ -1,13 +1,27 @@
 # Contributing to VayuWeb
 
-VayuWeb is at the specification stage. There is no implementation yet, which changes what a
-useful contribution looks like.
+VayuWeb is at the specification stage, and there is now a reference implementation of the parts
+that can be built on one machine — the registry, replication, resolution, the browsing proxy and
+the content encoders, in [`registry/src`](registry/src). No network is running and no phase past
+0 is finished, which still changes what a useful contribution looks like.
 
-**Right now, adversarial review is worth more than code.** Finding the clause in the
-[Constitution](constitution/CONSTITUTION.md) that a determined bad actor could drive a truck
-through, or the step in the [resolution spec](docs/spec/RESOLUTION.md) that leaks a lookup to
-a clearnet resolver, is the highest-value thing anyone can do to this project today. Once code
-exists, those mistakes cost a hundred times more to fix.
+**Adversarial review is worth more than code, and the implementation is the evidence.** Every
+defect found in this project so far was a defect in a document before it was a defect in a
+module, and most of them were found by holding two documents open at once. Finding the clause in
+the [Constitution](constitution/CONSTITUTION.md) that a determined bad actor could drive a truck
+through, or the step in the [resolution spec](docs/spec/RESOLUTION.md) that leaks a lookup to a
+clearnet resolver, is still the highest-value thing anyone can do here.
+
+**Any language.** The protocol fixes formats, not runtimes, and the conformance vectors are hex
+and JSON so that they can be read from anything. Rust is a first-class choice and the expected one
+for the desktop client, the resolver and the proof-of-work worker — see
+[ARCHITECTURE.md](docs/ARCHITECTURE.md), "Implementation Language". A component in another
+language passes the same suites or it is not the same component.
+
+The second-highest thing you can do is run [`conformance/vectors.json`](conformance/vectors.json)
+against your own code. It is readable without any of this repository, and a disagreement means one of three
+things — a bug in yours, a bug in ours, or an ambiguity in the specification that let two people
+read it differently. The third is the most valuable and the reason the file exists.
 
 ## Where to start
 

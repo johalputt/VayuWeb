@@ -378,8 +378,10 @@ a non-ASCII label MUST be rejected at validation.
 
 ## Status
 
-Status: Draft — not yet implemented. This document specifies intended behaviour
-against the pre-implementation VayuWeb design; nothing described here is running.
+Status: Draft, implemented. The label grammar, the reserved-label set and the homograph rules
+are in `registry/src/names.ts`, and every reserved label carries a conformance vector. Nothing
+is *running* — no network exists — but the rules in this document are enforced by code and are
+open to revision only by VWIP.
 
 ## See also
 

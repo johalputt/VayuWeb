@@ -306,10 +306,12 @@ because every visitor verifies the same bytes against the same CID.
 
 ## Status
 
-Status: Draft — not yet implemented. This specification describes the
-pre-implementation design; no publishing tool exists, no site has been
-published, and every constant here is subject to change through the VWIP
-process before a first release.
+Status: Draft, partially implemented. The content-addressing parameters, the UnixFS and
+dag-pb encoders and the availability-reporting rules are in `registry/src/content.ts`,
+`unixfs.ts` and `pins.ts`, checked against published reference CIDs rather than only against
+themselves. No publishing tool exists, no site has been published, and the block-exchange path
+is not written. Every constant here is subject to change through the VWIP process before a
+first release.
 
 ## See also
 

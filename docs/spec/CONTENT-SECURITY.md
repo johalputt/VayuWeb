@@ -19,7 +19,11 @@ read two different policies and both believe they conform.
 The key words MUST, MUST NOT, SHALL, SHALL NOT, SHOULD, SHOULD NOT and MAY are to be interpreted
 as described in RFC 2119.
 
-**Status:** Draft — not yet implemented. Proposed formally by [VWIP-0001](VWIP-0001.md).
+**Status:** Draft, partially implemented. Proposed formally by [VWIP-0001](VWIP-0001.md).
+The header set and the per-name origin isolation are in `registry/src/proxy.ts`; content
+fetching and the browser integration are not. Draft means every value here is open to
+revision by VWIP, not that nothing enforces them — that phrasing outlived its truth once and
+`scripts/check-status-claims.py` now refuses it.
 
 ## 0. The governing principle
 

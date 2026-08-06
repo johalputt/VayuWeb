@@ -7,7 +7,11 @@ associated with VayuWeb. This document specifies how those listeners are hardene
 The key words MUST, MUST NOT, SHALL, SHALL NOT, SHOULD, SHOULD NOT and MAY are to be interpreted
 as described in RFC 2119.
 
-**Status:** Draft — not yet implemented. Proposed formally by [VWIP-0001](VWIP-0001.md).
+**Status:** Draft, partially implemented. Proposed formally by [VWIP-0001](VWIP-0001.md).
+The control API's request handling and its refusal to bind TCP are in
+`registry/src/control.ts`; the proxy's is in `proxy.ts`. Both are pure handlers, so the
+sockets themselves are not yet bound. Draft means every value here is open to revision by
+VWIP, not that nothing enforces them.
 
 ## 1. The control API is not a TCP listener
 

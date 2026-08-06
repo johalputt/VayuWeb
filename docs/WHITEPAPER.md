@@ -19,7 +19,7 @@ Nothing described here is running: no network, no registered name, no user, no
 download. Every requirement is in the normative future voice because it describes a
 system to be built.
 
-Status: Draft — not yet implemented.
+Status: Draft, partially implemented. See section 9.
 
 ## 1. The problem
 
@@ -360,8 +360,11 @@ support desk. Lose the key and the name is gone until it expires.
 
 ## 9. Status and roadmap
 
-VayuWeb is at the specification and charter stage. There is no implementation, no running
-network, no registered name, no user, and no release to download. Every number in this
+VayuWeb is at the specification and charter stage. A reference implementation of the parts
+buildable on one machine exists in `registry/src` — the registry, replication, resolution, the
+browsing proxy and the content encoders — with six conformance vector suites stating what a
+second implementation must agree with. There is no running network, no registered name, no
+user, and no release to download. Every number in this
 paper — the 1-year term, the 60-day renewal window, the 30-day grace period followed by
 a 30-day quarantine before a name returns to the open pool, the loopback ports, the
 label grammar, the ratified extension set — is a design decision recorded in the
@@ -370,8 +373,9 @@ it. The sequencing of that work, from reference registry to resolver to client, 
 [docs/ROADMAP.md](ROADMAP.md). Readers who want the mechanism rather than the argument
 should start with [docs/ARCHITECTURE.md](ARCHITECTURE.md).
 
-Status: Draft — not yet implemented. This document describes a pre-implementation
-design; no component of VayuWeb exists as running software.
+Status: Draft, partially implemented — see section 9. No component of VayuWeb exists as
+*running* software: nothing is deployed, and every acceptance test past roadmap Phase 0
+requires machines and a network that no sandbox can supply.
 
 See also:
 

@@ -139,6 +139,7 @@ jobs:
           python3 scripts/check-links.py
           python3 scripts/check-headers.py
           python3 scripts/check-counts.py
+          python3 scripts/check-status-claims.py
 
   tag:
     name: create tag and release

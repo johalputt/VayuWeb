@@ -13,7 +13,11 @@ suite identifier is a record format that can never migrate.
 The key words MUST, MUST NOT, SHALL, SHALL NOT, SHOULD, SHOULD NOT and MAY are to be interpreted
 as described in RFC 2119.
 
-**Status:** Draft — not yet implemented.
+**Status:** Draft, partially implemented. The suite registry, the per-suite key, signature and
+record-size bounds, and the forward-only downgrade rule are in `registry/src/suites.ts`,
+`record.ts` and `verify.ts`; one suite is active and the reserved rows are unreachable by
+construction. Draft means every value here is open to revision by VWIP, not that nothing
+enforces them.
 
 ## 1. The rule
 

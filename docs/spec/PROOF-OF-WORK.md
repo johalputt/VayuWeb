@@ -1,6 +1,9 @@
 # VayuWeb Proof-of-Work Specification
 
-Status: Draft — not yet implemented.
+Status: Draft, implemented. The construction, difficulty function, salt derivation and
+verification rule are in `registry/src/pow.ts`, and the `pow` suite in
+[`conformance/vectors.json`](../../conformance/vectors.json) pins every derivation that does
+not need an Argon2id evaluation. Draft means every parameter here is open to revision by VWIP.
 
 This document specifies the anti-squatting proof-of-work (PoW) that a VayuWeb registry
 operation MUST carry. It defines the construction, the difficulty function, the
@@ -319,8 +322,8 @@ the VWIP process can ratify more. And the resolution layer is not scarce — not
 attention, links or traffic. A more complete accounting of what this defends against and
 what it does not is in [THREAT-MODEL.md](../THREAT-MODEL.md).
 
-Status: Draft against the pre-implementation VayuWeb design. No implementation exists; every
-parameter here is subject to revision by VWIP before the first release.
+Status: Draft, implemented — see the header. Every parameter here is subject to revision by
+VWIP before the first release.
 
 See also:
 

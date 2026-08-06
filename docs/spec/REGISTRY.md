@@ -3,7 +3,8 @@
 This document specifies the VayuWeb registry: the append-only log that holds name ownership, the
 index over it, the record format, the signed bytes, the six operations it implements of the
 eleven Article 29.4 names, and the rules by which every peer independently reaches the same
-answer. Nothing here has been implemented.
+answer. The specification is authoritative; where this document and the code disagree, this
+document wins.
 
 Label grammar lives in [docs/spec/NAMES.md](NAMES.md), difficulty derivation in
 [docs/spec/PROOF-OF-WORK.md](PROOF-OF-WORK.md), resolver behaviour in
@@ -901,9 +902,12 @@ policy is ratified as a VWIP.
 
 ## Status
 
-Status: Draft — not yet implemented. This specification describes the pre-implementation design:
-no registry code exists, no network is running, and every constant here is subject to change by
-the VWIP process before a first release.
+Status: Draft, implemented. Sixteen modules under `registry/src` cite this document as what
+they implement — the log, the index keyspace, the record schema, the signed bytes, the six
+operations and the convergence rule — and 72 record-verification vectors in
+[`conformance/vectors.json`](../../conformance/vectors.json) pin what a second implementation
+must agree with. No network is running, and every constant here is subject to change by the
+VWIP process before a first release.
 
 ## See also
 
