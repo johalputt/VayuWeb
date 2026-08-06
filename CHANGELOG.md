@@ -61,6 +61,37 @@ was typed; it was printing hex.
   that existed when it was written stops covering the tree the moment a file arrives in another
   one.
 
+- **A sampled DNS check on the browser tree**, because Phase 3's acceptance criterion has two
+  halves and only one was being measured. "No phone-home" was: the resolver holds no non-loopback
+  socket. "No clearnet DNS query" was not — it was inferred from Chromium's documented behaviour
+  under `--proxy-server`. The browser's process tree is now polled for port-53 sockets throughout
+  the navigation, and the sampler was mutation-tested by launching Chromium with `--no-proxy-server`
+  at a clearnet name: it reports `8.8.8.8:53` there and nothing in the acceptance run.
+
+  Its limits are written into the function rather than left implied. Sampling narrows the window
+  on a short-lived UDP socket without closing it, and a resolver reached over a Unix socket
+  carries no port and would not appear at all. The load-bearing evidence for that half stays the
+  refusal check: a clearnet name fails while a VayuWeb name renders, which no configuration that
+  quietly resolved names could produce.
+
+### Changed — two documents that had gone stale by being true
+
+- **`HOSTING.md` said "No publishing tool exists, no site has been published."** Both were true
+  when written and neither survived running the acceptance harness once. Corrected, with the two
+  things that *are* still missing named specifically — no standalone publish command, and no
+  block-exchange path — rather than folded into a general disclaimer.
+
+  `scripts/check-status-claims.py` did not catch it and was deliberately not extended to.
+  The check is whole-document: it fires when a cited document claims no implementation exists.
+  HOSTING.md must stay free to say truthfully that the block-exchange path is unwritten, so
+  widening the patterns would make a true sentence unwriteable. Per-clause staleness is caught by
+  running the system, not by reading it.
+
+- **`ROADMAP.md`'s preamble said every phase is held open by a test a sandbox cannot pass.**
+  Phase 3's now passes here. The remaining four are still genuinely out of reach and are listed
+  individually, which is more useful than the blanket claim and no longer understates the work —
+  the same error the paragraph itself warns about, pointing the other way.
+
 ### Adversarial review
 
 Attacked: the new content path end to end, and the acceptance harness itself.

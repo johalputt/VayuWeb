@@ -59,25 +59,22 @@ const check = (name, ok, detail = '') => {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Every non-loopback TCP peer THIS PROCESS is connected to.
+ * The socket inodes a process actually holds open.
  *
- * A resolver serving a verified local blockstore must have none. Its listeners are inbound, and
- * an outbound connection to anywhere is the phone-home Constitution Article 14 forbids.
- *
- * **The inode join is the whole measurement.** `/proc/<pid>/net/tcp` is per network NAMESPACE,
- * not per process — reading it directly reports every socket in the container, and the first
- * version of this check answered "14 outbound connections" for a resolver that had opened none.
- * The process's own sockets are the ones whose inode appears in `/proc/<pid>/fd/*` as
- * `socket:[N]`, so the fd set is what makes this a statement about the resolver rather than
- * about the machine it happens to be running on.
- *
- * Counting sockets rather than trapping `dns.lookup`, too: a trap catches only the library that
- * honours it, and catches nothing in a child process or behind a connect to a literal address —
- * which is the shape a leak would actually take.
+ * **This join is what makes every check below a statement about a process.**
+ * `/proc/<pid>/net/tcp` is per network NAMESPACE, not per process — reading it directly reports
+ * every socket in the container, and the first version of this harness answered "14 outbound
+ * connections" for a resolver that had opened none.
  */
-function outboundPeers(pid) {
+function socketInodes(pid) {
   const owned = new Set();
-  for (const fd of readdirSync(`/proc/${pid}/fd`)) {
+  let entries;
+  try {
+    entries = readdirSync(`/proc/${pid}/fd`);
+  } catch {
+    return owned; // The process is gone; it holds nothing.
+  }
+  for (const fd of entries) {
     let target;
     try {
       target = readlinkSync(`/proc/${pid}/fd/${fd}`);
@@ -87,7 +84,23 @@ function outboundPeers(pid) {
     const match = /^socket:\[(\d+)\]$/.exec(target);
     if (match !== null) owned.add(match[1]);
   }
+  return owned;
+}
 
+const isLoopback = (hex) => hex === '0100007F' || /^0{31}1$/.test(hex) || /^0+$/.test(hex);
+
+/**
+ * Every non-loopback TCP peer a process is connected to.
+ *
+ * A resolver serving a verified local blockstore must have none: its listeners are inbound, and
+ * an outbound connection to anywhere is the phone-home Constitution Article 14 forbids.
+ *
+ * Counting sockets rather than trapping `dns.lookup`: a trap catches only the library that
+ * honours it, and catches nothing in a child process or behind a connect to a literal address —
+ * which is the shape a leak would actually take.
+ */
+function outboundPeers(pid) {
+  const owned = socketInodes(pid);
   const peers = [];
   for (const table of ['tcp', 'tcp6']) {
     let text;
@@ -102,12 +115,102 @@ function outboundPeers(pid) {
       const [remote, state, inode] = [fields[2], fields[3], fields[9]];
       if (!owned.has(inode)) continue; // Another process sharing this namespace.
       if (state === '0A') continue; // LISTEN: inbound, not a connection this process made.
-      const hex = (remote.split(':')[0] ?? '').toUpperCase();
-      const loopback = hex === '0100007F' || /^0{31}1$/.test(hex) || /^0+$/.test(hex);
-      if (!loopback) peers.push(remote);
+      if (!isLoopback((remote.split(':')[0] ?? '').toUpperCase())) peers.push(remote);
     }
   }
   return peers;
+}
+
+/**
+ * The launched browser's pid, found by its own argv.
+ *
+ * Not `browser.process()`: that is a driver API whose availability varies by Playwright version
+ * and by how the browser was launched, and this harness must not fail on a detail of the tool it
+ * uses to observe. The `--proxy-server` this run passed is unique to this run, which makes argv a
+ * more reliable identifier here than the driver's own bookkeeping.
+ */
+function browserProcessPid(port) {
+  const marker = `--proxy-server=http://127.0.0.1:${port}`;
+  for (const entry of readdirSync('/proc')) {
+    if (!/^\d+$/.test(entry)) continue;
+    try {
+      const argv = readFileSync(`/proc/${entry}/cmdline`, 'utf8');
+      if (argv.includes(marker)) return entry;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/** Every process in `root`'s tree, including `root` itself. */
+function processTree(root) {
+  const children = new Map();
+  for (const entry of readdirSync('/proc')) {
+    if (!/^\d+$/.test(entry)) continue;
+    let status;
+    try {
+      status = readFileSync(`/proc/${entry}/status`, 'utf8');
+    } catch {
+      continue;
+    }
+    const parent = /^PPid:\s*(\d+)$/m.exec(status);
+    if (parent === null) continue;
+    const list = children.get(parent[1]) ?? [];
+    list.push(entry);
+    children.set(parent[1], list);
+  }
+  const tree = [];
+  const queue = [String(root)];
+  while (queue.length > 0) {
+    const pid = queue.shift();
+    tree.push(pid);
+    queue.push(...(children.get(pid) ?? []));
+  }
+  return tree;
+}
+
+/**
+ * Name-resolution traffic from a process tree: any UDP or TCP socket to port 53.
+ *
+ * Article 14's clause is "no clearnet DNS query", and a browser handed a proxy is supposed to
+ * pass the hostname to it rather than resolve the name itself. That is a claim about Chromium's
+ * behaviour, and this is the measurement of it.
+ *
+ * **What it does not prove, stated because a check that only flatters itself gets discounted.**
+ * A UDP socket is short-lived, so sampling can miss one that opened and closed between polls;
+ * the caller samples throughout the navigation rather than once after it, which narrows the
+ * window without closing it. A resolver reached over a Unix socket (systemd-resolved's
+ * `/run/systemd/resolve/io.systemd.Resolve`) carries no port and would not appear here at all.
+ * The load-bearing evidence for "no DNS fallback" is not this function — it is that a name
+ * outside the ratified namespace is REFUSED while a VayuWeb name renders, which no configuration
+ * that quietly resolved names could produce.
+ */
+function resolutionSockets(pids) {
+  const seen = [];
+  for (const pid of pids) {
+    const owned = socketInodes(pid);
+    if (owned.size === 0) continue;
+    for (const table of ['udp', 'udp6', 'tcp', 'tcp6']) {
+      let text;
+      try {
+        text = readFileSync(`/proc/${pid}/net/${table}`, 'utf8');
+      } catch {
+        continue;
+      }
+      for (const line of text.split('\n').slice(1)) {
+        const fields = line.trim().split(/\s+/);
+        if (fields.length < 10) continue;
+        const [remote, inode] = [fields[2], fields[9]];
+        if (!owned.has(inode)) continue;
+        const [host, port] = remote.split(':');
+        if (parseInt(port ?? '0', 16) !== 53) continue;
+        if (isLoopback((host ?? '').toUpperCase())) continue; // A local stub is not clearnet.
+        seen.push(`${pid}:${remote}`);
+      }
+    }
+  }
+  return seen;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -281,6 +384,16 @@ try {
   context.on('request', (r) => requested.push(r.url()));
   context.on('requestfailed', (r) => failed.push([r.url(), r.failure()?.errorText]));
 
+  // Sampled THROUGHOUT the navigation rather than once after it. A DNS socket lives for
+  // milliseconds, so a single reading taken when the page has already loaded would be looking for
+  // something that has been gone for a second — and would report "none" with total confidence.
+  const browserPid = browserProcessPid(PORT);
+  if (browserPid === null) throw new Error('could not find the launched browser process');
+  const dnsSeen = new Set();
+  const sampler = setInterval(() => {
+    for (const socket of resolutionSockets(processTree(browserPid))) dnsSeen.add(socket);
+  }, 20);
+
   const page = await context.newPage();
   const response = await page.goto(`http://${NAME}/`, { waitUntil: 'load', timeout: 20_000 });
 
@@ -323,10 +436,20 @@ try {
   }
   check('a non-VayuWeb name is refused, not resolved', refused);
 
+  clearInterval(sampler);
+
   check(
     'the resolver opened no outbound connection (Constitution Art. 14)',
     outboundPeers(resolver.pid).length === 0,
     JSON.stringify(outboundPeers(resolver.pid)),
+  );
+
+  // The weaker of the two, and labelled so. See `resolutionSockets` for what sampling cannot see;
+  // the refusal check above is the load-bearing evidence that no name fell through to DNS.
+  check(
+    'no clearnet DNS query was sampled from the browser (Art. 14, sampled)',
+    dnsSeen.size === 0,
+    JSON.stringify([...dnsSeen]),
   );
 } catch (error) {
   check('the harness ran at all', false, String(error).split('\n').slice(0, 3).join(' / '));

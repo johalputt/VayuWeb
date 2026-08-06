@@ -4,10 +4,16 @@
 
 This line said "nothing here is implemented" until the day that stopped being true, and then for
 a while after — a stale claim at the top of the file whose whole subject is what is and is not
-done. Phases 1 to 4 are variously started or mostly built, each says so in its own words, and
-every one of them is held open by an acceptance test that a single machine in a sandbox cannot
-honestly pass. Understating progress is not the safe direction: it is as wrong as overstating it,
-and it teaches a reader to discount the rest of the page.
+done. Phases 1 to 4 are variously started or mostly built, and each says so in its own words.
+Understating progress is not the safe direction: it is as wrong as overstating it, and it teaches
+a reader to discount the rest of the page.
+
+**Phase 3's acceptance test now passes on one machine**, which is the first time any of them has.
+The rest are still held open by conditions a single sandbox cannot honestly meet — Phase 2 wants
+independent peers, Phase 4 wants a second machine that was never told where the content came
+from, Phase 5 wants a person who has never opened a terminal, and Phase 6 wants an implementation
+written by people with no connection to this one. Those are not near misses to be argued around;
+they are the point of writing an acceptance test that an outsider can check.
 
 This roadmap is organised by phase, not by calendar. Dates on a volunteer protocol project are a
 form of dishonesty: they are set by wishful thinking, missed, and then quietly deleted. Phases
@@ -219,7 +225,18 @@ inodes from `/proc/<pid>/fd` against the TCP tables, because `/proc/<pid>/net/tc
 is per network namespace and reports the whole machine's traffic as though it were the
 resolver's. Running it is what found the three defects standing between a resolved name and a
 rendered page — all three silent, and none reachable by a test that stopped at "did it return
-200". **The block-exchange transport remains.**
+200".
+
+The Article 14 clause has two halves and they are not equally well evidenced, which is worth
+stating rather than averaging away. **No phone-home** is measured exactly: the resolver holds no
+non-loopback socket, and the check was mutation-tested against a process deliberately holding
+one. **No clearnet DNS query** is *sampled* — the browser tree is polled for port-53 sockets
+throughout the navigation, which narrows but does not close the window on a socket that opens and
+closes between polls, and would miss a resolver reached over a Unix socket. The load-bearing
+evidence for that half is not the sampler: it is that a clearnet name is refused while a VayuWeb
+name renders, which no configuration that quietly resolved names could produce.
+
+**The block-exchange transport remains.**
 
 The two surfaces are deliberately of different kinds. The proxy is TCP because a browser must
 reach it; the control API is a Unix domain socket because a browser must never reach it, and

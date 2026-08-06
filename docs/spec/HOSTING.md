@@ -309,9 +309,27 @@ because every visitor verifies the same bytes against the same CID.
 Status: Draft, partially implemented. The content-addressing parameters, the UnixFS and
 dag-pb encoders and the availability-reporting rules are in `registry/src/content.ts`,
 `unixfs.ts` and `pins.ts`, checked against published reference CIDs rather than only against
-themselves. No publishing tool exists, no site has been published, and the block-exchange path
-is not written. Every constant here is subject to change through the VWIP process before a
-first release.
+themselves.
+
+**A site has now been published and read back through a browser.** `vayuweb-registry serve
+--site <dir>` runs the import flow of section "The publish flow" over a directory, and
+`registry/scripts/acceptance-browser.mjs` registers the resulting root CID against a name and
+renders the site in stock Chromium through the resolver. The bytes come back through the verified
+traversal in `fetch.ts`, so what a browser displays is what hashed correctly rather than what a
+source offered.
+
+Two things named here are still missing, and the distinction matters: there is **no standalone
+publish command** — no CAR export, no pin to a node, nothing that outlives the serving process —
+and **the block-exchange path is not written**, so a site is reachable only from the machine that
+imported it. Every constant here is subject to change through the VWIP process before a first
+release.
+
+This paragraph said "No publishing tool exists, no site has been published" for as long as it
+took to run the acceptance harness once. `scripts/check-status-claims.py` did not catch it and
+was not extended to: the check is whole-document, and HOSTING.md must stay free to say truthfully
+that the block-exchange path is unwritten. A per-clause claim goes stale by being true about one
+part and read as a statement about all of them, and the only thing that reliably catches that is
+running the system rather than reading about it.
 
 ## See also
 
