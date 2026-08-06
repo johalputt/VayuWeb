@@ -8,13 +8,65 @@ instruction was to **refute** it.
 could not be rechecked before the run hit a limit and are **not** listed either — absence from
 this file is not evidence of soundness.
 
-This is the unreviewed record, kept verbatim because a finding nobody wrote down gets
-rediscovered later at greater cost. Nothing here has been triaged into a fix yet, and at least
-two items are decisions rather than defects. What has actually been acted on lives in
-`CHANGELOG.md`; this file is evidence, not a changelog.
+This is the raw record, kept verbatim because a finding nobody wrote down gets rediscovered
+later at greater cost. What has actually been acted on lives in `CHANGELOG.md`; this file is
+evidence, not a changelog.
 
 Severity is the rechecker's corrected value, not the finder's claim. Bodies are fenced verbatim
-so that quoted paths and snippets are not re-interpreted as markup.
+so that quoted paths and snippets are not re-interpreted as markup, **and they are never edited
+after the fact** — a finding that says "not fixed" is describing the corpus on 2026-08-04, not
+today. Read the disposition below for current state.
+
+## Disposition — every HIGH finding
+
+Added because the status of these was re-derived from scratch three separate times, each costing
+a full re-read of the corpus, and twice the answer was "already fixed, the finding text is
+stale". A finding with no recorded outcome is a finding somebody re-investigates.
+
+Four outcomes are used, and the distinction between the last two matters:
+
+- **Fixed** — the defect is gone and a test or a checker refuses its return.
+- **Escalated** — real, and not an implementer's to decide. Both sides are Articles of the
+  Constitution, so Article 3.7 cannot rank them and Article 58 reserves the choice to an
+  amendment. `scripts/check-charter-consistency.py` prints each on every run and fails if one is
+  closed by editing a single side. Escalated is not deferred: the conflict is held open
+  deliberately and visibly.
+- **Stale** — the defect was real when written and had already been fixed before this file was
+  triaged. Recorded rather than deleted, so the next reader does not re-derive it.
+
+| # | Finding | Outcome |
+| --- | --- | --- |
+| 1 | `registry-worked-example-powproof` | **Fixed.** Example rewritten; a test parses it out of the document |
+| 2 | `namespace-tld-set-contradiction` | **Fixed.** RESOLUTION.md defers to the Namespace Annex; `check-counts.py` derives the number |
+| 3 | `local-surface-vs-resolution-control-api-tcp` | **Fixed.** `assertSocketAddress` throws on TCP; `check-listeners.py` holds the corpus |
+| 4 | `privacy-query-log-contradiction` | **Fixed.** Both documents corrected to PRIVACY.md's "never written, in either mode" |
+| 5 | `privacy-private-mode-ephemeral-profile` | **Fixed.** The platform fallback is normative and must be reported |
+| 6 | `crypto-agility-registry-suite-mismatch` | **Fixed.** `suite` field, per-suite sizes, downgrade rule, three vectors |
+| 7 | `manifest-schema-conflict` | **Stale.** HOSTING.md defers to PUBLISHING.md; RESOLUTION.md step 13 consults the manifest |
+| 8 | `hosting-ipns-cid-selection-conflict` | **Stale.** `SOURCE_ORDER` is `ipns, cid, peer, alias`, with the reasoning in `resolve.ts` |
+| 9 | `publishing-inline-hash-vs-content-security` | **Fixed.** The third relaxation is withdrawn; the argument for it is kept |
+| 10 | `registration-term-conflict` | **Escalated.** Art 11.6 vs 32.2 vs REGISTRY.md — three terms |
+| 11 | `art-29.4-vs-registry-op-set` | **Fixed** for `RELINQUISH` and the stated gap; **escalated** for `RENEW` and `TLD-CREATE` |
+| 12 | `epoch-three-definitions` | **Escalated.** Art 2.5 an interval, Art 11.5 an instant |
+| 13 | `constitution-vs-registry-renewal-grace-windows` | **Escalated.** Renewal window and post-expiry interval, three sources each |
+| 14 | `art-33-4-settlement-delay-absent-from-specs` | **Fixed.** Fourteen-day settlement implemented, with seven vectors |
+| 15 | `names-registry-transfer-op-mismatch` | **Fixed.** NAMES.md rewritten to the single-record `TRANSFER` |
+| 16 | `names-namespace-tld-ratification-vote-vs-constitution` | **Fixed.** The ballot is gone from both documents, and `check-counts.py` pairs them |
+| 17 | `vwip-0000-missing-naming-and-constitutional-amendment-categories` | **Fixed.** Both declared; VWIP-0004 uses them |
+| 18 | `names-reserved-labels-unimplemented` | **Fixed.** `RESERVED_LABELS` enforced, one vector per label |
+
+**The MEDIUM, LOW and UNRATED findings below are not yet triaged.** That is a statement about
+this file, not about the corpus: some of them are certainly stale in the same way items 7 and 8
+were, and finding out costs a re-read each time. Whoever works them should extend the table
+above rather than repeating the survey.
+
+**The lesson the HIGH set carries, stated once.** Fourteen of the eighteen were invisible to
+reading any one document and obvious with two open at the same time — a specification against
+the charter, a specification against its sibling, or the charter against itself. Every checker
+this project had before the audit compared prose to a list or a number to its source. The four
+that now exist for cross-document agreement — `check-charter-consistency.py`'s quantities, terms
+and memberships, and `check-counts.py`'s paired statements — exist because that class of defect
+has no other way of being caught.
 
 ## registry-worked-example-powproof — HIGH
 
