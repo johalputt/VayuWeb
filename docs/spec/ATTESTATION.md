@@ -52,9 +52,31 @@ This is a better outcome than reservation on four counts:
 
 ## 3. Attestation records
 
-An attestation is an ordinary registry record type, `attest`, carrying a claim that an external
-identity and this VayuWeb name are controlled by the same party. It confers **no allocation
-priority whatsoever**, and an implementation MUST NOT treat it as conferring any.
+An attestation is a **`records` entry** of type `attest` — not an operation — carrying a claim
+that an external identity and this VayuWeb name are controlled by the same party. It is published
+by an ordinary `UPDATE`. It confers **no allocation priority whatsoever**, and an implementation
+MUST NOT treat it as conferring any.
+
+**Neither layer carries it yet, and this document does not add it.** The distinction matters
+because "registry record type" is the phrase Constitution Article 29.4 uses for *operations*, and
+an earlier revision of this sentence used it here — leaving two readings, both unimplementable.
+As an operation, `attest` is outside 29.4's closed set and outside `REGISTRY.md`'s six, so a
+conformant peer rejects it `UNKNOWN_OP`. As an entry type it is outside `REGISTRY.md`'s five, and
+that document's rule is explicit: "Unknown `type` values are stored and replicated unchanged but
+MUST NOT be acted upon" — so an attestation would propagate and no resolver could display it,
+which is the entire mechanism.
+
+The entry reading is the intended one and is the cheaper of the two: it needs a row in
+`REGISTRY.md`'s entry-type table and a validation rule, not a seventh operation. But this
+document does not get to add either. `REGISTRY.md` owns the record schema, and a subordinate
+specification describing a type the schema does not carry is how a type acquires an
+implementation without ever being reviewed — the same defect withdrawn from `PUBLISHING.md`
+(inline digests) and `LOCAL-SURFACE.md` (a cross-name allowance) this month. Adding `attest` is a
+Standards Track VWIP against `REGISTRY.md`, and until one is ratified this specification is a
+design, not a mechanism.
+
+**Status is `Draft` for exactly this reason**, and the rest of this document should be read as
+what the mechanism would be, not as what a peer does today.
 
 ```json
 {
@@ -173,6 +195,6 @@ Required by Constitution Article 21.
 ## See also
 
 - [Namespace](NAMESPACE.md) — why breadth does not create a defensive-registration tax
-- [Registry](REGISTRY.md) — the record schema this extends
+- [Registry](REGISTRY.md) — the record schema this would extend, and which does not yet carry `attest`
 - [Naming and TLD policy](NAMES.md) — allocation, unchanged by this document
 - [The VayuWeb Constitution](../../constitution/CONSTITUTION.md) — Articles 21, 30, 35, 36

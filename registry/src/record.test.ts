@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 import {
   parseRecord,
   parseRecordBytes,
   OPERATIONS,
+  KNOWN_ENTRY_TYPES,
   RecordError,
   MAX_RECORD_ENTRIES,
   MAX_ENTRY_VALUE_BYTES,
@@ -353,5 +354,40 @@ test("AUDIT: REGISTRY.md's worked example is a record this implementation accept
     record.powProof !== null && record.powProof.bits <= 18,
     'PROOF-OF-WORK.md caps the schedule at 18 bits; the example claimed 22, overstating the ' +
       'cost budget roughly fourfold',
+  );
+});
+
+test('AUDIT: no specification names a record type the registry does not carry', () => {
+  // `ATTESTATION.md` described "an ordinary registry record type, `attest`". Two readings, both
+  // unimplementable: as an operation it is outside Article 29.4's closed set and outside this
+  // module's six, so a peer rejects it UNKNOWN_OP; as a `records` entry type it is outside
+  // REGISTRY.md's five, and that document's rule is "Unknown `type` values are stored and
+  // replicated unchanged but MUST NOT be acted upon" — so it would propagate and no resolver
+  // could act on it, which is the entire mechanism.
+  //
+  // The earlier guard in this file compares OPERATIONS against the charter, which catches the
+  // implementation drifting. It does not catch a DOCUMENT proposing an operation nobody
+  // implements, and that is the direction three findings went this month: PUBLISHING.md's inline
+  // digests, LOCAL-SURFACE.md's cross-name allowance, and this.
+  const specs = new URL('../../docs/spec/', import.meta.url);
+  const known = new Set<string>([...OPERATIONS, ...KNOWN_ENTRY_TYPES]);
+
+  const offenders: string[] = [];
+  for (const name of readdirSync(specs)) {
+    if (!name.endsWith('.md') || name === 'REGISTRY.md') continue;
+    const text = readFileSync(new URL(name, specs), 'utf8');
+    // "a/an ... record type, `x`" and "operation `x`" — the two shapes a document uses when it
+    // is introducing one rather than referring to one.
+    for (const m of text.matchAll(
+      /record type[,:]?\s+`([a-zA-Z-]+)`|\boperations?\s+`([a-zA-Z-]+)`/g,
+    )) {
+      const type = (m[1] ?? m[2])!;
+      if (!known.has(type) && !known.has(type.toUpperCase())) offenders.push(`${name}: ${type}`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    'a specification names a record type or operation the registry does not carry',
   );
 });

@@ -200,6 +200,42 @@ signed it. This line said "signed local checkpoint" for a period, against `REGIS
 states that a checkpoint "is not an authority and carries no signature that would make it one". A peer that has never verified the history and wants full
 assurance MUST pay the full cost once.
 
+## The log anchor this design does not carry
+
+Constitution Article 31.1 requires the proof to be bound to **three** things: "the name being
+claimed, the ownership public key, and a recent log anchor". Article 29.5.d requires every record
+to carry "an anchor to a recent log state". **There is no such field in the record schema**, here
+or in [REGISTRY.md](REGISTRY.md), and this section exists so that the gap is stated rather than
+discovered.
+
+**What the current design does deliver, by a different mechanism.** The salt is derived from the
+record's own canonical bytes, which include `name`, `ownerKey`, `seq`, `prevHash` and
+`notBefore`. So a proof is already bound to the name and to the key — two of the Article's three
+— and is not reusable across names, not transferable to another key, and not saleable. The
+Article's stated purposes are largely met.
+
+**What it does not deliver, stated exactly.** Two things, and the first is smaller than it looks.
+
+- *Generic precomputation* is bounded but not closed. `notBefore` is inside the salt preimage and
+  the clock rules pin it to roughly a day of the verifier's time, so a proof cannot be ground
+  months ahead for a name nobody has registered. It can be ground about a day ahead. An
+  adversary with a large machine can therefore assemble a portfolio of proofs for desirable
+  names over a 24-hour window, which is a real advantage at a namespace opening and a negligible
+  one thereafter.
+- *Binding to log state* is absent entirely. A proof valid on one linearisation is valid on any
+  other, including a partition or a fork, because nothing in the preimage names the log the
+  registrant was looking at. This is what 29.5.d's "replay resistance without any clock shared
+  between peers" is asking for, and the clock-bounded `notBefore` is precisely the shared-clock
+  mechanism the Article was trying to avoid depending on.
+
+**Closing it is a VWIP against `REGISTRY.md`, not an edit here**, and it has to settle three
+things this document cannot: what the anchor *is* (a checkpoint `treeRoot` at a stated
+`logLength` is the obvious candidate, since REGISTRY.md already computes one every 10,000
+entries); what "recent" means as a number of entries or epochs; and how a peer with no history —
+the light client of the same document — validates an anchor it cannot recompute. That last one is
+the reason this is a design task rather than a field addition: an anchor a newcomer must take on
+trust is the privileged authority the checkpoint's unsigned-ness exists to refuse.
+
 ## Renewal
 
 A renewal is a new signed operation with an incremented `seq` and a new `notBefore`, and it

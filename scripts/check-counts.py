@@ -257,6 +257,19 @@ AGREEMENTS = [
         ),
     },
     {
+        # Articles 29.5.d and 31.1 both require a log anchor in every record and no field carries
+        # one. The gap is acknowledged in both documents an implementer would look in, and a
+        # rule that only required it in one would let the other quietly stop saying it.
+        "label": "the missing log anchor is acknowledged",
+        "files": ["docs/spec/PROOF-OF-WORK.md", "docs/spec/REGISTRY.md"],
+        "present": re.compile(r"log anchor"),
+        "note": (
+            "Article 31.1 binds the proof to three things and the schema delivers two. Closing "
+            "it is a VWIP; leaving it unstated is how an implementer concludes the third was "
+            "never required."
+        ),
+    },
+    {
         # LOCAL-SURFACE.md section 4 specified the behaviour of a cross-name subresource
         # allowance that CONTENT-SECURITY.md 2.3's closed list does not contain, and whose
         # section 1 names it FIRST among the widenings that revalue every unfixable

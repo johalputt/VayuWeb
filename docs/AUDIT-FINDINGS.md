@@ -91,6 +91,28 @@ Four outcomes are used, and the distinction between the last two matters:
 | `local-surface-3.3-3.4-unspecified-bounds` | **Fixed.** Four concrete limits and a negative-cache bound, stated as judgements |
 | `resolution-md-cross-reference-and-count` | **Stale.** Corrected with the residual-channel sweep |
 
+## Disposition — UNRATED
+
+UNRATED means the recheck did not assign a severity, **not** that the severity is low. One of
+these turned out to be the largest remaining gap in the record format.
+
+| Finding | Outcome |
+| --- | --- |
+| `attestation-registry-record-type-conflict` | **Fixed.** `attest` is an entry, not an operation, and `REGISTRY.md` carries neither yet; a test refuses any document naming a type the registry lacks |
+| `pow-log-anchor-missing` | **Acknowledged, with the gap measured.** Articles 29.5.d and 31.1 require a log anchor and no field carries one. Closing it is a VWIP; what the salt delivers instead, and the three questions a VWIP must settle, are written into both documents |
+| `names-reserved-labels-unenforced` | **Fixed** with the HIGH finding of the same name |
+| `names-reserved-labels-vs-art-10-8` | **Fixed** with it |
+| `names-transfer-vs-registry-transfer` | **Fixed** with `names-registry-transfer-op-mismatch` |
+| `resolution-control-api-tcp-vs-unix-socket` | **Stale.** `check-listeners.py` holds four documents and the code |
+| `resolution-control-api-tcp-7653` | **Stale** with it |
+| `registry-epoch-activation-interval` | **Stale.** Corrected to the 180-day constitutional floor |
+| `names-tld-retire-24mo-vs-const-35.10` | **Stale.** The 24-month sunset was withdrawn, with the reason recorded |
+| `names-tld-sunset-vs-registry-register-renew` | **Stale** with it |
+
+**Five remain untriaged**: `registry-epochs-checkpoint-conjunction`,
+`resolution-step8-release-revoke-lifecycle`, `resolution-step1-vs-local-surface-host-normalisation`,
+`privacy-md-secret-storage-contradiction` and `content-security-md-s3-clipboard-permissions-policy`.
+
 **Every HIGH, MEDIUM and LOW finding now carries an outcome.** The count of untriaged MEDIUM
 findings is worth stating rather than implying: zero MEDIUM, and none at LOW either. **Fifteen
 UNRATED remain**, and UNRATED means the recheck did not assign a severity rather than that the

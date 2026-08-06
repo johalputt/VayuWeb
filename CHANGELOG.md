@@ -10,6 +10,50 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a record type the registry does not carry, and the log anchor nothing carries
+
+- **`ATTESTATION.md` described "an ordinary registry record type, `attest`".** Two readings, both
+  unimplementable. As an **operation** it is outside Article 29.4's closed set and outside
+  `REGISTRY.md`'s six, so a conformant peer rejects it `UNKNOWN_OP`. As a **`records` entry type**
+  it is outside `REGISTRY.md`'s five, and that document's rule is explicit — "Unknown `type`
+  values are stored and replicated unchanged but MUST NOT be acted upon" — so an attestation would
+  propagate and no resolver could display it, which is the entire mechanism.
+
+  The ambiguity was itself the defect: "record type" is the phrase Article 29.4 uses for
+  operations, so an implementer could not tell which layer it was at. `ATTESTATION.md` now states
+  the entry reading, that neither layer carries it, and that adding it is a Standards Track VWIP
+  against `REGISTRY.md` — the same refusal applied to `PUBLISHING.md`'s inline digests and
+  `LOCAL-SURFACE.md`'s cross-name allowance this month, and the third instance of one document
+  quietly extending another's closed set.
+
+  A new test refuses **any** specification naming an operation or entry type the registry does
+  not carry. The existing guard compares `OPERATIONS` against the charter, which catches the
+  implementation drifting; it does not catch a document proposing something nobody implements,
+  and that is the direction all three of those findings went.
+
+- **Articles 29.5.d and 31.1 require a log anchor in every record. No field carries one.** 31.1
+  binds the proof of work to three things — name, ownership key, and "a recent log anchor" — and
+  the schema delivers two.
+
+  **The gap is measured rather than asserted, and it is smaller in one direction than it looks.**
+  The salt derives from the record's canonical bytes, which include `notBefore`, and the clock
+  rules pin that to roughly a day — so generic precomputation is bounded to a 24-hour window, not
+  open-ended. That is a real advantage at a namespace opening and negligible afterwards. What is
+  absent entirely is binding to log *state*: a proof valid on one linearisation is valid on any
+  other, including a partition, which is exactly the "replay resistance without any clock shared
+  between peers" 29.5.d asks for — and the clock-bounded `notBefore` is the shared-clock
+  dependency that Article was avoiding.
+
+  Recorded in both documents an implementer would look in, with the three questions a VWIP has to
+  settle: what the anchor is, what "recent" means, and how a peer with no history validates one it
+  cannot recompute. That last is why this is a design task and not a field addition — an anchor a
+  newcomer must take on trust is the privileged authority the checkpoint's unsigned-ness refuses.
+
+- **Ten UNRATED findings dispositioned**; five remain. UNRATED meant the recheck assigned no
+  severity, not that the severity was low, and this pair is the evidence: one was a third instance
+  of a pattern already fixed twice at HIGH, and the other is the largest remaining gap in the
+  record format.
+
 ### Fixed — the last four MEDIUM findings, and a `MUST` that supplied no value
 
 - **`privacy-contained-webview-vs-locked-profile`.** `PRIVACY.md`'s mode table said Private

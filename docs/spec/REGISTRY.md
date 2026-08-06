@@ -59,6 +59,13 @@ marked otherwise. JSON renderings encode byte strings as unpadded base64url.
 | `sig` | bstr | suite signature length | Signature under `suite` over the signing input. 64 bytes under suite 1. |
 | `coSig` | bstr, optional | suite signature length | `TRANSFER` only: incoming owner's signature over the same input. |
 
+**No field carries a log anchor**, which Constitution Articles 29.5.d and 31.1 both require —
+29.5.d of every record, 31.1 as the third input the proof of work is bound to. The gap, what the
+salt derivation delivers instead, and the three questions a VWIP closing it has to settle are in
+[PROOF-OF-WORK.md](PROOF-OF-WORK.md), "The log anchor this design does not carry". It is recorded
+in both documents because a schema table is where an implementer looks for a field and a
+proof-of-work document is where they look for what the work is bound to.
+
 `op` and `coSig` extend the field list in [docs/ARCHITECTURE.md](../ARCHITECTURE.md). Inferring
 the operation from a field diff is ambiguous, and an ambiguous validation rule is a fork waiting
 to happen. `coSig` exists because a transfer signed only by the outgoing owner can send a name
