@@ -104,6 +104,28 @@ def count_accompanying_headers():
     return len(names), None
 
 
+def count_untriaged_medium():
+    """MEDIUM findings with no row in AUDIT-FINDINGS.md's disposition table.
+
+    Derived because the first version of that sentence said eight and the answer was six -- a
+    number asserted from memory in the very file that exists to stop numbers being asserted from
+    memory. Counting it is two lines; guessing it was wrong on the first try.
+    """
+    text = read("docs/AUDIT-FINDINGS.md")
+    if text is None:
+        return None, "docs/AUDIT-FINDINGS.md is missing"
+    marker = "## Disposition — MEDIUM and LOW"
+    end = "**The remainder is not yet triaged**"
+    if marker not in text or end not in text:
+        return None, "could not locate the disposition table -- its format changed"
+    table = text[text.index(marker):text.index(end)]
+    triaged = set(re.findall(r"^\| `([^`]+)`", table, re.M))
+    heads = re.findall(r"^## (.+?) — MEDIUM$", text, re.M)
+    if not heads:
+        return None, "no MEDIUM findings parsed -- the heading format changed"
+    return len([h for h in heads if h not in triaged]), None
+
+
 def count_conformance_tests():
     """Numbered items in CONTENT-SECURITY.md section 6 plus PRIVACY.md section 10.
 
@@ -480,6 +502,57 @@ def markdown_files():
                 yield rel, path
 
 
+def check_evidence_self_count(failures):
+    """The one claim inside an evidence file that this checker still has to verify.
+
+    `docs/AUDIT-FINDINGS.md` is in EVIDENCE_FILES and is therefore skipped by every rule that
+    walks the corpus, for the reason recorded there: it quotes defects verbatim, so a check for a
+    defect fails on the document reporting it. That exclusion is right and is not weakened here.
+
+    But its disposition section makes a claim about its OWN structure -- how many MEDIUM findings
+    have no disposition row -- and that is not a quoted defect, it is a count like any other. The
+    first version of the sentence said eight; the answer was six. A number asserted from memory,
+    in the file that exists to stop numbers being asserted from memory.
+
+    So this one claim is read directly rather than through `markdown_files()`, and it is the only
+    thing here that reaches into an evidence file. Adding a second would mean the exclusion had
+    stopped meaning anything.
+    """
+    rel = "docs/AUDIT-FINDINGS.md"
+    text = read(rel)
+    if text is None:
+        failures.append(f"{rel} is missing")
+        return 0
+    marker = "## Disposition — MEDIUM and LOW"
+    end = "**The remainder is not yet triaged**"
+    if marker not in text or end not in text:
+        failures.append(f"{rel}: could not locate the disposition table -- its format changed")
+        return 0
+    table = text[text.index(marker):text.index(end)]
+    triaged = set(re.findall(r"^\| `([^`]+)`", table, re.M))
+    heads = re.findall(r"^## (.+?) — MEDIUM$", text, re.M)
+    if not heads:
+        failures.append(f"{rel}: no MEDIUM findings parsed -- the heading format changed")
+        return 0
+    actual = len([h for h in heads if h not in triaged])
+
+    claim = re.search(r"stating rather than implying: ([\w]+)\s*\n?MEDIUM", text)
+    if claim is None:
+        failures.append(f"{rel}: the untriaged-count sentence is gone -- restore it or drop this "
+                        f"check, but do not leave the number unstated")
+        return 0
+    stated = NUMBER_WORDS.get(claim.group(1).lower())
+    if stated is None:
+        failures.append(f"{rel}: could not read a number from '{claim.group(1)}'")
+        return 0
+    if stated != actual:
+        failures.append(
+            f"{rel}: says {stated} untriaged MEDIUM finding(s); {actual} have no disposition row")
+        return 0
+    print(f"derived: {actual} untriaged MEDIUM finding(s) (from {rel}'s own headings and table)")
+    return 1
+
+
 def check_agreements(failures):
     """Each paired statement must be present in every listed file, and its withdrawn form absent.
 
@@ -575,6 +648,7 @@ def main():
         return 1
 
     agreed = check_agreements(failures)
+    checked += check_evidence_self_count(failures)
 
     if failures:
         print(f"\n{len(failures)} counted claim(s) disagree with their source:\n", file=sys.stderr)

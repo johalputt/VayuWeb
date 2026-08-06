@@ -55,10 +55,42 @@ Four outcomes are used, and the distinction between the last two matters:
 | 17 | `vwip-0000-missing-naming-and-constitutional-amendment-categories` | **Fixed.** Both declared; VWIP-0004 uses them |
 | 18 | `names-reserved-labels-unimplemented` | **Fixed.** `RESERVED_LABELS` enforced, one vector per label |
 
-**The MEDIUM, LOW and UNRATED findings below are not yet triaged.** That is a statement about
-this file, not about the corpus: some of them are certainly stale in the same way items 7 and 8
-were, and finding out costs a re-read each time. Whoever works them should extend the table
-above rather than repeating the survey.
+## Disposition — MEDIUM and LOW, as far as triaged
+
+| Finding | Outcome |
+| --- | --- |
+| `conformance-vector-coverage-claim` | **Fixed.** The coverage list is derived from the rejection codes; six vectors added |
+| `registry-fully-released-undefined` | **Fixed.** `fully_released` defined per operation, pinned against `lifecycle.ts` |
+| `csp-four-channels-vs-eight` | **Fixed** in all three documents; the count is derived and the overstatement forbidden |
+| `content-security-4.1-uniform-headers` | **Fixed** with it — conformance item 1 no longer contradicts 2.3 |
+| `csp-test1-vs-relaxations` | **Fixed** with the same change |
+| `csp-injection-scope-html-vs-every-response` | **Fixed** with the same change |
+| `uri-scheme-tld-grammar-excludes-p2p` | **Fixed.** `URI-SCHEME.md` takes `NAMES.md`'s production; the two are paired |
+| `letters-only-tld-grammar-uri-scheme-catalogue` | **Fixed** with it |
+| `namespace-two-char-conformance-contradiction` | **Fixed.** Three `NAMESPACE.md` §7 items rewritten; two guards |
+| `registry-eleven-tlds-vs-1267-catalogue` | **Stale.** `REGISTRY.md` defers to the Annex |
+| `tld-set-specified-three-ways` | **Stale.** One `RATIFIED_TLDS` reference, resolved against the Annex |
+| `check-counts-tld-enumeration-anchor` | **Stale.** The matcher was rewritten to find chains structurally, with no anchors |
+| `docs-spec-nomatch-path-divergence` | **Stale.** `RESOLUTION.md` step 13 serves `notFound` then `fallback` |
+| `registry-verify-check-order-too-large-vs-non-canonical` | **Stale.** The size bound runs before decoding, as it must |
+| `implementation-omits-named-reserved-labels` | **Fixed.** `_vayu` was ungrammatical, not reserved; the two sets are compared by a test |
+| `VWIP-0000-final-missing-sections` | **Fixed.** Five sections written; `check-vwips.py` reads the table from the document |
+| `docs/spec/PROOF-OF-WORK.md:135,118` | **Fixed** with it — the same missing-sections finding under a filename |
+| `vwip0001-test-count` (LOW) | **Fixed.** Seventeen, derived from the two conformance sections |
+| `docs-spec-cross-reference-section-numbers` (LOW) | **Fixed** for the four found; not swept exhaustively |
+| `registry-worked-example-powproof` (MEDIUM ×3) | **Fixed** — the same finding as HIGH #1, raised four times |
+
+**The remainder is not yet triaged**, and the count is worth stating rather than implying: six
+MEDIUM, five LOW and fifteen UNRATED. That is a statement about this file rather than about the
+corpus — several are certainly stale in the way the entries above turned out to be, and finding
+out costs a re-read each time. Whoever works them should extend these tables rather than
+repeating the survey.
+
+Two patterns are worth carrying into that work. **Duplicates**: `registry-worked-example-powproof`
+appears four times at two severities, so the list is shorter than it looks. And **the same defect
+under two names**: `docs/spec/PROOF-OF-WORK.md:135,118` is the VWIP-0000 missing-sections finding
+filed under a file-and-line heading, which is why headings that name a location rather than a
+defect are worth re-reading before being counted as separate work.
 
 **The lesson the HIGH set carries, stated once.** Fourteen of the eighteen were invisible to
 reading any one document and obvious with two open at the same time — a specification against

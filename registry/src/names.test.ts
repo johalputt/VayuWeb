@@ -259,3 +259,46 @@ test('an alias target that cannot exist is refused at parse time', () => {
   assert.equal(parseAlias('-atlas.vayu'), null);
   assert.equal(parseAlias('ab--cd.vayu'), null);
 });
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT FINDING: the reserved set in code and the one in the spec              */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: RESERVED_LABELS is exactly the set NAMES.md withholds', () => {
+  // NAMES.md is authoritative and this module enforces it, so the two lists have to be the same
+  // list. They were not: the specification's table named `_vayu` and this set does not carry it.
+  //
+  // That gap was not a hole — `_` is not in the label grammar, so `_vayu` can never be a label
+  // at all — and that is exactly why it was worth correcting rather than silently adding. Listing
+  // an ungrammatical string among the reserved labels implies the reservation is what withholds
+  // it, and therefore that lifting the reservation would make it registrable. It would not. A
+  // reader deciding which labels a VWIP could release would have got that wrong.
+  const spec = readFileSync(new URL('../../docs/spec/NAMES.md', import.meta.url), 'utf8');
+  const section = /## Reserved labels\n([\s\S]*?)\n## /.exec(spec);
+  assert.ok(section, 'the Reserved labels section must exist, or this check is inert');
+
+  // Every backticked label in the table's first column, which is where the named ones live.
+  const rows = section[1]!.matchAll(/^\| ((?:`[a-z0-9_]+`(?:, )?)+) \|/gm);
+  const named = new Set<string>();
+  for (const row of rows) {
+    for (const label of row[1]!.matchAll(/`([a-z0-9_]+)`/g)) named.add(label[1]!);
+  }
+  assert.ok(named.size >= 10, `only ${named.size} labels parsed — the table format changed`);
+
+  assert.deepEqual(
+    [...named].sort(),
+    [...RESERVED_LABELS].sort(),
+    'the specification and the enforced set name different labels',
+  );
+
+  // And the reservation is what withholds each of them: every one is grammatical, so removing it
+  // from the set would genuinely make it registrable. That is the property that makes the list
+  // meaningful, and the property `_vayu` did not have.
+  for (const label of RESERVED_LABELS) {
+    assert.equal(
+      labelRejection(label),
+      'RESERVED_LABEL',
+      `${label} must be refused as reserved, not by some other rule`,
+    );
+  }
+});

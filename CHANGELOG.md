@@ -10,6 +10,54 @@ it.
 
 ## [Unreleased]
 
+### Added — dispositions for the MEDIUM and LOW findings, and the count that caught me out
+
+- **Twenty more findings now carry an outcome**, alongside the eighteen HIGH ones. Ten fixed,
+  five stale, and — worth knowing before anyone budgets the rest —
+  `registry-worked-example-powproof` appears **four times** at two severities, and
+  `docs/spec/PROOF-OF-WORK.md:135,118` is the `VWIP-0000` missing-sections finding filed under a
+  file-and-line heading. The list is shorter than it looks, and a heading that names a location
+  rather than a defect is worth re-reading before being counted as separate work.
+
+- **The remainder is six MEDIUM, five LOW and fifteen UNRATED — and the first draft of that
+  sentence said eight.** A number asserted from memory, in the file that exists to stop numbers
+  being asserted from memory, in a session spent fixing exactly that. Counting it took two lines.
+
+  It is now derived, which required reaching past a deliberate exclusion: `AUDIT-FINDINGS.md` is
+  in `EVIDENCE_FILES` and skipped by every rule that walks the corpus, because it quotes defects
+  verbatim and a check for a defect fails on the document reporting it. That exclusion stands.
+  But a count of the file's own disposition rows is not a quoted defect, so it is read directly —
+  and that is the **only** thing permitted to reach into an evidence file, because a second one
+  would mean the exclusion had stopped meaning anything.
+
+  Mutation-tested four ways: staling the number, deleting a disposition row, removing the sentence
+  entirely, and the control. All refused — including the removal, since a count that can be
+  deleted to make the check pass is not a check.
+
+### Fixed — a reserved label that no reservation was withholding
+
+- **`NAMES.md` listed `_vayu` among the reserved labels; `registry/src/names.ts` did not.** The
+  gap was not a hole — `_` is not in the label grammar, so `_vayu` can never be a label under any
+  policy — and that is precisely why it was worth correcting rather than silently adding to the
+  set.
+
+  Listing an ungrammatical string among the reserved labels implies the reservation is what
+  withholds it, and therefore that a VWIP releasing the class would make it available. It would
+  not. The section's own next paragraph says "Reserved labels are not permanently unregistrable.
+  A VWIP MAY release a class of them", so a reader deciding what such a VWIP could release would
+  have got this one wrong. A string the grammar already excludes is excluded by the grammar, and
+  saying so twice makes the weaker statement look like the operative one.
+
+  `NAMES.md` now states that every label in the table is grammatical, and why that is the property
+  that makes the list mean anything: each one would be registrable if the reservation were lifted,
+  so lifting it is a real decision.
+
+- **A test parses the table out of the document and compares it with the enforced set**, so
+  neither can gain or lose a label without the other — and asserts that every member is refused
+  as `RESERVED_LABEL` rather than by some other rule, which is the assertion that would have
+  caught `_vayu` on the day it was added. Mutation-tested three ways: dropping a label from the
+  code, adding one to the table only, and putting `_vayu` back. All three refused.
+
 ### Fixed — the document defining the completeness bar was the one never measured against it
 
 - **`VWIP-0000` is `Status: Final` and was missing five of its own mandatory sections.**

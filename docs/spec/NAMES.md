@@ -74,11 +74,24 @@ an invalid operation never becomes an ownership fact.
 | `localhost` | Special-use in RFC 6761. A resolver MUST treat it as loopback and MUST NOT resolve it through VayuWeb. |
 | `example`, `invalid`, `test` | RFC 2606 reserves these for documentation and testing. Documentation that uses a live name eventually points somewhere its author did not intend. |
 | `vayu` | Protocol identity. It is withheld in every TLD, including `.vayu`, so that no holder can speak as the protocol. |
-| `control`, `api`, `resolver`, `proxy`, `pac`, `wpad`, `_vayu` | These collide with the resolver's control surface or with proxy auto-configuration conventions. `wpad` in particular is a long-standing proxy-hijack vector; a name that a browser might fetch as configuration MUST NOT be registrable by a stranger. |
+| `control`, `api`, `resolver`, `proxy`, `pac`, `wpad` | These collide with the resolver's control surface or with proxy auto-configuration conventions. `wpad` in particular is a long-standing proxy-hijack vector; a name that a browser might fetch as configuration MUST NOT be registrable by a stranger. |
 
 Reserved labels are not permanently unregistrable. A VWIP MAY release a class of
 them under an allocation policy, but until one is ratified the class stays
 closed. Withholding is reversible; a bad allocation is not.
+
+**Every label in this table is grammatical**, and that is what makes the list
+mean anything: each one would be registrable if the reservation were lifted, so
+lifting it is a real decision. An earlier revision also listed `_vayu`, which is
+not — `_` is not in the label grammar, so no such label can exist under any
+policy. Its presence here implied that the reservation was what withheld it, and
+therefore that a VWIP releasing the class would make it available. It would not.
+A string the grammar already excludes is excluded by the grammar, and saying so
+twice makes the weaker statement look like the operative one.
+
+`registry/src/names.ts` enforces exactly this table, and a test parses it out of
+this document and compares the two sets, so neither can gain or lose a label
+without the other.
 
 ## Lifecycle
 
