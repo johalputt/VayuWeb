@@ -8,7 +8,24 @@ Versions follow the scheme set by [VWIP-0003](docs/spec/VWIP-0003.md), which kee
 software. Before 1.0.0 the public interface is explicitly unstable and a minor release may break
 it.
 
-## [Unreleased]
+## [0.2.0] — 2026-08-06
+
+**Protocol version 1**, unchanged, and VWIP-0003 2.5 asks for that to be said plainly along with
+what moved underneath it.
+
+**The accepted RECORD set is unchanged.** Nothing in this release alters which registry records a
+peer accepts: the schema, the signature rules, the proof-of-work verification and the lifecycle
+are all as they were, and every one of the 72 record vectors produces the same verdict.
+
+**The accepted EVIDENCE set narrowed, and the content rules are new.** `verifyEquivocation` now
+refuses a report whose two records are not attributable to the key they accuse, so a peer running
+0.1.0 will record forged evidence that a peer running this release discards — a difference in
+behaviour with no difference in protocol version, which 2.5 names as the combination most likely
+to surprise. `RESOLUTION.md` gains clauses 12.1 to 12.3, which are new normative rules rather than
+changed ones: they cover ground the document was silent about.
+
+Pre-`1.0.0`, so the public interface is explicitly unstable and this MINOR release changes it —
+VWIP-0003 2.2, stated here rather than left to be discovered.
 
 ### Adversarial review
 
