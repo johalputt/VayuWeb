@@ -10,6 +10,46 @@ it.
 
 ## [Unreleased]
 
+### Fixed — the last three findings: a clock that could stop, and a revocation that said "expired"
+
+- **The epoch counter could stall forever, justified by a paragraph naming that exact failure.**
+  A boundary required **both** fourteen days of `notBefore` time *and* a checkpoint computed since
+  the last one. Checkpoints came every 10,000 entries and nowhere else, so a quiet log produced no
+  checkpoint, no boundary, and a frozen epoch — while the rationale two paragraphs down says log
+  progress alone "would stall the epoch counter whenever registration activity dropped, which
+  over a century is a near certainty". The condition being justified caused the failure the
+  justification warns about. It would also have breached Article 2.5's fourteen-day ceiling: an
+  epoch that cannot end is longer than any bound. A boundary now triggers a checkpoint, which
+  keeps what condition 2 is for — the epoch anchored to log state a peer verifies rather than a
+  clock it is told about — at a cost of 32 bytes on an idle log.
+
+- **A revoked name told the reader its registration had expired.** `RESOLUTION.md` step 8 said to
+  compare `now` against `notAfter` directly, which is right for four operations and wrong for
+  two. A `RELINQUISH` sets `notAfter == notBefore` and skips grace, so the comparison reports
+  `NAME_EXPIRED` through quarantine. A `REVOKE` keeps `prev.notAfter`, so it reports the name
+  **live for the remainder of its term** — a resolver following the step literally serves content
+  from a key its holder has declared compromised, the one outcome `REVOKE` exists to prevent.
+
+  The implementation computed the state correctly and never served one, so this was not a hole.
+  What it returned was 1410, *"This name's registration has expired"* — false, since the
+  registration has not expired, and it sends the reader to renew, which is the single action a
+  revoked name must not invite. Now 1412 `NAME_REVOKED`, with a message that says what happened,
+  and step 8 defers to the lifecycle rules rather than restating a comparison that only works for
+  some operations.
+
+- **`LOCAL-SURFACE.md` told an implementer to repair the value it also told them to refuse.**
+  §2.1 rejects a `Host` "with a port" as part of the DNS-rebinding defence; §3.2 said the resolver
+  "strips a trailing dot and any port". §2.1 wins: repairing a malformed authority is how a
+  request that should have been refused acquires a cache entry instead.
+
+  **The first version of the revocation test passed against the deleted fix.** It asserted the
+  1412 constant and the specification's table and never resolved a revoked name — so removing the
+  branch that returns it changed nothing. A test that checks a value exists is not a test that the
+  value is ever produced. Rewritten to resolve one, twice, including deep into what would
+  otherwise be the live term. Five mutations now fail.
+
+  **Every finding in `docs/AUDIT-FINDINGS.md` now carries an outcome.**
+
 ### Fixed — the entire `Permissions-Policy` header was specified and never sent
 
 - **The proxy emitted the CSP and eight of the nine other canonical values.** `Permissions-Policy`

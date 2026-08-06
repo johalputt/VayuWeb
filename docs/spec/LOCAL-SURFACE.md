@@ -133,8 +133,14 @@ injection vector for response splitting and header injection, and ordering is th
 ### 3.2 Cache keying
 
 The cache key MUST be the post-normalisation `(label, tld)` tuple — never the raw `Host`. The
-resolver normalises to NFC, lowercases, strips a trailing dot and any port, and **rejects** rather
-than repairs anything that does not then match the grammar. Keying on the raw `Host` allows two
+resolver normalises to NFC, lowercases, strips a trailing dot, and **rejects** rather than repairs
+anything that does not then match the grammar.
+
+It does **not** strip a port. This clause said "strips a trailing dot and any port", against 2.1
+above, which lists "a value with a port" among the `Host` values that "MUST be rejected before
+routing" — one document telling an implementer to repair the exact value the other tells them to
+refuse. 2.1 wins: it is the DNS-rebinding rule, and repairing a malformed authority is how a
+request that should have been refused acquires a cache entry instead. Keying on the raw `Host` allows two
 spellings of one name to occupy two entries, which is a cache-poisoning primitive.
 
 ### 3.3 Negative caching must be bounded

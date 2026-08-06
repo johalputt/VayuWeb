@@ -112,9 +112,12 @@ these turned out to be the largest remaining gap in the record format.
 | `privacy-md-secret-storage-contradiction` | **Fixed.** The keystore fallback is normative, reported, and limited to the control-API token |
 | `content-security-md-s3-clipboard-permissions-policy` | **Fixed.** `clipboard-read` and `clipboard-write` exist and are now denied — and the proxy was emitting no `Permissions-Policy` at all |
 
-**Three remain untriaged**: `registry-epochs-checkpoint-conjunction`,
-`resolution-step8-release-revoke-lifecycle` and
-`resolution-step1-vs-local-surface-host-normalisation`.
+| `registry-epochs-checkpoint-conjunction` | **Fixed.** A boundary now triggers a checkpoint, so silence cannot stop the epoch counter |
+| `resolution-step8-release-revoke-lifecycle` | **Fixed.** Step 8 defers to the lifecycle rules, and a revoked name returns 1412 rather than "expired" |
+| `resolution-step1-vs-local-surface-host-normalisation` | **Fixed.** A `Host` with a port is rejected, never repaired |
+
+**Every finding in this file now carries an outcome.** Sixty-six headings, of which several are
+the same defect filed more than once; the disposition tables above say which.
 
 **Every HIGH, MEDIUM and LOW finding now carries an outcome.** The count of untriaged MEDIUM
 findings is worth stating rather than implying: zero MEDIUM, and none at LOW either. **Fifteen

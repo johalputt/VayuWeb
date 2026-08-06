@@ -30,7 +30,7 @@
  */
 
 import { isRatifiedTld, labelRejection, parseAlias } from './names.ts';
-import { stateAt } from './lifecycle.ts';
+import { stateAt, lifecycleOf } from './lifecycle.ts';
 import type { RegistryRecord, RecordEntry } from './record.ts';
 
 /** Numbered errors, exactly as the catalogue in RESOLUTION.md defines them. */
@@ -41,6 +41,22 @@ export const RESOLVE_ERRORS = {
   CONTENT_TIMEOUT: { code: 1408, http: 504, message: 'The site took too long to load.' },
   NAME_QUARANTINED: { code: 1409, http: 409, message: 'This name expired and is on hold.' },
   NAME_EXPIRED: { code: 1410, http: 410, message: "This name's registration has expired." },
+  /**
+   * Distinct from 1410, and the distinction is the point.
+   *
+   * `stateAt` reports a revoked name as GRACE for the remainder of its term, so this path used to
+   * return 1410 — "This name's registration has expired". The registration has not expired: the
+   * holder declared the key compromised. Saying "expired" tells the reader to renew, which is the
+   * single action a revoked name must not invite, and it is the kind of user-facing claim this
+   * project treats as a defect rather than as wording.
+   */
+  NAME_REVOKED: {
+    code: 1412,
+    http: 410,
+    message:
+      "This name's owner declared its key compromised. It cannot be renewed or re-registered " +
+      'by anyone until its term ends.',
+  },
   RESPONSE_TOO_LARGE: {
     code: 1413,
     http: 502,
@@ -261,6 +277,9 @@ export function resolveName(host: string, ports: ResolverPorts, now: number): Ou
     // Step 8: validity window. An expired name MUST NOT resolve even when its content is still
     // held locally — otherwise a lapsed registration keeps serving to whoever never re-queried.
     const state = stateAt(record, now);
+    if (lifecycleOf(record).revoked && state !== 'FREE') {
+      return fail('NAME_REVOKED', `${key} was revoked at ${record.notBefore}`, diagnostics);
+    }
     if (state === 'GRACE') {
       return fail('NAME_EXPIRED', `${key} expired at ${record.notAfter}`, diagnostics);
     }

@@ -370,3 +370,47 @@ test('AUDIT: the origin model is tested on both components of the tuple', () => 
   assert.ok(byLabel, 'no pair differs by label alone');
   assert.ok(byTld, 'no pair differs by TLD alone');
 });
+
+test('AUDIT: a revoked name says so, rather than telling the reader to renew', () => {
+  // `stateAt` reports a revoked name as GRACE for the remainder of its term, so this path
+  // returned 1410 — "This name's registration has expired". The registration had not expired:
+  // the holder declared the key compromised. The name never resolved, so this was not a security
+  // hole; it was a message that named the wrong cause and implied the wrong remedy, and renewing
+  // is the single action a revoked name must not invite.
+  //
+  // RESOLUTION.md step 8 also said to compare `now` against `notAfter` directly, which is right
+  // for four operations and wrong for two: a RELINQUISH sets `notAfter == notBefore` and skips
+  // grace, so the naive comparison reports EXPIRED through quarantine; a REVOKE keeps
+  // `prev.notAfter`, so it reports the name LIVE and a resolver following the step literally
+  // serves content from a key its holder has declared compromised.
+  // The behavioural half, and the half the first version of this test was missing: it asserted
+  // the constant and the specification and never resolved a revoked name, so deleting the branch
+  // that returns 1412 left it passing. A test that checks a value exists is not a test that the
+  // value is ever produced.
+  const revoked = rec('atlas', [], {
+    op: 'REVOKE',
+    seq: 1,
+    records: [],
+    notBefore: NOW,
+    notAfter: NOW + TERM,
+    powProof: null,
+    prevHash: new Uint8Array(32).fill(0x22),
+  });
+  const during = resolveName('atlas.vayu', ports({ 'atlas.vayu': revoked }), NOW + 1000);
+  assert.equal(code(during), 'NAME_REVOKED');
+  // Still revoked deep into what would otherwise be the live term — a naive notAfter comparison
+  // reports this one as LIVE and serves it.
+  const later = resolveName('atlas.vayu', ports({ 'atlas.vayu': revoked }), NOW + TERM - 1000);
+  assert.equal(code(later), 'NAME_REVOKED');
+
+  assert.equal(RESOLVE_ERRORS.NAME_REVOKED.code, 1412);
+  assert.equal(/expired/i.test(RESOLVE_ERRORS.NAME_REVOKED.message), false);
+
+  const spec = readFileSync(new URL('../../docs/spec/RESOLUTION.md', import.meta.url), 'utf8');
+  assert.match(spec, /\| 1412 \| NAME_REVOKED \| 410 \|/);
+  // The step no longer tells an implementer to compare against notAfter directly.
+  const step8 = /^8\. \*\*Validity window\.\*\*([\s\S]*?)(?=^9\. )/m.exec(spec);
+  assert.ok(step8, 'step 8 must exist');
+  assert.match(step8[1]!, /lifecycle rules in\s+\[REGISTRY\.md\]/);
+  assert.match(step8[1]!, /\*\*not\*\* by comparing `now` against `notAfter`/);
+});

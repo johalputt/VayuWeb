@@ -739,7 +739,9 @@ at the genesis entry. An epoch boundary is crossed when **both** of the followin
 1. at least `1,209,600` seconds (14 days) of `notBefore` time has elapsed since the boundary that
    opened the current epoch, measured at the median of the last 1,000 accepted records rather
    than from any single clock; and
-2. at least one checkpoint has been computed since that boundary.
+2. at least one checkpoint has been computed since that boundary — and a node SHALL compute one
+   when condition 1 is met, in addition to the every-10,000-entry schedule, so that condition 2
+   can never be the reason a boundary is missed.
 
 An earlier revision set the first condition at `2,592,000` seconds (30 days). Constitution Article
 2.5 requires that "Epoch length MUST NOT be shorter than one day nor longer than fourteen days",
@@ -751,7 +753,19 @@ push at the bound rather than away from it.
 Requiring both conditions is deliberate. Time alone would let a peer with a wrong or hostile
 clock disagree with the network about which epoch it is in — the weakness recorded in
 [LONGEVITY.md](../LONGEVITY.md) section 3. Log progress alone would stall the epoch counter
-whenever registration activity dropped, which over a century is a near certainty. Taking the
+whenever registration activity dropped, which over a century is a near certainty.
+
+**That second sentence also describes what condition 2 did on its own**, and the clause above is
+what fixes it. Checkpoints were computed every 10,000 entries and nowhere else, so a quiet log
+produced no checkpoint, no boundary and a frozen epoch counter — the exact stall the paragraph
+names as the reason not to rely on log progress, reintroduced by the condition the paragraph is
+justifying. It would also have breached Article 2.5, which caps epoch length at fourteen days:
+an epoch that cannot end is longer than any ceiling. Requiring the boundary itself to trigger a
+checkpoint keeps what condition 2 is for — the epoch is anchored to log state a peer can verify,
+not to a clock it is told about — while making it impossible for silence to stop time.
+
+The cost is one checkpoint per epoch on an otherwise idle log, which is 32 bytes of tree root and
+a comparison. That is the correct trade against a counter that can stop. Taking the
 median `notBefore` of a thousand records makes a single lying clock irrelevant, because moving
 the median requires controlling the majority of recent registrations, which proof-of-work already
 prices.

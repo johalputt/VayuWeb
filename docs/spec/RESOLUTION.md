@@ -83,11 +83,30 @@ for `http://example.vayu/` arriving at the proxy.
 7. **Registry lookup.** Query the local Hyperbee index for the highest-`seq`
    record. The lookup is local and contacts no peer. If the log has never
    synchronised (no verified head), return 1502 `REGISTRY_UNAVAILABLE`.
-8. **Validity window.** Compare now against `notBefore` and `notAfter`. An
-   unexpired record proceeds; a record in grace or quarantine returns 1410
-   `NAME_EXPIRED` or 1409 `NAME_QUARANTINED`; no record returns 1404
-   `NAME_NOT_FOUND`. A resolver MUST NOT resolve an expired name even if the
-   old `cid` is still held locally.
+8. **Validity window.** Compute the name's state by the lifecycle rules in
+   [REGISTRY.md](REGISTRY.md), **not** by comparing `now` against `notAfter`
+   directly. A live record proceeds; grace returns 1410 `NAME_EXPIRED`;
+   quarantine returns 1409 `NAME_QUARANTINED`; a **revoked** name returns 1412
+   `NAME_REVOKED`, because it accepts no further record from anyone and is not
+   merely late; no record returns 1404 `NAME_NOT_FOUND`. A resolver MUST NOT resolve an expired
+   name even if the old `cid` is still held locally.
+
+   An earlier revision said "compare now against `notBefore` and `notAfter`",
+   which is right for four operations and wrong for two. A `RELINQUISH` sets
+   `notAfter == notBefore` and **skips grace**, so the naive comparison reports
+   1410 `NAME_EXPIRED` for thirty days when the name is in quarantine and 1409
+   is the truth. A `REVOKE` keeps `prev.notAfter`, so the same comparison
+   reports the name as live for the remainder of its term — a resolver serving
+   content from a key its holder has declared compromised, which is the one
+   outcome `REVOKE` exists to prevent. Two resolvers, one reading this step and
+   one reading `REGISTRY.md`, disagree about whether to serve a revoked name.
+
+   The reference implementation already computed the state correctly and so
+   never served one; what it returned was 1410, whose message is *"This name's
+   registration has expired"*. That is false — the registration has not expired,
+   the key was declared compromised — and it sends the reader to renew, which is
+   the one action a revoked name must not invite. Hence 1412, and hence a
+   message that says what happened.
 9. **Record selection.** Choose one content source from the record's `records`
    set using the ordering below. If none is usable, return 1421
    `NO_USABLE_RECORD`.
@@ -445,6 +464,7 @@ and on the control API, which is where a diagnostic belongs.
 | 1408 | CONTENT_TIMEOUT | 504 | The site took too long to load. |
 | 1409 | NAME_QUARANTINED | 409 | This name expired and is on hold. |
 | 1410 | NAME_EXPIRED | 410 | This name's registration has expired. |
+| 1412 | NAME_REVOKED | 410 | This name's owner declared its key compromised. It cannot be renewed or re-registered by anyone until its term ends. |
 | 1413 | RESPONSE_TOO_LARGE | 502 | This file is larger than the resolver will load. |
 | 1414 | PATH_NOT_FOUND | 404 | This page does not exist on this site. |
 | 1421 | NO_USABLE_RECORD | 502 | This name points at nothing fetchable. |
