@@ -40,6 +40,8 @@ import {
   type ResolveErrorName,
   type ResolverPorts,
 } from './resolve.ts';
+import { cidFromBytes, encodeCid } from './content.ts';
+import type { CborValue } from './cbor.ts';
 
 /**
  * The default Content-Security-Policy, byte-identical to CONTENT-SECURITY.md section 2.
@@ -145,6 +147,73 @@ export interface ProxyResponse {
 export interface ProxyOptions {
   /** LOCAL-SURFACE.md 2.4: off by default, and only the control API may turn it on. */
   readonly diagnostics?: boolean;
+  /**
+   * RESOLUTION.md step 13: map the request path onto the resolved CID's tree.
+   *
+   * Supplied rather than imported, and synchronous, for the reason every port in this file is:
+   * `handleRequest` stays a pure function of its inputs, so every refusal below is exercised as
+   * data. The caller has already fetched and **verified** the tree — `fetch.ts` checks each block
+   * against the CID that referred it — so what arrives here is bytes that hashed correctly, not
+   * bytes a peer sent.
+   *
+   * Absent means no content layer is wired, and the proxy answers a bare 200 rather than
+   * pretending: an empty body is a truthful "the name resolves and nothing here serves it".
+   */
+  readonly content?: ContentPort;
+}
+
+/** What the proxy needs to turn a resolved content source into a response body. */
+export interface ContentPort {
+  /**
+   * Bytes for `path` under `source`, or a numbered failure.
+   *
+   * The path is the request target's path component, already bounded by `PROXY_LIMITS`. Returning
+   * a code rather than throwing keeps the catalogue in one place: RESOLUTION.md's numbers are the
+   * contract, and an exception escaping here would surface as a 500 that says nothing.
+   */
+  fetch(source: { type: string; value: string }, path: string): ContentResult;
+}
+
+export type ContentResult =
+  | { readonly ok: true; readonly bytes: Uint8Array; readonly contentType: string }
+  | { readonly ok: false; readonly error: ResolveErrorName };
+
+/**
+ * Render a resolved entry's value as the text an addressing layer takes.
+ *
+ * **This existed as `String(entry.value)` and was wrong for every binary entry type.** A `cid`
+ * entry is a `bstr` (REGISTRY.md, entry table), so `String` produced `"1,112,32,180,…"` — the
+ * comma-joined decimals of a typed array. That is a string, it is not empty, and it flows through
+ * every type check on the way to a content port that can only ever fail to match it. The symptom
+ * was a 502 on a name that resolved perfectly, with nothing wrong logged anywhere, because
+ * nothing had gone wrong as far as any code on the path could tell.
+ *
+ * So the conversion is explicit, per type, and returns null rather than guessing. `String()` on a
+ * value whose shape you have not checked is not a conversion; it is a promise that there will
+ * always be *some* string, which is exactly the property that keeps a mismatch from surfacing.
+ */
+export function sourceValueOf(entry: { type: string; value: CborValue }): string | null {
+  const value = entry.value;
+  switch (entry.type) {
+    case 'cid':
+      // Rendered base32, as REGISTRY.md renders a `cid` outside CBOR. `cidFromBytes` refuses a
+      // CIDv0, a foreign codec or a short digest, so a record carrying one addresses nothing
+      // here instead of addressing something approximate.
+      if (!(value instanceof Uint8Array)) return null;
+      try {
+        return encodeCid(cidFromBytes(value));
+      } catch {
+        return null;
+      }
+    case 'ipns':
+    case 'alias':
+      return typeof value === 'string' ? value : null;
+    case 'peer':
+      if (!(value instanceof Uint8Array)) return null;
+      return Array.from(value, (b) => b.toString(16).padStart(2, '0')).join('');
+    default:
+      return null;
+  }
 }
 
 /**
@@ -265,6 +334,18 @@ function refusal(error: ResolveErrorName): ProxyResponse {
 }
 
 /**
+ * The path component of a request target, absolute-form or origin-form.
+ *
+ * Query and fragment are dropped rather than passed on: a VayuWeb tree has no query semantics,
+ * and forwarding one would invite a resolver to grow them.
+ */
+export function pathOf(target: string): string {
+  const withoutScheme = target.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, '');
+  const path = (withoutScheme.split(/[?#]/)[0] ?? '').trim();
+  return path.length === 0 ? '/' : path;
+}
+
+/**
  * Handle one request.
  *
  * Ordered so that the cheapest and most decisive refusals run first, and so that nothing derived
@@ -313,6 +394,27 @@ export function handleRequest(
   const headers = new Map<string, string>(SECURITY_HEADERS);
   headers.set('content-type', 'text/plain; charset=utf-8');
 
+  // RESOLUTION.md step 13. Only attempted when a content layer is wired; otherwise the answer
+  // stays a bare 200, which is the truthful "this name resolves and nothing here serves it"
+  // rather than a pretend page. What arrives from the port has already been VERIFIED --
+  // `fetch.ts` checks every block against the CID that referred it -- so these are bytes that
+  // hashed correctly, not bytes a peer sent.
+  let body = '';
+  if (options.content !== undefined) {
+    const value = sourceValueOf(outcome.entry);
+    if (value === null) return refusal('NO_USABLE_RECORD');
+    const fetched = options.content.fetch(
+      { type: outcome.entry.type, value },
+      pathOf(request.target),
+    );
+    if (!fetched.ok) return refusal(fetched.error);
+    headers.set('content-type', fetched.contentType);
+    // Latin-1 rather than UTF-8: the body is a byte string all the way to the socket, and
+    // decoding it as text would corrupt every image and every multi-byte character before the
+    // serialiser could write it back out.
+    body = Buffer.from(fetched.bytes).toString('binary');
+  }
+
   if (options.diagnostics === true) {
     // Only reachable once the control API has turned them on. Values come from the *validated*
     // name and the resolver's own diagnostics, never from the request, so there is nothing here
@@ -324,5 +426,5 @@ export function handleRequest(
     headers.set('x-vayuweb-stale', outcome.diagnostics.stale ? '1' : '0');
   }
 
-  return { status: 200, headers, body: '' };
+  return { status: 200, headers, body };
 }

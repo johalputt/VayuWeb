@@ -50,7 +50,10 @@ jobs:
         # inside CI. Formatting is not a matter of taste here — an unformatted diff hides the
         # change under the reflow.
         working-directory: registry
-        run: npx --yes prettier@3.6.2 --check "src/**/*.ts" "bin/**/*.ts" "scripts/**/*.ts"
+        # `.mjs` as well as `.ts`: the acceptance harness under scripts/ is plain ESM, and a glob
+        # naming only the extensions that happened to exist when it was written stops covering the
+        # tree the moment a file arrives in another one.
+        run: npx --yes prettier@3.6.2 --check "src/**/*.ts" "bin/**/*.ts" "scripts/**/*.{ts,mjs}"
 
   hygiene:
     name: source hygiene

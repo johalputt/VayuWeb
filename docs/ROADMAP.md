@@ -208,9 +208,18 @@ them, and `vayuweb-registry serve` starts both. A browser pointed at the proxy g
 answer with the full header set on it, including on refusals — which is where a header set is
 most often forgotten. **Verified traversal** is in `registry/src/fetch.ts`: block-by-block verification against the referring CID, a bound on blocks
 and depth rather than on assembled bytes, and refusal of a node whose declared sizes disagree with
-what arrives. **The block-exchange transport and the browser integration remain**, and so does the
-Article 14 outbound-connection test, which needs a real browser and a real network to mean
-anything.
+what arrives.
+
+**The browser integration is done and the acceptance criterion is executable.**
+`registry/scripts/acceptance-browser.mjs` publishes a site, registers a name against the root CID
+the importer produced, serves it, and drives stock Chromium through the proxy with no extension,
+no certificate and no flag beyond `--proxy-server`. It carries the **Article 14
+outbound-connection test** too, measured rather than asserted: it joins the resolver's own socket
+inodes from `/proc/<pid>/fd` against the TCP tables, because `/proc/<pid>/net/tcp` read directly
+is per network namespace and reports the whole machine's traffic as though it were the
+resolver's. Running it is what found the three defects standing between a resolved name and a
+rendered page — all three silent, and none reachable by a test that stopped at "did it return
+200". **The block-exchange transport remains.**
 
 The two surfaces are deliberately of different kinds. The proxy is TCP because a browser must
 reach it; the control API is a Unix domain socket because a browser must never reach it, and

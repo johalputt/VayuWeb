@@ -107,14 +107,19 @@ export interface Cid {
 }
 
 /**
- * Encode a CID to its text form.
+ * Encode a CID to its **binary** form — the bytes a registry record actually carries.
+ *
+ * REGISTRY.md's entry table says a `cid` entry is a `bstr` holding a "Binary CIDv1, 1-64 bytes;
+ * rendered base32 in JSON". So these bytes are the value and the familiar `bafy…` string is the
+ * rendering, which is the reverse of how it looks from outside: the CID a person types is the
+ * derived form, not the stored one.
  *
  * Bytes are `version || codec || multihash-code || digest-length || digest`, each as an unsigned
  * varint. Every value here is below 128, so each varint is one byte — but the varint rule is what
  * the format says, and an implementation that hard-codes single bytes will produce wrong output
  * the first time a value exceeds 127. The encoder below is written for the general case.
  */
-export function encodeCid(cid: Cid): string {
+export function cidBytes(cid: Cid): Uint8Array {
   if (cid.digest.length !== CID_PARAMETERS.digestBytes) {
     throw new ContentError(
       `a sha2-256 digest is ${CID_PARAMETERS.digestBytes} bytes, got ${cid.digest.length}`,
@@ -126,8 +131,12 @@ export function encodeCid(cid: Cid): string {
     ...varint(CID_PARAMETERS.multihashSha2_256),
     ...varint(cid.digest.length),
   ];
-  const bytes = Uint8Array.from([...header, ...cid.digest]);
-  return MULTIBASE_BASE32 + base32Encode(bytes);
+  return Uint8Array.from([...header, ...cid.digest]);
+}
+
+/** Encode a CID to its text form: the binary form rendered under multibase base32. */
+export function encodeCid(cid: Cid): string {
+  return MULTIBASE_BASE32 + base32Encode(cidBytes(cid));
 }
 
 /**
@@ -144,7 +153,18 @@ export function decodeCid(text: string): Cid {
       `expected a ${MULTIBASE_BASE32}-prefixed base32 CID; CIDv0 and other multibases are not used`,
     );
   }
-  const bytes = base32Decode(text.slice(1));
+  return cidFromBytes(base32Decode(text.slice(1)));
+}
+
+/**
+ * Decode a CID from its binary form, making every refusal {@link decodeCid} makes.
+ *
+ * Split out because a `cid` entry arrives off the wire as bytes and never as text. Routing those
+ * bytes through base32 first — encoding them only to decode what was just encoded — would put a
+ * reversible transformation between the record and the check meant to validate it, and a value
+ * that survives a round trip has been tested against the round trip rather than against the rule.
+ */
+export function cidFromBytes(bytes: Uint8Array): Cid {
   let at = 0;
   const read = (): number => {
     const [value, size] = readVarint(bytes, at);

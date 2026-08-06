@@ -8,6 +8,81 @@ Versions follow the scheme set by [VWIP-0003](docs/spec/VWIP-0003.md), which kee
 software. Before 1.0.0 the public interface is explicitly unstable and a minor release may break
 it.
 
+## [Unreleased]
+
+### Fixed — the resolver could not serve a page, and nothing said so
+
+Phase 3's acceptance criterion is a browser nobody modified rendering a VayuWeb name. Running it
+returned **502** for a name that resolved perfectly. Three defects sat in a row on the path from a
+typed CID to a rendered page, and not one of them produced an error message.
+
+- **`--cid` was accepted and silently discarded.** `entriesFrom` never read the flag, so the tool
+  could register a name and could never point one at content, and it answered
+  `accepted REGISTER … 329 bytes` for a record with no entries in it. `cid` and `ipns` are the two
+  entry types `RESOLUTION.md`'s source order puts *first*, so this was not a gap at the edge of
+  the surface but a hole through the middle of it. Every unrecognised flag is now refused by name,
+  with the nearest known flag suggested — a tool that drops what you typed and then reports
+  success is a tool that lies about what it did.
+
+- **A `cid` entry is binary, and the CLI stored text.** `REGISTRY.md` types the entry `bstr` —
+  "Binary CIDv1, 1-64 bytes; rendered base32 in JSON" — so the `bafy…` string is the *rendering*
+  and the bytes are the value. The binary form had no encoder anywhere in the codebase, which is
+  part of why it was easy to miss. `content.ts` grows `cidBytes` and `cidFromBytes` as the pair
+  the record format actually needs, and the flag is decoded before the proof-of-work solve rather
+  than rejected by the parser after it: a mistyped CID used to cost a full solve to find out about.
+
+- **`String(entry.value)` on a byte string.** The proxy handed the content layer
+  `String(outcome.entry.value)`, which for a `Uint8Array` produces `"1,112,18,32,180,…"` — the
+  comma-joined decimals of the array. It is a string, it is non-empty, and it satisfies every type
+  check between there and a content port that can then only ever fail to match it. Replaced with
+  `sourceValueOf`, which converts per entry type and returns null rather than guessing. Same
+  lesson as the stale-lockfile one earlier: the dangerous conversion is the one that always
+  produces *something*.
+
+`resolve` now prints a `cid` in base32 as well, so what it shows can be compared by eye with what
+was typed; it was printing hex.
+
+### Added
+
+- **`registry/scripts/acceptance-browser.mjs`** — Phase 3's acceptance criterion, executable. It
+  publishes a two-file site, registers a name against the root CID the importer actually produced,
+  starts the resolver, drives stock Chromium through it with no extension and no flag beyond
+  `--proxy-server`, then checks that the page renders, that the *stylesheet* renders too (a
+  resolver that serves `index.html` and nothing else still passes a text assertion), that the CSP
+  arrives intact, that a non-VayuWeb name is refused rather than handed to the OS resolver, and
+  that the resolver opened no outbound connection.
+
+  It is not a CI job and not a dependency: Playwright's tree would take `registry/` past the
+  forty-package supply-chain ceiling, and that ceiling exists to notice exactly this kind of
+  change. It **refuses rather than skips** when it cannot run, because a harness that reports
+  success on a machine with no browser converts an unrun check into a green one.
+
+- The Prettier job covers `scripts/**/*.mjs` as well as `.ts`. A glob naming only the extensions
+  that existed when it was written stops covering the tree the moment a file arrives in another
+  one.
+
+### Adversarial review
+
+Attacked: the new content path end to end, and the acceptance harness itself.
+
+- **The harness's own Article 14 check was measuring the wrong thing, twice.** The first version
+  declared a `dnsAttempts` array and a saved `dns.lookup`, used neither, and passed — dead code
+  shaped exactly like a check. Replacing it with a read of `/proc/<pid>/net/tcp` then reported
+  *fourteen* outbound connections for a resolver that had opened none, because that file is per
+  network **namespace**, not per process. The measurement is now a join against the process's own
+  socket inodes from `/proc/<pid>/fd`, and it was mutation-tested against a process holding one
+  deliberate non-loopback connection: it reports that one and stays empty for the resolver.
+
+- **Eight mutations, each re-breaking exactly one thing.** `sourceValueOf` back to
+  `String(value)`; `entriesFrom` dropping `--cid` again; `cidValue` storing the text;
+  `assertKnownFlags` made a no-op; the entry build moved back inside the solver skeleton;
+  `cidFromBytes` losing its trailing-digest bound; `cidFromBytes` accepting any codec; `resolve`
+  rendering hex again. All eight failed the intended test.
+
+- Found **SOUND** under attack: the negative cache bounds, the `CONNECT` refusal, the
+  diagnostic-header disclosure default, and the closed content-type list — a sniffed type would
+  undo the `nosniff` header from the other side.
+
 ## [0.2.1] — 2026-08-06
 
 **The release 0.2.0 was supposed to be.** `v0.2.0`'s tag exists on the remote and produced no

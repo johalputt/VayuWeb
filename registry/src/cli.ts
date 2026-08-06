@@ -14,7 +14,7 @@
  *   hygiene than exists is worse than having none, because it stops the user providing their own.
  */
 
-import { readFileSync, writeFileSync, chmodSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, chmodSync, existsSync, readdirSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -31,6 +31,11 @@ import { stateAt } from './lifecycle.ts';
 import { buildVectors, fromHex } from './vectors.ts';
 import { verify, predecessorFrom, type RegistryView } from './verify.ts';
 import { serveControl, serveProxy } from './serve.ts';
+import { sourceValueOf, type ContentPort } from './proxy.ts';
+import { importSite, type SiteFile } from './unixfs.ts';
+import { cidBytes, decodeCid } from './content.ts';
+import { memorySource } from './blockstore.ts';
+import { fetchPath, FetchError } from './fetch.ts';
 import { treeOf } from './merkle.ts';
 import { TOKEN_BYTES } from './control.ts';
 
@@ -124,15 +129,86 @@ const entry = (type: string, value: CborValue): CborMap =>
   ]);
 
 /** `--txt a --txt b` style repetition is not supported; one `--txt` keeps the tool honest. */
+/**
+ * A `--cid` flag as the record stores it: binary, not the text the user typed.
+ *
+ * REGISTRY.md types a `cid` entry `bstr`, and `parseRecordBytes` enforces it — so passing the
+ * `bafy…` string through unchanged produced a record the tool's own verifier rejected, after a
+ * proof-of-work solve, with `cid value must be 1-64 bytes` on a 59-character string. Decoding
+ * here also means a mistyped CID is refused before the work is spent rather than after it.
+ */
+function cidValue(text: string): Uint8Array {
+  try {
+    return cidBytes(decodeCid(text));
+  } catch (error) {
+    throw new UsageError(
+      `--cid ${text}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/**
+ * Record entries from the flags.
+ *
+ * **`cid` and `ipns` were missing**, which meant this tool could register a name and could never
+ * point one at content — every name it created resolved to nothing. They are the two entry types
+ * `RESOLUTION.md`'s `SOURCE_ORDER` puts *first*, so their absence was not a gap at the edge of
+ * the surface but a hole through the middle of it. Found by publishing a site, registering a name
+ * for it, and getting a 502.
+ */
 function entriesFrom(args: Args): CborValue[] {
   const entries: CborValue[] = [];
   const txt = args.flags.get('txt');
   if (txt !== undefined) entries.push(entry('txt', txt));
+  const cid = args.flags.get('cid');
+  if (cid !== undefined) entries.push(entry('cid', cidValue(cid)));
+  const ipns = args.flags.get('ipns');
+  if (ipns !== undefined) entries.push(entry('ipns', ipns));
   const alias = args.flags.get('alias');
   if (alias !== undefined) entries.push(entry('alias', alias));
   const peer = args.flags.get('peer');
   if (peer !== undefined) entries.push(entry('peer', fromHex(peer)));
   return entries;
+}
+
+/**
+ * Every flag any command understands.
+ *
+ * Enumerated so an unrecognised one can be REFUSED rather than dropped. `--cid` was accepted and
+ * silently ignored for as long as `entriesFrom` did not read it, and the tool answered
+ * "accepted REGISTER … 329 bytes" for a record with no entries at all. A tool that discards
+ * something you typed and then reports success is a tool that lies about what it did, and the
+ * cost of finding out is a name on a real log that resolves to nothing.
+ */
+const KNOWN_FLAGS = new Set([
+  'log',
+  'key',
+  'name',
+  'seed',
+  'force',
+  'at',
+  'bits',
+  'record',
+  'txt',
+  'cid',
+  'ipns',
+  'alias',
+  'peer',
+  'to',
+  'cosign',
+  'port',
+  'socket',
+  'site',
+]);
+
+/** Refuse a flag nothing reads, naming the nearest thing it might have meant. */
+function assertKnownFlags(args: Args): void {
+  for (const flag of args.flags.keys()) {
+    if (KNOWN_FLAGS.has(flag)) continue;
+    const near = [...KNOWN_FLAGS].filter((k) => k.startsWith(flag.slice(0, 2))).sort();
+    const hint = near.length > 0 ? `; did you mean ${near.map((k) => `--${k}`).join(', ')}?` : '';
+    throw new UsageError(`unknown flag --${flag}${hint}`);
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -187,6 +263,11 @@ function cmdRegister(args: Args): number {
     return 1;
   }
 
+  // Built before the solve, not inside the skeleton the solver calls. A mistyped `--cid` is a
+  // refusal that is decidable from the flag alone, and deferring it until the first skeleton is
+  // constructed means the tool has already announced "solving proof of work" before it says no.
+  const records = entriesFrom(args);
+
   const skeleton = (nonce: Uint8Array): CborMap =>
     new Map<string | Uint8Array, CborValue>([
       ['version', 1],
@@ -198,7 +279,7 @@ function cmdRegister(args: Args): number {
       ['seq', 0],
       ['notBefore', now],
       ['notAfter', now + TERM_SECONDS],
-      ['records', entriesFrom(args)],
+      ['records', records],
       [
         'powProof',
         new Map<string | Uint8Array, CborValue>([
@@ -370,7 +451,12 @@ function cmdResolve(args: Args): number {
   out('  entries');
   if (r.entries.length === 0) out('    (none)');
   for (const e of r.entries) {
-    const value = e.value instanceof Uint8Array ? toHex(e.value) : String(e.value);
+    // `sourceValueOf` renders a `cid` base32, the way REGISTRY.md renders one outside CBOR, so
+    // what is printed here is comparable by eye to the `--cid` that was typed. Falling back to
+    // hex is for the entry types it does not address (and for a malformed one), where the raw
+    // bytes are the only honest thing to show.
+    const rendered = e.known ? sourceValueOf(e) : null;
+    const value = rendered ?? (e.value instanceof Uint8Array ? toHex(e.value) : String(e.value));
     out(`    ${e.type}${e.known ? '' : ' (unknown type — never acted upon)'}  ${value}`);
   }
   return state === 'LIVE' ? 0 : 3;
@@ -501,6 +587,75 @@ function merkleRootOf(store: Store, length: number): Uint8Array {
  */
 const RESOLVER_VERSION = '0.1.0';
 
+/**
+ * A content port over a directory published into memory.
+ *
+ * Returns null when no `--site` was given, which leaves the proxy answering a bare 200 -- the
+ * truthful "this name resolves and nothing here serves it".
+ */
+function siteContentOf(directory: string | undefined): ContentPort | null {
+  if (directory === undefined) return null;
+
+  const files: SiteFile[] = [];
+  const walk = (dir: string, prefix: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+      if (entry.isDirectory()) walk(join(dir, entry.name), rel);
+      else if (entry.isFile())
+        files.push({ path: rel, content: readFileSync(join(dir, entry.name)) });
+    }
+  };
+  walk(directory, '');
+  if (files.length === 0) throw new UsageError(`${directory} holds no files to publish`);
+
+  const built = importSite(files);
+  const source = memorySource(built.blocks);
+  out(`published ${files.length} file(s) from ${directory}`);
+  out(`  root CID  ${built.root}`);
+
+  return {
+    fetch: (chosen, path) => {
+      // Only a `cid` entry is served here. An `ipns` pointer needs a resolution step this
+      // command does not perform, and answering one anyway would be claiming a capability.
+      if (chosen.type !== 'cid') return { ok: false, error: 'NO_USABLE_RECORD' };
+      if (chosen.value !== built.root) return { ok: false, error: 'CONTENT_UNAVAILABLE' };
+      const candidates = path.endsWith('/') ? [`${path}index.html`] : [path, `${path}/index.html`];
+      for (const candidate of candidates) {
+        try {
+          const bytes = fetchPath(source, built.root, candidate);
+          return { ok: true, bytes, contentType: contentTypeOf(candidate) };
+        } catch (error) {
+          if (!(error instanceof FetchError)) throw error;
+        }
+      }
+      return { ok: false, error: 'PATH_NOT_FOUND' };
+    },
+  };
+}
+
+/**
+ * Content type by extension, from a closed list.
+ *
+ * Closed on purpose. Sniffing a type from bytes is how a resolver serves attacker-chosen content
+ * as script, and `x-content-type-options: nosniff` is already on every response -- guessing here
+ * would undo it from the other side.
+ */
+function contentTypeOf(path: string): string {
+  const known: Record<string, string> = {
+    html: 'text/html; charset=utf-8',
+    css: 'text/css; charset=utf-8',
+    js: 'text/javascript; charset=utf-8',
+    json: 'application/json',
+    svg: 'image/svg+xml',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    webp: 'image/webp',
+    txt: 'text/plain; charset=utf-8',
+  };
+  const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
+  return known[ext] ?? 'application/octet-stream';
+}
+
 async function cmdServe(args: Args): Promise<number> {
   const store = Store.open(required(args, 'log'), Math.floor(Date.now() / 1000));
   const started = Math.floor(Date.now() / 1000);
@@ -513,6 +668,12 @@ async function cmdServe(args: Args): Promise<number> {
   const socketPath =
     args.flags.get('socket') ??
     join(process.env['XDG_RUNTIME_DIR'] ?? join(homedir(), '.vayuweb'), 'control.sock');
+
+  // `--site <dir>` publishes a directory into an in-memory blockstore and serves it for the CID
+  // it produces. The tree goes through the same importer a real publish uses and comes back
+  // through the same VERIFIED traversal a peer's blocks would, so this is the content path rather
+  // than a shortcut around it -- the only thing it skips is the network.
+  const site = siteContentOf(args.flags.get('site'));
 
   let diagnostics = false;
   const control = await serveControl({
@@ -550,6 +711,7 @@ async function cmdServe(args: Args): Promise<number> {
       get diagnostics() {
         return diagnostics;
       },
+      ...(site === null ? {} : { content: site }),
     },
     ports: {
       lookup: (label, tld) => store.lookup(label, tld)?.current.record ?? null,
@@ -580,8 +742,8 @@ async function cmdServe(args: Args): Promise<number> {
 const USAGE = `vayuweb-registry — local name registry (Phase 1: no network)
 
   keygen     --key <file> [--seed <hex>] [--force]
-  register   --log <file> --key <file> --name <label.tld> [--txt <s>] [--alias <n.tld>]
-             [--peer <hex>] [--bits <n>] [--at <unix>]
+  register   --log <file> --key <file> --name <label.tld> [--cid <root>] [--ipns <key>]
+             [--txt <s>] [--alias <n.tld>] [--peer <hex>] [--bits <n>] [--at <unix>]
   update     --log <file> --key <file> --name <label.tld> [--txt <s>] ...
   renew      --log <file> --key <file> --name <label.tld> [--bits <n>]
   transfer   --log <file> --key <file> --name <label.tld> --to <hex> --cosign <file>
@@ -592,7 +754,7 @@ const USAGE = `vayuweb-registry — local name registry (Phase 1: no network)
   difficulty --log <file> --name <label.tld>
   verify     --log <file> --record <file containing hex>
   vectors
-  serve      --log <file> [--port <n>] [--socket <path>]
+  serve      --log <file> [--port <n>] [--socket <path>] [--site <dir>]
 
 Exit codes: 0 accepted, 1 rejected or error, 2 deferred (clock skew), 3 not live.
 
@@ -615,6 +777,7 @@ export function main(argv: readonly string[]): number | Promise<number> {
 
   try {
     const args = parseArgs(rest);
+    assertKnownFlags(args);
     switch (command) {
       case 'keygen':
         return cmdKeygen(args);

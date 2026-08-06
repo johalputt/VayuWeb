@@ -12,8 +12,14 @@ import {
   handleRequest,
   normaliseHost,
   requestHost,
+  sourceValueOf,
+  type ContentPort,
   type ProxyRequest,
 } from './proxy.ts';
+import { CID_PARAMETERS, cidBytes, encodeCid, sha256 } from './content.ts';
+import { parseRecord } from './record.ts';
+import { POW_ALGORITHM, POW_NONCE_LENGTH } from './pow.ts';
+import type { CborValue } from './cbor.ts';
 import { RESOLVE_ERRORS, type ResolverPorts } from './resolve.ts';
 import type { RegistryRecord } from './record.ts';
 
@@ -378,4 +384,115 @@ test('AUDIT: every canonical header block in CONTENT-SECURITY.md is actually emi
     assert.ok(emitted.has(name!), `${name} is canonical in the specification and never emitted`);
     assert.equal(emitted.get(name!), value, `${name} differs from its canonical block`);
   }
+});
+
+/* -------------------------------------------------------------------------- */
+/* Handing a resolved entry to the content layer                               */
+/* -------------------------------------------------------------------------- */
+
+/** A live record carrying whatever entries the test needs. */
+function live(entries: CborValue[]): RegistryRecord {
+  return parseRecord(
+    new Map<string | Uint8Array, CborValue>([
+      ['version', 1],
+      ['suite', 1],
+      ['op', 'REGISTER'],
+      ['name', 'atlas'],
+      ['tld', 'vayu'],
+      ['ownerKey', new Uint8Array(32).fill(0x11)],
+      ['seq', 0],
+      ['notBefore', NOW - 10],
+      ['notAfter', NOW + 31_536_000],
+      ['records', entries],
+      [
+        'powProof',
+        new Map<string | Uint8Array, CborValue>([
+          ['alg', POW_ALGORITHM],
+          ['nonce', new Uint8Array(POW_NONCE_LENGTH).fill(7)],
+          ['bits', 10],
+        ]),
+      ],
+      ['prevHash', new Uint8Array(32)],
+      ['sig', new Uint8Array(64).fill(0xaa)],
+    ]),
+  );
+}
+
+const cborEntry = (type: string, value: CborValue): CborValue =>
+  new Map<string | Uint8Array, CborValue>([
+    ['type', type],
+    ['value', value],
+  ]);
+
+const DIGEST = sha256(new TextEncoder().encode('atlas observatory'));
+const CID_TEXT = encodeCid({ version: 1, codec: CID_PARAMETERS.codecDagPb, digest: DIGEST });
+const CID_BYTES = cidBytes({ version: 1, codec: CID_PARAMETERS.codecDagPb, digest: DIGEST });
+
+test('AUDIT: a cid entry reaches the content layer as base32, not as String(Uint8Array)', () => {
+  // This was `String(outcome.entry.value)`. A `cid` entry is a bstr, so that produced
+  // "1,112,18,32,180,…" — the comma-joined DECIMALS of a typed array. It is a string, it is
+  // non-empty, and it passes every type check between here and the content port, which can then
+  // only ever fail to match it. The symptom was a 502 on a name that resolved perfectly, with
+  // nothing wrong recorded anywhere, because by the lights of every function on the path nothing
+  // had gone wrong.
+  assert.equal(sourceValueOf({ type: 'cid', value: CID_BYTES }), CID_TEXT);
+  assert.match(CID_TEXT, /^bafy/);
+  // The specific wrong answer, named so a regression cannot be mistaken for a near miss.
+  assert.notEqual(sourceValueOf({ type: 'cid', value: CID_BYTES }), String(CID_BYTES));
+
+  // And end to end: the port receives what an addressing layer can compare against.
+  const seen: { type: string; value: string }[] = [];
+  const content: ContentPort = {
+    fetch: (source) => {
+      seen.push(source);
+      return { ok: true, bytes: new TextEncoder().encode('served'), contentType: 'text/html' };
+    },
+  };
+  const record = live([cborEntry('cid', CID_BYTES)]);
+  const response = handleRequest(
+    get('/', { host: 'atlas.vayu' }),
+    { lookup: () => record, hasVerifiedHead: () => true },
+    new NegativeCache(),
+    NOW,
+    { content },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(seen, [{ type: 'cid', value: CID_TEXT }]);
+  assert.equal(response.body, 'served');
+});
+
+test('a malformed cid entry addresses nothing rather than something approximate', () => {
+  // A record can carry any bytes; the entry-shape check bounds the LENGTH and says nothing about
+  // the contents. A CIDv0, a blake3 multihash or a truncated digest must produce no source at
+  // all — rendering one "as best we can" is how a resolver serves a block the record did not
+  // name.
+  assert.equal(sourceValueOf({ type: 'cid', value: Uint8Array.of(0x00, 0x70) }), null); // v0
+  assert.equal(sourceValueOf({ type: 'cid', value: CID_BYTES.subarray(0, 20) }), null); // short
+  assert.equal(sourceValueOf({ type: 'cid', value: CID_TEXT }), null); // text in a bstr field
+
+  // A record whose only source is unusable is NO_USABLE_RECORD, not a 200 with an empty body:
+  // an empty page is indistinguishable from a site that is genuinely blank.
+  const record = live([cborEntry('cid', Uint8Array.of(0x00, 0x70))]);
+  const response = handleRequest(
+    get('/', { host: 'atlas.vayu' }),
+    { lookup: () => record, hasVerifiedHead: () => true },
+    new NegativeCache(),
+    NOW,
+    { content: { fetch: () => assert.fail('the content port must not be reached') } },
+  );
+  assert.equal(response.status, RESOLVE_ERRORS.NO_USABLE_RECORD.http);
+});
+
+test('each entry type is rendered in its own form, and an unknown one in none', () => {
+  assert.equal(sourceValueOf({ type: 'ipns', value: 'k51qzi5uqu5d' }), 'k51qzi5uqu5d');
+  assert.equal(sourceValueOf({ type: 'alias', value: 'other.vayu' }), 'other.vayu');
+  assert.equal(sourceValueOf({ type: 'peer', value: Uint8Array.of(0xde, 0xad, 0x00) }), 'dead00');
+  // Shape mismatches, each the reverse of the type's declared CBOR major type.
+  assert.equal(sourceValueOf({ type: 'ipns', value: CID_BYTES }), null);
+  assert.equal(sourceValueOf({ type: 'peer', value: 'deadbeef' }), null);
+  // `txt` is never a content source (RESOLUTION.md section 9) and neither is a type this version
+  // does not know — REGISTRY.md requires both to be stored and replicated, which is not the same
+  // as being acted upon.
+  assert.equal(sourceValueOf({ type: 'txt', value: 'hello' }), null);
+  assert.equal(sourceValueOf({ type: 'dnslink', value: 'example.com' }), null);
 });
