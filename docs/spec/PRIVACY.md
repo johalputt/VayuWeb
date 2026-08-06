@@ -5,9 +5,15 @@ What VayuWeb writes down, what it sends, and what can be reconstructed afterward
 The goal of this document is stated precisely rather than as a slogan:
 
 > **Everything within VayuWeb's control is closed completely.** Zero requests to any party other
-> than the VayuWeb network. Zero logs. Zero telemetry. Zero durable trail on disk. Not "minimised",
-> not "configurable off by default" — absent, and structurally impossible to add back without
-> amending the Constitution.
+> than the VayuWeb network. Zero logs. Zero telemetry. Not "minimised", not "configurable off by
+> default" — absent, and structurally impossible to add back without amending the Constitution.
+>
+> **One qualification, here rather than in a footnote.** "Zero durable trail on disk" holds where
+> the platform provides a memory-backed location for the ephemeral browser profile. macOS and
+> Windows provide none by default, so there the profile is written and deleted rather than never
+> written, and the client must say so. Section 9 explains why that is weaker; section 11 records
+> it as a limit. A summary that stated the stronger property and left the weaker one to be
+> discovered further down would be the exact failure Article 21 names.
 >
 > **Two things are outside VayuWeb's control**, and are named here rather than buried: the network
 > path, which Private Mode closes by routing through an anonymising transport, and the reader's
@@ -43,7 +49,7 @@ matrix of privacy settings is a matrix of ways to be wrong.
 | Query logging | None | None |
 | Telemetry | None | None |
 | Egress transport | Direct to the VayuWeb network | Anonymising transport, mandatory |
-| Durable local state | Registry log and content cache on disk | **Memory only. Nothing durable.** |
+| Durable local state | Registry log and content cache on disk | **Memory only where the platform provides a memory-backed location** (Linux `tmpfs`). On macOS and Windows, which provide none by default, the profile is written to a temporary directory and destroyed on exit — and the client MUST report that, because written-then-deleted is a weaker property than never-written. See section 9. |
 | Behaviour if transport unavailable | n/a | **Refuses to start** |
 | Browser requirement | Proxy configured for VayuWeb names | **Full-proxy configuration required** |
 
@@ -162,10 +168,37 @@ it should understand they have added a no-op.
 
 Because no header can clear browser storage here, Private Mode achieves it structurally:
 
-**Private Mode MUST use an ephemeral browser profile directory**, created per session in a
-memory-backed location where the platform provides one, and destroyed on exit. This is the only
-mechanism that actually works, and it has the useful property of covering the traces a header
-never could — history, session restore and the visited-link database included.
+**Private Mode MUST use an ephemeral browser profile directory**, created per session and
+destroyed on exit. It covers the traces a header never could — history, session restore and the
+visited-link database included.
+
+**Where the platform provides a memory-backed location, the client MUST use it.** On Linux that
+is normally a `tmpfs` such as `/dev/shm`, or an `XDG_RUNTIME_DIR` mounted on one; the client MUST
+verify the filesystem type rather than infer it from the path.
+
+**Where the platform provides none, the client MUST say so.** macOS and Windows provide none by
+default. In that case the client:
+
+1. MUST create the profile in a per-session directory under the platform's temporary location,
+   and destroy it on exit;
+2. MUST report, in the same place it reports its mode, that **the profile was written to disk and
+   deleted rather than never written**; and
+3. MUST NOT describe that session as leaving nothing durable behind.
+
+The reporting duty is the substantive part, and it exists because this document's own words
+foreclose the comfortable reading: filesystem metadata "can outlive a deleted file. Private Mode
+avoids creating the file at all, which is the only reliable defence." A conditional clause cannot
+deliver that on a platform with no memory-backed location, so on two of the three desktop
+platforms the strongest available behaviour is *written then deleted* — a weaker property, and
+Article 21's duty of honest claiming requires it to be named where the claim is made rather than
+left for a reader to infer.
+
+An earlier revision said only "in a memory-backed location where the platform provides one",
+imposing no fallback and no reporting duty, while section 2's mode table stated Private Mode's
+durable local state as "**Memory only. Nothing durable.**" without qualification. Section 6's
+`mlock` mitigation is platform-conditional in exactly the same way and already carries "MUST
+attempt and MUST report when it fails"; this clause now follows the shape the document had
+already found for itself.
 
 Where the reader insists on a third-party browser, the client MUST require a private-browsing
 window, MUST detect and refuse to proceed where detection is possible, and MUST warn plainly where
@@ -237,8 +270,15 @@ behaviour**, not on configuration:
    vectors.
 2. **The fail-closed test.** Start in Private Mode, kill the anonymising transport, assert the
    resolver stops and that no direct connection is attempted.
-3. **The no-trail test.** Run a Private Mode session under a filesystem monitor. Assert zero
-   durable writes outside the process's own memory.
+3. **The no-trail test.** Run a Private Mode session under a filesystem monitor.
+
+   On a platform with a memory-backed location, assert zero durable writes outside the process's
+   own memory. On a platform without one — macOS and Windows by default — assert that the only
+   durable writes are inside the per-session profile directory, that the directory is destroyed
+   on exit, **and that the client reported the weaker guarantee**. The second form is not a
+   relaxation of the first: it tests a different claim, because it is a different claim, and a
+   test that passed on both platforms by asserting the weaker property everywhere would have made
+   the stronger one unmeasured.
 4. **The uniform-request test.** Two installs on different machines fetch the same page; assert
    byte-identical outbound request headers.
 5. **The no-secrets-in-errors test.** Format every error type with secrets present; assert none
@@ -254,6 +294,11 @@ Required by Constitution Article 21, the Duty of Honest Claiming, and repeated h
 is the document most likely to be quoted out of context:
 
 - It does not claim anonymity against an adversary who controls the reader's device.
+- **It does not claim Private Mode leaves nothing durable on every platform.** Where the platform
+  provides no memory-backed location — macOS and Windows by default — the ephemeral profile is
+  written to disk and deleted rather than never written, and section 9 of this document says why
+  that is weaker: filesystem metadata can outlive a deleted file. The client must report it; this
+  specification will not imply otherwise by omission.
 - It does not claim that Standard Mode hides VayuWeb use from the reader's network provider.
 - It does not claim the registry log can be made private. It is public replicated state.
 - It does not claim that content, once fetched by others, can be recalled.

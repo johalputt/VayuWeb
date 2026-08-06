@@ -337,10 +337,25 @@ disclose the tool's presence are disclosure, not diagnostics. See
 
 ## Privacy requirements
 
-- The resolver MUST NOT log queries by default. Logging is opt-in, reset to off
+- **The resolver MUST NOT write a query log at all, in any mode, under any
+  verbosity setting.** There is no logging subsystem to configure, no remote log
+  target, and no opt-in. [PRIVACY.md](PRIVACY.md) section 4 is normative and
+  says the same in its own words: "never written, in either mode".
+
+  An earlier revision of this clause said logging was "opt-in, reset to off
   after every upgrade, capped by a retention in hours, and written only to a
-  local file. There is no remote log target and configuration MUST NOT accept
-  one.
+  local file". Every one of those qualifiers is a mitigation, and a mitigation
+  is the wrong shape here. Constitution Article 14.1 and 14.2 forbid logging a
+  lookup to durable storage outright; 14.7 makes it a conformance test that
+  fails on any durable file containing a resolved name; and Article 14 is
+  entrenched under Article 9.8, so no process can relax it.
+
+  A local file with an hours-long retention **is** durable storage. Article
+  14.5's optional-diagnostic carve-out does not license it either, because that
+  carve-out requires the diagnostic to be per-session rather than persistent.
+  PRIVACY.md had already rejected the "logging defaults to off" framing in
+  terms; this document had not been updated to match, and it is the one an
+  implementer building a resolver reads.
 - The resolver MUST NOT send telemetry, analytics, crash reports or update
   pings to any host. Update checks, if offered, MUST be manual.
 - The resolver MUST NOT contact the clearnet DNS resolver for any host in the

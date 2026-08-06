@@ -10,6 +10,51 @@ it.
 
 ## [Unreleased]
 
+### Fixed — two documents specified a query log the charter forbids outright
+
+- **`RESOLUTION.md` and `ARCHITECTURE.md` both described an opt-in query log.** RESOLUTION.md:
+  logging is "opt-in, reset to off after every upgrade, capped by a retention in hours, and
+  written only to a local file". ARCHITECTURE.md: query logs "are not written by default", and the
+  resolver announces it at startup if a user turns debug logging on.
+
+  `PRIVACY.md` section 4 says "never written, in either mode" and explicitly rejects the
+  logging-defaults-to-off framing. Constitution Article 14.1 and 14.2 forbid logging a lookup to
+  durable storage; 14.7 makes it a conformance test that fails on any durable file containing a
+  resolved name; Article 9.8 entrenches it. **A local file with an hours-long retention is durable
+  storage**, and Article 14.5's optional-diagnostic carve-out does not license it, because that
+  carve-out requires the diagnostic to be per-session rather than persistent.
+
+  Every qualifier in the old text was a mitigation, and a mitigation is the wrong shape: a log a
+  user can enable is a log a user can be persuaded, tricked or compelled to enable, and announcing
+  it at startup does not make the file less durable. Both corrected. The two that were wrong are
+  the two an implementer building a resolver actually reads.
+
+### Fixed — "Nothing durable" was true on one desktop platform of three
+
+- **Private Mode's headline claim was unconditional; its normative clause was not.** The mode
+  table stated durable local state as "**Memory only. Nothing durable.**", and the goal at the top
+  of the document promised "Zero durable trail on disk". The clause that implements it required an
+  ephemeral profile "in a memory-backed location **where the platform provides one**" — and macOS
+  and Windows provide none by default, so on two of the three desktop platforms the profile is
+  written to disk and deleted.
+
+  `PRIVACY.md` itself forecloses the comfortable reading: filesystem metadata "can outlive a
+  deleted file. Private Mode avoids creating the file at all, which is the only reliable defence."
+  So written-then-deleted is a genuinely weaker property, and stating the stronger one unqualified
+  is what Article 21's duty of honest claiming exists to forbid — the Article being entrenched
+  under 9.12.
+
+  The clause now names the fallback normatively, requires the client to **report** that the weaker
+  guarantee applies, and forbids describing such a session as leaving nothing durable behind. The
+  mode table, the goal statement, the no-trail conformance test and section 11's limits all carry
+  it. Section 6's `mlock` mitigation is platform-conditional in exactly the same way and already
+  carried "MUST attempt and MUST report when it fails"; this clause now follows the shape the
+  document had already found for itself.
+
+  The conformance test is deliberately **two** assertions rather than one relaxed one: a test that
+  passed on both platforms by asserting the weaker property everywhere would have left the
+  stronger property unmeasured on the platform that can actually deliver it.
+
 ### Fixed — the specification overrode the charter twice on activation timing
 
 - **`REGISTRY.md` set the epoch at 30 days where Article 2.5 caps it at 14.** The Article is

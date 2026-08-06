@@ -235,8 +235,20 @@ with a key derived by Argon2id from a user passphrase at 256 MiB of memory, thre
 one lane, so that an offline dictionary attack on a stolen file is expensive rather than
 convenient.
 
-Query logs are not written by default. If a user turns on debug logging, the resolver SHALL
-say so in its startup output, because a silent query log is a deanonymisation tool.
+Query logs are **never written**, in either mode, under any verbosity setting. There is no
+logging subsystem to enable and no setting that turns one on. Constitution Article 14 forbids
+logging a lookup to durable storage, 14.7 makes it a conformance test that fails on any durable
+file containing a resolved name, and Article 9.8 entrenches it — so this is not a default a user
+could change.
+
+An earlier revision of this paragraph said query logs were "not written by default" and that the
+resolver "SHALL say so in its startup output" if a user turned on debug logging. That is the
+shape of a mitigation, and it concedes exactly what the charter forbids: a log a user can enable
+is a log a user can be persuaded, tricked or compelled to enable, and announcing it at startup
+does not make the file less durable. [PRIVACY.md](spec/PRIVACY.md) section 4 had already rejected
+the "logging-defaults-to-off" framing in terms; this document and
+[RESOLUTION.md](spec/RESOLUTION.md) had not been updated to match, and between them they are what
+an implementer building a resolver actually reads.
 
 ## Bootstrap and Cold Start
 
