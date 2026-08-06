@@ -40,7 +40,8 @@
 import { decode, encode, type CborMap, type CborValue } from './cbor.ts';
 import { isEquivocation, type Candidate } from './converge.ts';
 import { parseRecordBytes } from './record.ts';
-import { recordHashFromBytes } from './domain.ts';
+import { recordHashFromBytes, signingInput } from './domain.ts';
+import { verifyStrict } from './signature.ts';
 import type { Verdict } from './verify.ts';
 
 /** Protocol version carried in HELLO. A peer MUST reject a major version it does not implement. */
@@ -299,6 +300,33 @@ export function decodeMessage(bytes: Uint8Array): Message {
 /* -------------------------------------------------------------------------- */
 
 /**
+ * Is this record attributable to the key it names as owner, from its own bytes alone?
+ *
+ * The one signature check equivocation evidence needs. REPLICATION.md 6.2 puts it first in the
+ * list of what a recipient checks, and everything downstream depends on it: equivocation is a
+ * claim about *who signed*, so evidence carrying no signature by the accused is not weak
+ * evidence, it is evidence of nothing.
+ *
+ * Which signature is the owner's depends on the operation, and both are recoverable from the
+ * bytes:
+ *
+ * - A REGISTER is signed by the key it names. Every other non-TRANSFER operation must carry
+ *   `ownerKey == prev.ownerKey` and is signed under the controlling key, which — outside a
+ *   settlement window, where only TRANSFER is accepted at all — is that same key. So `sig`
+ *   verifies under `ownerKey` for all five.
+ * - A TRANSFER's `sig` is the *transferor's*, whose key is not in these bytes at all — that is
+ *   the same self-containment gap that gives `VectorState.transferorKey` its reason to exist.
+ *   The named owner's own signature is `coSig`, which the schema requires on TRANSFER and
+ *   forbids everywhere else, and which verifies under `ownerKey`.
+ */
+function attributable(candidate: Candidate): boolean {
+  const record = candidate.record;
+  const signature = record.op === 'TRANSFER' ? record.coSig : record.sig;
+  if (signature === null) return false;
+  return verifyStrict(record.ownerKey, signingInput(record.map), signature);
+}
+
+/**
  * Check equivocation evidence from its two encodings alone.
  *
  * Self-contained on purpose, and this is the property that makes the message worth forwarding:
@@ -306,10 +334,25 @@ export function decodeMessage(bytes: Uint8Array): Message {
  * having been online when it happened. A report that must be believed is a report that can be
  * faked.
  *
- * Note what this does NOT check: whether either record would be accepted by a verifier. An
- * equivocation is two signatures by one key over two futures for one name, and that is a fact
- * about the bytes whether or not either record is otherwise valid. Requiring validity would let
- * an equivocator escape the record by making both halves invalid in some unrelated way.
+ * Note what this does NOT check: whether either record would be **accepted** by a verifier.
+ * Expiry, proof of work, chain position and lifecycle state are all reasons a record would be
+ * refused, and requiring them here would hand an equivocator a one-line evasion — break your own
+ * proof of work in both halves and no report of you can be verified.
+ *
+ * The signatures are the exception, and the distinction is worth stating because it was got
+ * wrong here: a signature is not a validity condition, it is the thing that makes a record
+ * *attributable*. Without checking them, an owner key — which is public, and appears in every
+ * record its holder ever published — was enough to manufacture evidence against its holder. Mint
+ * two records naming the victim as owner for one name at one `seq`, sign both with a key of your
+ * own, and every peer receiving the pair recorded it and forwarded it on. That is precisely the
+ * mechanism 6.4 refuses when it says a mechanism able to act on evidence is a mechanism able to
+ * act on *manufactured* evidence.
+ *
+ * A limit that remains, stated rather than hidden: attribution is by `ownerKey`, so a transferor
+ * signing two different TRANSFERs of one name at one `seq` to two different recipients is not
+ * reported — the two records name different owners. Detecting that needs the transferor's key,
+ * which is not in the bytes, and evidence that needs outside state is evidence that can be faked
+ * by whoever supplies the state.
  */
 export function verifyEquivocation(evidence: EquivocationMessage): boolean {
   if (evidence.a.length > LIMITS.recordBytes || evidence.b.length > LIMITS.recordBytes) {
@@ -333,7 +376,8 @@ export function verifyEquivocation(evidence: EquivocationMessage): boolean {
   } catch {
     return false;
   }
-  return isEquivocation(left, right);
+  if (!isEquivocation(left, right)) return false;
+  return attributable(left) && attributable(right);
 }
 
 /* -------------------------------------------------------------------------- */

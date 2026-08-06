@@ -153,6 +153,33 @@ owner keys are equal, without trusting the sender, holding any prior state, or b
 the time. This is what makes `EQUIVOCATION` worth forwarding — a report that must be believed is
 a report that can be faked.
 
+6.2.1 **Both signatures MUST be checked, and a peer MUST discard a report where either record is
+not attributable to the `ownerKey` it names.** An owner key is public — it appears in every record
+its holder ever published — so a pair checked for everything except who signed it can be minted by
+anyone against anyone. This is not a hypothetical reading of 6.2: an implementation that omitted
+the check recorded and forwarded such pairs, which is 6.4's manufactured evidence arriving by the
+front door.
+
+6.2.2 Which signature attributes a record depends on its operation, and both are recoverable from
+the bytes:
+
+| Operation | The named owner's signature |
+| --- | --- |
+| `REGISTER`, `UPDATE`, `RENEW`, `RELINQUISH`, `REVOKE` | `sig`, which verifies under `ownerKey` |
+| `TRANSFER` | `coSig`. `sig` is the *transferor's*, and the transferor's key is not in these bytes at all |
+
+6.2.3 Attribution is by `ownerKey`, and one case therefore falls outside it: a transferor signing
+two different `TRANSFER` records of one name at one `seq` to two *different* recipients is not
+reported, because the two records name different owners. Detecting it needs the transferor's key,
+which is not in the evidence; evidence that needs outside state is evidence that can be faked by
+whoever supplies the state. This is a stated limit, not an oversight.
+
+6.2.4 A peer MUST NOT require either record to be *acceptable*. Expiry, proof of work, chain
+position and lifecycle state are reasons a record would be refused, and requiring them would let
+an equivocator escape the record by breaking their own proof of work in both halves. A signature
+is different in kind from those: it is what makes a record attributable, and equivocation is a
+claim about who signed.
+
 6.3 A peer detecting equivocation MUST record it and SHOULD forward the evidence. A peer
 receiving `EQUIVOCATION` MUST verify it independently before recording or forwarding it, and MUST
 discard a report whose two records do not in fact equivocate.
@@ -199,7 +226,14 @@ wire and asserting the state is unchanged.
 or sending an oversized batch is refused without proportional allocation.
 
 8.5 **Equivocation is detected and provable.** A third party given only the two encodings reaches
-the same verdict as the detector.
+the same verdict as the detector. Pinned by the `equivocation` suite in
+[`conformance/vectors.json`](../../conformance/vectors.json), which carries both answers rather
+than only the refusals — an implementation that never reports anything passes a suite made
+entirely of forgeries, and under-reporting here is silent.
+
+8.6 **Forged evidence is refused.** Two records naming a key as `ownerKey` that the holder of that
+key never signed are not equivocation, and a peer given the pair records nothing and forwards
+nothing. Testable without a network: the pair is a vector.
 
 ## See also
 

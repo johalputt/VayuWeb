@@ -148,6 +148,34 @@ function unsolvedRegistration(
   return encode(map);
 }
 
+/**
+ * A TRANSFER of `LABEL` from OWNER_A to OWNER_B, signed by the transferor and countersigned by
+ * the recipient — the one operation whose `sig` is not the key it names as owner.
+ *
+ * No proof of work is searched for: TRANSFER carries `powProof` null, and nothing on this path
+ * evaluates one in any case.
+ */
+function handover(build: { at: number; coSecret?: Uint8Array }): Uint8Array {
+  const map: CborMap = new Map<string | Uint8Array, CborValue>([
+    ['version', 1],
+    ['suite', 1],
+    ['op', 'TRANSFER'],
+    ['name', LABEL],
+    ['tld', 'vayu'],
+    ['ownerKey', OWNER_B],
+    ['seq', 1],
+    ['notBefore', build.at],
+    ['notAfter', NOW + TERM_SECONDS],
+    ['records', []],
+    ['powProof', null],
+    ['prevHash', recordHashFromBytes(registration())],
+  ]);
+  const input = signingInput(map);
+  map.set('sig', sign(SECRET_A, input));
+  map.set('coSig', sign(build.coSecret ?? SECRET_B, input));
+  return encode(map);
+}
+
 function lengthOf(store: Store): number {
   let count = 0;
   while (store.entryAt(count) !== null) count += 1;
@@ -682,6 +710,81 @@ test('8.5 a report that does not in fact equivocate is discarded, not recorded',
     NOW,
   );
   assert.equal(garbage.equivocations.length, 0);
+});
+
+test('8.5 evidence nobody signed is a forgery, not a report', () => {
+  // The attack, in full: an owner key is public — it is in every record its holder ever
+  // published. Take a victim's, mint two records naming it as `ownerKey` for one name at one
+  // `seq`, sign both with a key of your own, and send the pair as EQUIVOCATION. Nothing in the
+  // pair is the victim's but the twelve bytes of their public key.
+  //
+  // Section 6.2 says what a recipient checks: "both signatures, both `seq` values, both names
+  // and that the owner keys are equal". Signatures are first on that list, and 6.4 names the
+  // exact consequence of dropping them — "a mechanism able to strip a name on evidence is a
+  // mechanism able to strip a name on *manufactured* evidence". A report that is recorded and
+  // forwarded on nothing but a public key is a way to publish, at any peer, that any name you
+  // choose is compromised.
+  //
+  // This is narrower than the validity check `verifyEquivocation` is right to refuse. Expiry,
+  // proof of work and chain position are all reasons a record would not be ACCEPTED, and
+  // requiring them would let an equivocator escape the record by making both halves invalid in
+  // some unrelated way. A signature is different in kind: it is the only thing that makes a
+  // record ATTRIBUTABLE, and equivocation is a claim about who signed.
+  const forgedOne = unsolvedRegistration('victimname', 1, NOW, OWNER_A, SECRET_B);
+  const forgedTwo = unsolvedRegistration('victimname', 2, NOW, OWNER_A, SECRET_B);
+
+  assert.equal(
+    verifyEquivocation({ t: 'EQUIVOCATION', a: forgedOne, b: forgedTwo }),
+    false,
+    'two records the named owner never signed do not in fact equivocate',
+  );
+
+  const p = peer();
+  p.session.receive({ t: 'HELLO', v: PROTOCOL_VERSION, len: 0, root: new Uint8Array(32) }, NOW);
+  const outcome = p.session.receive({ t: 'EQUIVOCATION', a: forgedOne, b: forgedTwo }, NOW);
+  assert.equal(outcome.equivocations.length, 0, 'a forged report must not be recorded');
+  assert.equal(outcome.rejected, 1, 'and must be counted as refused, not silently dropped');
+});
+
+test('8.5 one genuine half and one forged half is still a forgery', () => {
+  // The halfway case, because it is the one an implementation checking "a signature" rather than
+  // "both signatures" would pass: the attacker takes a real published record of the victim's and
+  // pairs it with one they minted themselves. The victim signed one future for that name, which
+  // is what every honest owner does.
+  const genuine = registration({ label: 'atlasobservatory', txt: 'v=vayuweb1;real' });
+  const minted = unsolvedRegistration('atlasobservatory', 9, NOW, OWNER_A, SECRET_B);
+
+  assert.equal(verifyEquivocation({ t: 'EQUIVOCATION', a: genuine, b: minted }), false);
+  assert.equal(verifyEquivocation({ t: 'EQUIVOCATION', a: minted, b: genuine }), false);
+});
+
+test('8.5 a TRANSFER is attributed by its countersignature, not by its signature', () => {
+  // TRANSFER is the one operation whose `sig` is not the named owner's — it is the transferor's,
+  // and the transferor's key is nowhere in these bytes. The named owner's own signature is
+  // `coSig`. A check that reads `sig` for every operation would therefore refuse every report
+  // involving a transfer, which is a silent hole in exactly the window Article 33.4 leaves a
+  // name in flux.
+  const first = handover({ at: NOW + 60 });
+  const second = handover({ at: NOW + 120 });
+  assert.ok(
+    verifyEquivocation({ t: 'EQUIVOCATION', a: first, b: second }),
+    'two transfers of one name at one seq, both countersigned by the named owner',
+  );
+
+  // And the forgery still fails on the same operation: a coSig by anyone but the named owner is
+  // not that owner's signature, whatever the transferor did.
+  const forged = handover({ at: NOW + 180, coSecret: SECRET_A });
+  assert.equal(verifyEquivocation({ t: 'EQUIVOCATION', a: first, b: forged }), false);
+});
+
+test('8.5 an otherwise-invalid record still equivocates if its owner signed it', () => {
+  // The other side of the line, and the reason the fix is a signature check rather than a
+  // validity check. Both of these carry an unsolved proof of work, so neither would be accepted
+  // by any verifier — and both are genuinely signed by the key they name. An equivocator who
+  // could escape the record by breaking their own proof of work would have a one-line evasion.
+  const one = unsolvedRegistration('atlasobservatory', 21, NOW, OWNER_A, SECRET_A);
+  const two = unsolvedRegistration('atlasobservatory', 22, NOW, OWNER_A, SECRET_A);
+  assert.ok(verifyEquivocation({ t: 'EQUIVOCATION', a: one, b: two }));
 });
 
 test('8.5 genuine evidence is surfaced for the caller to record', () => {
