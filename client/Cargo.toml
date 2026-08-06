@@ -1,0 +1,18 @@
+[package]
+name = "vayuweb-client"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "VayuWeb desktop client: identity handling and the control-API client"
+publish = false
+
+[dependencies]
+zeroize = { version = "1", features = ["zeroize_derive"] }
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+[dev-dependencies]
+
+[lib]
+name = "vayuweb_client"
+path = "src/lib.rs"

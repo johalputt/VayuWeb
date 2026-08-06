@@ -199,13 +199,37 @@ jobs:
           fi
           echo "OK — the committed vectors match a fresh generation."
 
+  client:
+    name: client (rust)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Build and test
+        # No system GUI dependencies are installed here on purpose. This crate holds the parts
+        # of the desktop client that touch a secret, and those must build and be testable
+        # without a display -- a security rule that can only be checked by launching a window
+        # is a security rule nobody checks in CI.
+        run: cargo test --locked
+
+      - name: Formatting and lints
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+
   ci-pass:
     name: ci-pass
     # One required status check rather than one per job, so branch protection does not need
     # editing every time a job is added or a matrix leg changes. `if: always()` plus the
     # explicit success comparison means a skipped or cancelled dependency fails here; a bare
     # `needs:` would let a cancelled job pass for green.
-    needs: [conformance, registry, markdown, vectors]
+    needs: [conformance, registry, client, markdown, vectors]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
