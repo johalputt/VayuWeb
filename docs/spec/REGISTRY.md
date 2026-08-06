@@ -527,15 +527,24 @@ nothing here solves it.
 ## Epochs
 
 The Constitution and VWIP-0000 both schedule changes against an *activation epoch*, and both
-treat "Epoch" as a defined unit. This section defines it.
+treat "Epoch" as a defined unit. This section defines the **interval** sense of the term. It does
+not, and cannot, resolve the charter's own disagreement about what kind of thing an epoch is —
+see "The unresolved part" below.
 
 An **Epoch** is a numbered interval of the registry's life, not of the calendar. Epoch 0 begins
 at the genesis entry. An epoch boundary is crossed when **both** of the following hold:
 
-1. at least `2,592,000` seconds (30 days) of `notBefore` time has elapsed since the boundary that
+1. at least `1,209,600` seconds (14 days) of `notBefore` time has elapsed since the boundary that
    opened the current epoch, measured at the median of the last 1,000 accepted records rather
    than from any single clock; and
 2. at least one checkpoint has been computed since that boundary.
+
+An earlier revision set the first condition at `2,592,000` seconds (30 days). Constitution Article
+2.5 requires that "Epoch length MUST NOT be shorter than one day nor longer than fourteen days",
+so thirty was a plain breach of the charter by a subordinate document, and Article 3.7 voids the
+specification to the extent of the conflict. Fourteen days is the charter's ceiling, chosen
+because the reasons for wanting a long epoch — propagation time, tolerance of quiet periods — all
+push at the bound rather than away from it.
 
 Requiring both conditions is deliberate. Time alone would let a peer with a wrong or hostile
 clock disagree with the network about which epoch it is in — the weakness recorded in
@@ -549,10 +558,15 @@ Consequences, all normative:
 
 - The current epoch number is **derived from the log**, identically by every peer, and is never
   taken from a peer's own clock or from any announcement.
-- A Standards Track activation epoch MUST be at least **two epochs** beyond the epoch in which
-  the VWIP reached Accepted — roughly sixty days minimum — so that deployment has time to
-  propagate before behaviour changes. Article 47.3 forbids a silent breaking change; this is the
-  interval that makes the prohibition operable.
+- A Standards Track activation epoch MUST be at least **`15,552,000` seconds (180 days)** beyond
+  the moment the VWIP reached Accepted, and at least two epoch boundaries beyond it. Article 47.3
+  forbids a silent breaking change; these are the intervals that make the prohibition operable.
+
+  An earlier revision required only "two epochs — roughly sixty days minimum". That is a quarter
+  of the floor Articles 20.3, 20.11, 35.7 and 47.6 all set at 180 days, so a VWIP scheduled by
+  this document would have activated four times sooner than the charter permits, and every one of
+  those four Articles states the bound in seconds rather than in epochs, so the discrepancy was
+  not even a unit confusion. Article 3.7 voids the specification here too.
 - A peer that has not yet reached the activation epoch MUST continue to apply the previous rules.
   A peer that has reached it MUST apply the new ones. Because the number is derived from shared
   log state rather than from wall-clock time, peers transition consistently rather than smeared
@@ -562,6 +576,38 @@ Consequences, all normative:
 The residual: a peer under eclipse sees whatever epoch its attacker's log says it is in. That is
 the same limitation as freshness above, with the same partial mitigation — query several
 independent peers and take the greatest verified length — and it is not solved here either.
+
+### The unresolved part
+
+**The Constitution defines "epoch" twice, as two different kinds of thing, and this document
+cannot choose between them.**
+
+- **Article 2.5** defines an Epoch as "the protocol's unit of ordered time: a fixed, deterministic
+  interval whose length is recorded in the Annex", bounded between one and fourteen days. That is
+  an *interval*, and it is what this section implements.
+- **Article 11.5** says "Every epoch in this Constitution is an integer count of SI seconds
+  elapsed since 1970-01-01T00:00:00Z". That is an *instant*, and the scope is deliberately wide —
+  the sentence immediately following it narrows itself to "this Title" while this one does not.
+
+Usage follows 11.5 throughout: Article 11.6 speaks of "the epoch of the latest REGISTER or RENEW
+record", 11.7 compares an epoch against "the receiving party's own clock", and 20.2 of "records
+created at or after that epoch". Every one of those reads as a timestamp.
+
+This is not resolvable by precedence. Article 3.7 ranks the Constitution above this document, and
+both clauses are *inside* the Constitution. Article 3.21 — "terms defined in Article 2 keep their
+defined meaning however ordinary usage later shifts" — points toward 11.5 being the text in
+conflict, but pointing at the wrong clause is not the same as curing it, and an implementer still
+has to know what type of value a VWIP's activation epoch carries and what to compare it against.
+
+**No value is chosen here, deliberately.** Deciding between an interval and an instant for a term
+that Article 20.11 makes the subject of a conformance test is an amendment under Article 58, not
+an editorial act by a subordinate document — and this specification has just been corrected twice
+for having overridden the charter by accident. `scripts/check-charter-consistency.py` records the
+disagreement and fails if it changes shape, so it cannot be closed by editing one side.
+
+Article 2.5's pointer to "the Annex" also resolves to nothing: no primitives Annex exists yet.
+That absence is why this section filled the gap in the first place, and it filled it outside the
+stated bound.
 
 ## Size Limits
 

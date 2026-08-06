@@ -62,6 +62,34 @@ QUANTITIES = [
     },
 ]
 
+# A term the charter defines more than once, where the disagreement is about the KIND of thing the
+# term names rather than about a number. `check_terms` proves both definitions are still present
+# and still incompatible; it cannot compare them, because they are not the same sort of value —
+# which is exactly the defect.
+TERMS = [
+    {
+        "name": "epoch",
+        "definitions": [
+            (CHARTER, r"2\.5 \*\*Epoch\*\* — the protocol's unit of ordered time: a fixed,\s+"
+                      r"deterministic interval", "Article 2.5", "an INTERVAL of 1-14 days"),
+            (CHARTER, r"11\.5 Time\. Every epoch in this Constitution is an integer count of SI\s+"
+                      r"seconds elapsed since", "Article 11.5", "an INSTANT, in Unix seconds"),
+        ],
+        "note": (
+            "Article 2.5 makes an Epoch a fixed interval of one to fourteen days whose boundary a "
+            "Node computes offline. Article 11.5 makes every epoch in the Constitution an integer "
+            "count of SI seconds since 1970 — an instant. Usage follows 11.5 throughout (11.6 "
+            "'the epoch of the latest REGISTER or RENEW record', 11.7 comparing an epoch against "
+            "'the receiving party's own clock', 20.2 'records created at or after that epoch'). "
+            "Precedence cannot resolve it: Article 3.7 ranks the Constitution above the "
+            "specifications, and both clauses are inside the Constitution. Article 3.21 points at "
+            "11.5 as the text in conflict without curing it. An implementer still cannot tell "
+            "what TYPE of value a VWIP's activation epoch carries, and Article 20.11 makes that "
+            "term the subject of a conformance test."
+        ),
+    },
+]
+
 WORD_NUMBERS = {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
@@ -82,6 +110,41 @@ def to_seconds(raw, unit):
     if value is None:
         return None
     return value * YEAR if unit == "years" else value
+
+
+def check_terms(failures):
+    """Both definitions must still be present, and still be the two incompatible ones.
+
+    Deliberately not a comparison. An interval and an instant cannot be compared, and pretending
+    otherwise would produce a number that looked like a resolution. What this proves is narrower
+    and is the whole point: the disagreement is still exactly where it was recorded, so nobody has
+    closed it by deleting one side.
+    """
+    checked = 0
+    for term in TERMS:
+        found = []
+        for rel, pattern, label, sense in term["definitions"]:
+            text = read(rel)
+            if text is None:
+                failures.append(f"{term['name']}: source file {rel} is missing")
+                continue
+            if re.search(pattern, text) is None:
+                failures.append(
+                    f"{term['name']}: {label} no longer defines it as {sense} "
+                    f"(pattern did not match in {rel}). If this was resolved by amendment, update "
+                    f"this check in the same commit. If one definition was simply edited away, "
+                    f"that is an implementer deciding what Article 58 reserves to an amendment.")
+                continue
+            found.append((label, sense))
+            checked += 1
+
+        if len(found) == len(term["definitions"]):
+            print(f"UNRESOLVED — {term['name']} is defined {len(found)} ways")
+            for label, sense in found:
+                print(f"    {label:<14} {sense}")
+            print(f"    {term['note']}")
+            print()
+    return checked
 
 
 def main():
@@ -136,6 +199,8 @@ def main():
             print(f"    {quantity['note']}")
             print()
 
+    checked += check_terms(failures)
+
     if checked == 0:
         print("::error::no quantities checked — this check is enforcing nothing", file=sys.stderr)
         return 1
@@ -146,8 +211,9 @@ def main():
             print(f"  {failure}", file=sys.stderr)
         return 1
 
-    print(f"OK — {checked} charter/specification quantity source(s) read; "
-          f"{len(QUANTITIES)} quantity(ies) tracked, unresolved conflicts printed above.")
+    print(f"OK — {checked} charter/specification source(s) read; "
+          f"{len(QUANTITIES)} quantity(ies) and {len(TERMS)} term(s) tracked, "
+          f"unresolved conflicts printed above.")
     return 0
 
 

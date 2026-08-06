@@ -10,6 +10,52 @@ it.
 
 ## [Unreleased]
 
+### Fixed — the specification overrode the charter twice on activation timing
+
+- **`REGISTRY.md` set the epoch at 30 days where Article 2.5 caps it at 14.** The Article is
+  unambiguous — "Epoch length MUST NOT be shorter than one day nor longer than fourteen days" —
+  so this was a subordinate document plainly overriding the charter, and Article 3.7 voids it.
+  Corrected to `1,209,600` seconds. Fourteen rather than some lower figure because every reason
+  for wanting a long epoch pushes at the bound rather than away from it.
+
+- **`REGISTRY.md` set the activation floor at "two epochs — roughly sixty days".** Articles 20.3,
+  20.11, 35.7 and 47.6 each set it at 180 days, **every one of them stated in seconds**, so this
+  was not even a unit confusion: a change scheduled by the specification would have activated four
+  times sooner than the charter permits.
+
+- **`VWIP-0002` had already inherited it.** Its activation clause said "at least two epochs beyond
+  the epoch in which this proposal reaches Accepted, per Article 47.3 and the epoch definition in
+  REGISTRY.md" — faithfully following a subordinate document that was itself wrong, and so
+  scheduling its own activation at a quarter of the constitutional floor. It now states the floor
+  directly rather than inheriting it through a reference, which is the general lesson: a
+  cross-reference to a document that can be wrong is a way to be wrong without looking wrong.
+
+### Escalated — the charter defines "epoch" as two different kinds of thing
+
+- **Article 2.5 makes an Epoch an interval; Article 11.5 makes it an instant.** 2.5: "the
+  protocol's unit of ordered time: a fixed, deterministic interval", bounded at one to fourteen
+  days. 11.5: "Every epoch in this Constitution is an integer count of SI seconds elapsed since
+  1970-01-01T00:00:00Z". Usage follows 11.5 throughout — 11.6 speaks of "the epoch of the latest
+  REGISTER or RENEW record", 11.7 compares an epoch to "the receiving party's own clock", 20.2 to
+  "records created at or after that epoch".
+
+  **Not fixed, deliberately.** Precedence cannot resolve it: Article 3.7 ranks the Constitution
+  above the specifications and *both clauses are inside the Constitution*. Article 3.21 points at
+  11.5 as the text in conflict without curing it. Choosing between an interval and an instant for
+  a term Article 20.11 makes the subject of a conformance test is an amendment under Article 58 —
+  and this specification has just been corrected twice for overriding the charter by accident,
+  which is not a good moment to do it deliberately.
+
+  `check-charter-consistency.py` gains a second kind of tracked item for terms whose disagreement
+  is about the *kind* of thing named rather than about a number. It proves both definitions are
+  still present and still incompatible; it does not compare them, because an interval and an
+  instant cannot be compared and a number that looked like a resolution would be worse than none.
+  Mutation-tested by editing one definition away: refused.
+
+  Article 2.5's pointer to "the Annex" also resolves to nothing — no primitives Annex exists.
+  That absence is why `REGISTRY.md` filled the gap in the first place, and why it filled it
+  outside the stated bound.
+
 ### Fixed — `wpad.vayu` was registrable, in code that claimed to prevent it
 
 - **The reserved-label set was never implemented.** `NAMES.md` withholds twelve named labels in
