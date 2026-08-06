@@ -10,6 +10,53 @@ it.
 
 ## [Unreleased]
 
+### Fixed — the last four MEDIUM findings, and a `MUST` that supplied no value
+
+- **`privacy-contained-webview-vs-locked-profile`.** `PRIVACY.md`'s mode table said Private
+  Mode's browser is "**Contained**, because full-proxy configuration and the client's own webview
+  are mandatory". Both stated reasons fail. `CONTENT-SECURITY.md` 5.5 makes it "the client's own
+  webview **or** a locked browser profile" — one of two configurations, not mandatory — and 5.1
+  says WebRTC "uses raw UDP and ignores the HTTP proxy entirely, so full-proxy mode does not
+  contain it either", calling it the most serious residual in the browser layer. So full-proxy
+  does not close WebRTC at all, and the thing that does is optional.
+
+  Now: contained in the client's own webview, narrowed otherwise, with the reason written out.
+  Same shape as the "Nothing durable" claim corrected earlier — a summary cell asserting the
+  strongest configuration's property, in a document whose section 11 exists to list what it does
+  not claim.
+
+- **`local-surface-3.3-3.4-unspecified-bounds`.** §3.3 required "a documented maximum entry
+  count" and §3.4 required concurrency caps, an in-flight bound and a memory ceiling "specified
+  with concrete numbers and enforced". **None of the five numbers existed**, here or anywhere in
+  the corpus. A `MUST` with no value is not a weaker requirement than one with a number; it is an
+  untestable one, and Article 44.6's standard is that a competent implementer can build from the
+  specifications alone.
+
+  Supplied: 4,096 negative-cache entries LRU; 6 concurrent requests per origin; 32 in-flight per
+  page; 256 per process; 64 MiB for the record and negative caches combined. Each with its
+  reasoning, and each stated as an engineering judgement rather than a derivation — defensible,
+  not uniquely so. It is the more common of the two failures: a document can require a number of
+  its implementers in language strong enough to sound like it has supplied one.
+
+- **`local-surface-cross-name-subresources-vs-content-security`.** §4 specified how an
+  `allow_cross_name_subresources` setting would behave. `CONTENT-SECURITY.md` 2.3 closes the list
+  of relaxations and does not contain it, and that document's section 1 names "a cross-name
+  subresource allowance" **first** among the widenings that "instantly revalue every unfixable
+  fingerprinting vector from harmless to critical". Specifying how a forbidden setting behaves is
+  how a forbidden setting acquires an implementation.
+
+  Withdrawn, with the argument kept for whoever proposes it properly. It escaped notice for a
+  structural reason worth recording: `check-headers.py` compares **fenced canonical blocks**, and
+  this section quoted none, so the gate that holds the profile together never saw it. Identical
+  in rule and in month to `PUBLISHING.md`'s inline hashes — and both were found by reading two
+  documents together rather than either alone.
+
+- **`resolution-md-cross-reference-and-count`** was already fixed by the residual-channel sweep.
+
+  **Every HIGH, MEDIUM and LOW finding now carries an outcome.** Fifteen UNRATED remain, and
+  UNRATED means the recheck did not assign a severity rather than that the severity is low —
+  several are of the same class as findings that turned out to be HIGH.
+
 ### Fixed — a signed checkpoint, and a proxy mode one document did not know existed
 
 - **Three documents signed a checkpoint that `REGISTRY.md` and the code deliberately leave

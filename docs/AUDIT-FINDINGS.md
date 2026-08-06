@@ -86,9 +86,15 @@ Four outcomes are used, and the distinction between the last two matters:
 | `resolution-cs-section-1-3` (LOW) | **Stale.** Corrected to section 2.3 with the other cross-references |
 | `pow-registry-signed-checkpoint` | **Fixed.** Checkpoints are unsigned in all three documents; a paired statement holds it |
 | `resolution-passthrough-vs-local-surface` | **Fixed.** `LOCAL-SURFACE.md` 2.1.1 carves the mode out with four constraints |
+| `privacy-contained-webview-vs-locked-profile` | **Fixed.** Private Mode narrows the browser; only the webview closes WebRTC |
+| `local-surface-cross-name-subresources-vs-content-security` | **Fixed.** The allowance is withdrawn; 2.3's list is closed |
+| `local-surface-3.3-3.4-unspecified-bounds` | **Fixed.** Four concrete limits and a negative-cache bound, stated as judgements |
+| `resolution-md-cross-reference-and-count` | **Stale.** Corrected with the residual-channel sweep |
 
-**The remainder is not yet triaged**, and the count is worth stating rather than implying: four
-MEDIUM, no LOW and fifteen UNRATED. That is a statement about this file rather than about the
+**Every HIGH, MEDIUM and LOW finding now carries an outcome.** The count of untriaged MEDIUM
+findings is worth stating rather than implying: zero MEDIUM, and none at LOW either. **Fifteen
+UNRATED remain**, and UNRATED means the recheck did not assign a severity rather than that the
+severity is low — several are of the same class as findings that turned out to be HIGH. That is a statement about this file rather than about the
 corpus — several are certainly stale in the way the entries above turned out to be, and finding
 out costs a re-read each time. Whoever works them should extend these tables rather than
 repeating the survey.

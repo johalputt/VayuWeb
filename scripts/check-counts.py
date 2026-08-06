@@ -40,7 +40,7 @@ SKIP_DIRS = {".git", "node_modules", "target", "dist", "build", ".venv", "venv"}
 EVIDENCE_FILES = {"docs/AUDIT-FINDINGS.md"}
 
 NUMBER_WORDS = {
-    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
     "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
     "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
     "nineteen": 19, "twenty": 20,
@@ -115,7 +115,7 @@ def count_untriaged_medium():
     if text is None:
         return None, "docs/AUDIT-FINDINGS.md is missing"
     marker = "## Disposition — MEDIUM and LOW"
-    end = "**The remainder is not yet triaged**"
+    end = "**Every HIGH, MEDIUM and LOW finding now carries an outcome.**"
     if marker not in text or end not in text:
         return None, "could not locate the disposition table -- its format changed"
     table = text[text.index(marker):text.index(end)]
@@ -254,6 +254,40 @@ AGREEMENTS = [
             "Article 43.1 makes consensus the absence of unaddressed substantive technical "
             "objection and 43.5.4 lists a vote count among the things that do not constitute it; "
             "Article 35.6's window is for objections, not ballots."
+        ),
+    },
+    {
+        # LOCAL-SURFACE.md section 4 specified the behaviour of a cross-name subresource
+        # allowance that CONTENT-SECURITY.md 2.3's closed list does not contain, and whose
+        # section 1 names it FIRST among the widenings that revalue every unfixable
+        # fingerprinting vector. It escaped check-headers.py because that gate compares fenced
+        # canonical blocks and this section quoted none. Same rule PUBLISHING.md broke with
+        # inline hashes: a relaxation not in the table does not exist.
+        "label": "there is no cross-name subresource allowance",
+        "files": ["docs/spec/LOCAL-SURFACE.md", "docs/spec/CONTENT-SECURITY.md"],
+        "absent": re.compile(
+            r"Where `allow_cross_name_subresources` is offered"
+            r"|MUST widen only `img-src`"),
+        "note": (
+            "CONTENT-SECURITY.md 2.3 closes the list of relaxations; specifying how a forbidden "
+            "setting would behave is how a forbidden setting acquires an implementation."
+        ),
+    },
+    {
+        # PRIVACY.md's mode table said Private Mode's browser is "Contained, because full-proxy
+        # configuration and the client's own webview are mandatory". CONTENT-SECURITY.md 5.5
+        # makes the webview one of two permitted configurations, and 5.1 says WebRTC ignores the
+        # HTTP proxy entirely -- so neither stated reason delivers containment under a locked
+        # third-party profile. A summary asserting the strongest configuration's property, in a
+        # document whose section 11 exists to list what it does not claim.
+        "label": "Private Mode narrows the browser rather than containing it",
+        "files": ["docs/spec/PRIVACY.md"],
+        "absent": re.compile(
+            r"Contained\*?\*?, because full-proxy|own webview are mandatory"),
+        "note": (
+            "CONTENT-SECURITY.md 5.5: 'the client's own webview OR a locked browser profile'. "
+            "5.1: WebRTC 'ignores the HTTP proxy entirely, so full-proxy mode does not contain "
+            "it either'."
         ),
     },
     {
@@ -577,7 +611,7 @@ def check_evidence_self_count(failures):
         failures.append(f"{rel} is missing")
         return 0
     marker = "## Disposition — MEDIUM and LOW"
-    end = "**The remainder is not yet triaged**"
+    end = "**Every HIGH, MEDIUM and LOW finding now carries an outcome.**"
     if marker not in text or end not in text:
         failures.append(f"{rel}: could not locate the disposition table -- its format changed")
         return 0
@@ -589,7 +623,7 @@ def check_evidence_self_count(failures):
         return 0
     actual = len([h for h in heads if h not in triaged])
 
-    claim = re.search(r"stating rather than implying: ([\w]+)\s*\n?MEDIUM", text)
+    claim = re.search(r"implying: ([\w]+) MEDIUM", text)
     if claim is None:
         failures.append(f"{rel}: the untriaged-count sentence is gone -- restore it or drop this "
                         f"check, but do not leave the number unstated")

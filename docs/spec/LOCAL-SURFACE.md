@@ -143,25 +143,62 @@ Caching `LABEL_INVALID` and `TLD_UNKNOWN` "for process lifetime" is a specificat
 entries are attacker-fillable, unbounded and never evicted, so one hostile page can exhaust
 memory by requesting an endless stream of invalid names.
 
-Negative cache entries MUST be held in a bounded, evicting structure with a documented maximum
-entry count and a finite TTL. Syntactically invalid names SHOULD NOT be cached at all — the
-grammar check is cheaper than the cache lookup.
+Negative cache entries MUST be held in a bounded, evicting structure with a finite TTL and a
+maximum of **4,096 entries**, evicted least-recently-used. Syntactically invalid names SHOULD NOT
+be cached at all — the grammar check is cheaper than the cache lookup, which is what makes the
+attacker-fillable half of this surface close to empty in practice.
+
+An earlier revision required "a documented maximum entry count" and documented none, here or
+anywhere else in the corpus. A `MUST` with no value is not a weaker requirement than one with a
+number; it is an untestable one, and Article 44.6's standard is that a competent implementer can
+build from the specifications alone.
 
 ### 3.4 Resource limits
 
-Per-page and per-origin concurrency caps, a bounded in-flight request count, and a total memory
-ceiling for caches MUST all be specified with concrete numbers and enforced. An unbounded resource
-is a denial-of-service primitive available to any page.
+An unbounded resource is a denial-of-service primitive available to any page, so each of these is
+a concrete number rather than an instruction to pick one:
+
+| Limit | Value | Why this number |
+| --- | --- | --- |
+| Concurrent requests per origin | **6** | What browsers already impose on HTTP/1.1, so it constrains the proxy without constraining the page beyond what the engine does anyway |
+| In-flight requests per page | **32** | Above any ordinary page's simultaneous subresource fan-out, below the point where one tab can starve another |
+| In-flight requests per process | **256** | A ceiling on the whole resolver, so many tabs cannot compose into the exhaustion one tab is prevented from causing |
+| Record and negative caches, combined | **64 MiB** | Both hold small entries and neither is content; the content cache has its own 2 GiB LRU in [RESOLUTION.md](RESOLUTION.md) |
+
+These are engineering judgements, not derivations, and are stated as such: each is defensible and
+none is the only defensible value. Changing one is a VWIP, because a resolver that quietly raises
+a limit is a resolver whose denial-of-service surface differs from the one this document
+describes.
+
+The previous revision of this section required all four "specified with concrete numbers" and
+specified none of them. That is the more common failure of the two: a document can require a
+number of its implementers in language strong enough to sound like it has supplied one.
 
 ## 4. Cross-name subresources
 
-Where `allow_cross_name_subresources` is offered at all it MUST be off by default, and when set it
-MUST widen only `img-src`, `font-src` and `media-src`.
+**There is no cross-name subresource allowance, and this document does not offer one.**
 
-It MUST NOT widen `script-src`, `connect-src`, `frame-src`, `object-src` or `worker-src`. Widening
+An earlier revision specified the behaviour of an `allow_cross_name_subresources` setting —
+off by default, widening only `img-src`, `font-src` and `media-src`. It is withdrawn.
+[CONTENT-SECURITY.md](CONTENT-SECURITY.md) 2.3 closes the list of relaxations, and this is not on
+it; the same document's section 1 names "a cross-name subresource allowance" **first** among the
+widenings that "instantly revalue every unfixable fingerprinting vector from harmless to
+critical". Specifying how a forbidden setting would behave is how a forbidden setting acquires an
+implementation.
+
+It escaped notice for a structural reason worth recording: `scripts/check-headers.py` compares
+**fenced canonical blocks**, and this section quoted none, so the one gate that holds the profile
+together never saw it. The rule it violated is the one `PUBLISHING.md` violated with inline
+hashes — a relaxation not in 2.3's table does not exist, whichever document proposes it — and
+both were found the same week by reading the two documents together rather than either alone.
+
+The reasoning is kept, because it is the argument any future proposal has to answer. Widening
 `script-src` across names creates a cross-name supply chain: one compromised name executes code in
 the context of every name that references it — the precise failure mode that has made third-party
-scripts the most reliable attack path on the clearnet.
+scripts the most reliable attack path on the clearnet. A proposal that widened only `img-src`,
+`font-src` and `media-src` would still have to answer the fingerprinting argument in
+CONTENT-SECURITY.md section 1, which is about the *existence* of a cross-name fetch rather than
+about which directive permits it.
 
 ## 5. What remains open
 

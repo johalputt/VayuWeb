@@ -45,10 +45,29 @@ matrix of privacy settings is a matrix of ways to be wrong.
 | | **Standard** | **Private** |
 |---|---|---|
 | Third-party requests **originated by the resolver** | None | None |
-| Third-party requests **the browser may still make** | **Possible.** The browser is not contained: top-level navigation, WebRTC, omnibox lookups and extensions are outside the resolver's reach. | **Contained**, because full-proxy configuration and the client's own webview are mandatory (section 2.1). |
+| Third-party requests **the browser may still make** | **Possible.** The browser is not contained: top-level navigation, WebRTC, omnibox lookups and extensions are outside the resolver's reach. | **Contained in the client's own webview; narrowed otherwise.** See the note below — this cell said "Contained" unconditionally, and one of the two permitted configurations does not deliver it. |
 | Query logging | None | None |
 | Telemetry | None | None |
 | Egress transport | Direct to the VayuWeb network | Anonymising transport, mandatory |
+
+**Why that cell is qualified.** It read "**Contained**, because full-proxy configuration and the
+client's own webview are mandatory", and both halves of the reason were wrong in the same
+direction.
+
+[CONTENT-SECURITY.md](CONTENT-SECURITY.md) 5.5 requires "the client's own webview **or** a locked
+browser profile with telemetry, suggestions and extensions disabled" — the webview is one of two
+permitted configurations, not mandatory. And 5.1 states that WebRTC "uses raw UDP and ignores the
+HTTP proxy entirely, so full-proxy mode does not contain it either", and calls it "the most
+serious residual in the browser layer".
+
+So of the two reasons this cell gave, full-proxy does not close WebRTC at all, and the webview —
+which does, by compiling it out — is not mandatory. Under a locked third-party profile the
+strongest available statement is that the resolver cannot enforce it and the client MUST warn
+plainly, which is what 5.1 already says.
+
+This is the same defect as the "Nothing durable" claim corrected in section 4, and it is worth
+noticing that it is the same *shape*: a summary cell asserting the property of the strongest
+configuration, in a document whose own section 11 exists to list what it does not claim.
 | Durable local state | Registry log and content cache on disk | **Memory only where the platform provides a memory-backed location** (Linux `tmpfs`). On macOS and Windows, which provide none by default, the profile is written to a temporary directory and destroyed on exit — and the client MUST report that, because written-then-deleted is a weaker property than never-written. See section 9. |
 | Behaviour if transport unavailable | n/a | **Refuses to start** |
 | Browser requirement | Proxy configured for VayuWeb names | **Full-proxy configuration required** |
@@ -303,8 +322,12 @@ is the document most likely to be quoted out of context:
 - It does not claim the registry log can be made private. It is public replicated state.
 - It does not claim that content, once fetched by others, can be recalled.
 - It does not claim the browser's own history can be erased by any header the resolver sends.
-- It does not claim Standard Mode contains the browser. Only Private Mode does, and only because
-  it mandates full-proxy configuration and the client's own webview.
+- It does not claim Standard Mode contains the browser, and it does not claim Private Mode fully
+  contains it either. Private Mode narrows it — full-proxy configuration, and either the client's
+  own webview or a locked profile. Only the webview closes WebRTC, by compiling it out;
+  `CONTENT-SECURITY.md` 5.1 records that WebRTC ignores the HTTP proxy entirely, so under a
+  locked third-party profile it remains the most serious residual in the browser layer and the
+  client MUST say so.
 - It does not claim `Cache-Control: no-store` removes every browser-side artefact. It removes the
   HTTP disk cache; the media cache, favicon database and thumbnail store are separate, and are
   closed only by the ephemeral profile.
