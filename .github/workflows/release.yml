@@ -164,29 +164,60 @@ jobs:
 
           # Extract this version's section from the changelog as the release body, so the notes
           # and the changelog cannot say different things.
+          #
+          # Truncated to fit GitHub's limit. The 0.2.0 notes were 200 KB against a 125,000
+          # character ceiling, and the API answered 422 AFTER the tag had already been pushed --
+          # leaving a tagged commit with no release, which is the worst of the three possible
+          # outcomes because it looks done from the tag list. A release whose notes are the whole
+          # changelog section is also a release nobody reads; the file is one click away.
           python3 - "$VERSION" > /tmp/notes.md <<'PY'
           import sys
           version = sys.argv[1]
+          LIMIT = 100_000  # GitHub allows 125,000; the margin absorbs the footer below.
           text = open('CHANGELOG.md', encoding='utf-8').read()
           start = text.find(f'## [{version}]')
           nxt = text.find('\n## ', start + 1)
-          body = text[start:nxt if nxt > 0 else len(text)]
-          print(body.split('\n', 1)[1].strip())
+          body = text[start:nxt if nxt > 0 else len(text)].split('\n', 1)[1].strip()
+          if len(body) > LIMIT:
+              cut = body.rfind('\n\n', 0, LIMIT)
+              body = body[: cut if cut > 0 else LIMIT].rstrip()
+              body += (
+                  f'\n\n---\n\n*These notes were truncated at {LIMIT:,} characters to fit '
+                  f'GitHub\u2019s limit. The complete entry for {version} is in '
+                  f'[CHANGELOG.md](https://github.com/johalputt/VayuWeb/blob/v{version}/CHANGELOG.md).*'
+              )
+          print(body)
           PY
 
           git config user.name  'johalputt'
           git config user.email 'ankushchoudharyjohal@gmail.com'
-          git tag -a "v$VERSION" -F /tmp/notes.md
-          git push origin "refs/tags/v$VERSION"
+          # Idempotent, because the release step below can fail after the tag has been pushed and
+          # a re-run must be able to finish the job rather than dying on the tag it just made.
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "tag v$VERSION already exists locally; not recreating"
+          elif git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "tag v$VERSION already on the remote; fetching it"
+            git fetch origin "refs/tags/v$VERSION:refs/tags/v$VERSION"
+          else
+            git tag -a "v$VERSION" -F /tmp/notes.md
+            git push origin "refs/tags/v$VERSION"
+          fi
 
           # Pre-1.0.0 is marked prerelease: VWIP-0003 2.2 makes the public interface explicitly
           # unstable before 1.0.0, and the release page should say so rather than imply otherwise.
           prerelease=""
           case "$VERSION" in 0.*) prerelease="--prerelease" ;; esac
 
-          gh release create "v$VERSION" \
-            --title "VayuWeb v$VERSION" \
-            --notes-file /tmp/notes.md \
-            $prerelease
+          # Also idempotent: a re-run after a partial failure must converge rather than 422.
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            gh release edit "v$VERSION" \
+              --title "VayuWeb v$VERSION" \
+              --notes-file /tmp/notes.md
+          else
+            gh release create "v$VERSION" \
+              --title "VayuWeb v$VERSION" \
+              --notes-file /tmp/notes.md \
+              $prerelease
+          fi
 
           echo "released v$VERSION"

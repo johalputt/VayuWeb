@@ -281,7 +281,9 @@ test('memorySource and blockSourceOf agree, so neither is a second opinion', () 
 });
 
 test('the store directory is created private', () => {
-  const path = prepareStoreDirectory(join(mkdtempSync(join(tmpdir(), 'vayuweb-blocks-')), 'blocks'));
+  const path = prepareStoreDirectory(
+    join(mkdtempSync(join(tmpdir(), 'vayuweb-blocks-')), 'blocks'),
+  );
   const mode = statSync(path).mode & 0o777;
   assert.equal(mode, 0o700, 'a blockstore is not world-readable');
 });

@@ -81,7 +81,11 @@ test('a malformed request line is refused in each of its forms', () => {
     ['empty line', ''],
   ];
   for (const [why, text] of cases) {
-    assert.equal(refusal(() => parseHead(text)), 'MALFORMED_REQUEST', why);
+    assert.equal(
+      refusal(() => parseHead(text)),
+      'MALFORMED_REQUEST',
+      why,
+    );
   }
 });
 
@@ -90,18 +94,27 @@ test('a header name that is not a token is refused', () => {
     refusal(() => parseHead(head('GET / HTTP/1.1', 'Bad Header: v'))),
     'MALFORMED_REQUEST',
   );
-  assert.equal(refusal(() => parseHead(head('GET / HTTP/1.1', ': novalue'))), 'MALFORMED_REQUEST');
+  assert.equal(
+    refusal(() => parseHead(head('GET / HTTP/1.1', ': novalue'))),
+    'MALFORMED_REQUEST',
+  );
 });
 
 test('too many header lines is refused, and counted independently of total size', () => {
   const many = ['GET / HTTP/1.1'];
   for (let i = 0; i <= SERVE_LIMITS.headerLines; i += 1) many.push(`x-h${i}: v`);
-  assert.equal(refusal(() => parseHead(head(...many))), 'TOO_MANY_HEADERS');
+  assert.equal(
+    refusal(() => parseHead(head(...many))),
+    'TOO_MANY_HEADERS',
+  );
 });
 
 test('an over-long target is refused before any routing happens', () => {
   const long = `/${'a'.repeat(4096)}`;
-  assert.equal(refusal(() => parseHead(head(`GET ${long} HTTP/1.1`))), 'MALFORMED_REQUEST');
+  assert.equal(
+    refusal(() => parseHead(head(`GET ${long} HTTP/1.1`))),
+    'MALFORMED_REQUEST',
+  );
 });
 
 /* -------------------------------------------------------------------------- */
@@ -153,10 +166,7 @@ test('the proxy binds loopback and answers a real request', async () => {
     () => serveProxy({ ports: resolverPorts, port: 0, now: () => 1_782_518_400 }),
     async (listener) => {
       assert.ok(listener.address.startsWith('127.0.0.1:'), listener.address);
-      const answer = await speak(
-        listener.address,
-        'GET / HTTP/1.1\r\nHost: atlas.vayu\r\n\r\n',
-      );
+      const answer = await speak(listener.address, 'GET / HTTP/1.1\r\nHost: atlas.vayu\r\n\r\n');
       assert.match(answer, /^HTTP\/1\.1 \d{3} /);
       // Whatever the outcome, the security headers the specification enumerates are on it. The
       // resolver has no records, so this is a refusal — and a refusal is exactly the response an
@@ -245,7 +255,8 @@ test('AUDIT: the listener survives a burst that includes refusals', async () => 
   // It does not attempt to force a refusal — that is what made the first version unreliable —
   // it checks that ordinary traffic through the real listener leaves it working.
   await withListener(
-    () => serveProxy({ ports: resolverPorts, port: 0, now: () => 1_782_518_400, maxConnections: 2 }),
+    () =>
+      serveProxy({ ports: resolverPorts, port: 0, now: () => 1_782_518_400, maxConnections: 2 }),
     async (listener) => {
       for (let i = 0; i < 6; i += 1) {
         const answer = await speak(listener.address, 'GET / HTTP/1.1\r\nHost: a.vayu\r\n\r\n');
@@ -269,7 +280,12 @@ test('the control API refuses a TCP address before it binds anything', async () 
   // looked authoritative. These addresses are the same shape without being the same number.
   for (const bad of ['127.0.0.1:7000', 'localhost:7000', '0.0.0.0:1', '[::1]:7000']) {
     await assert.rejects(
-      async () => serveControl({ ports: controlPorts, path: bad, token: randomBytes(32).toString('base64url') }),
+      async () =>
+        serveControl({
+          ports: controlPorts,
+          path: bad,
+          token: randomBytes(32).toString('base64url'),
+        }),
       /TCP|address|socket/i,
       bad,
     );
@@ -342,7 +358,10 @@ test('the control API answers over the socket and refuses a wrong token', async 
       // Past the token check, so the version is disclosed here and nowhere else.
       assert.match(good, /0\.0\.0-test/);
 
-      const wrong = await speak(listener.address, authorised('/v1/status', randomBytes(32).toString('base64url')));
+      const wrong = await speak(
+        listener.address,
+        authorised('/v1/status', randomBytes(32).toString('base64url')),
+      );
       assert.match(wrong, /^HTTP\/1\.1 401 /, 'a wrong token is unauthorised, not merely not-200');
 
       // Without the marker header at all: a request a browser could actually make.

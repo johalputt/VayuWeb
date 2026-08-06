@@ -72,7 +72,10 @@ test('a single-chunk file is a raw leaf with no dag-pb wrapper', () => {
 test('12.1 a peer substituting bytes for the ROOT cid is refused', () => {
   const { root } = importSite([{ path: 'index.html', content: text('real') }]);
   const lying: BlockSource = { get: () => text('whatever I like') };
-  assert.equal(refusal(() => fetchFile(lying, root)), 'CONTENT_INTEGRITY');
+  assert.equal(
+    refusal(() => fetchFile(lying, root)),
+    'CONTENT_INTEGRITY',
+  );
 });
 
 test('12.1 a peer substituting bytes for a CHILD is refused, which is the whole point', () => {
@@ -88,7 +91,10 @@ test('12.1 a peer substituting bytes for a CHILD is refused, which is the whole 
   const tampering: BlockSource = {
     get: (cid) => (cid === root ? rootBytes : text('<script>attacker</script>')),
   };
-  assert.equal(refusal(() => fetchPath(tampering, root, 'index.html')), 'CONTENT_INTEGRITY');
+  assert.equal(
+    refusal(() => fetchPath(tampering, root, 'index.html')),
+    'CONTENT_INTEGRITY',
+  );
 });
 
 test('12.1 substitution at DEPTH is refused too, not only one level down', () => {
@@ -109,7 +115,10 @@ test('12.1 substitution at DEPTH is refused too, not only one level down', () =>
   const swapped: BlockSource = {
     get: (cid) => (cid === leafCid ? text('forged!') : honest.get(cid)),
   };
-  assert.equal(refusal(() => fetchPath(swapped, root, 'a/b/c/deep.txt')), 'CONTENT_INTEGRITY');
+  assert.equal(
+    refusal(() => fetchPath(swapped, root, 'a/b/c/deep.txt')),
+    'CONTENT_INTEGRITY',
+  );
 });
 
 test('12.1 a block that is simply missing is distinguished from one that is wrong', () => {
@@ -118,7 +127,10 @@ test('12.1 a block that is simply missing is distinguished from one that is wron
   // cannot tell them apart cannot act on either.
   const { root } = importSite([{ path: 'index.html', content: text('x') }]);
   const empty: BlockSource = { get: () => null };
-  assert.equal(refusal(() => fetchFile(empty, root)), 'CONTENT_UNAVAILABLE');
+  assert.equal(
+    refusal(() => fetchFile(empty, root)),
+    'CONTENT_UNAVAILABLE',
+  );
 });
 
 /* -------------------------------------------------------------------------- */
@@ -170,7 +182,10 @@ test('12.2 a DAG that links to the same child repeatedly cannot amplify without 
       return blocks.get(cid) ?? null;
     },
   };
-  assert.equal(refusal(() => fetchFile(source, childCid)), 'RESPONSE_TOO_LARGE');
+  assert.equal(
+    refusal(() => fetchFile(source, childCid)),
+    'RESPONSE_TOO_LARGE',
+  );
   assert.ok(gets <= FETCH_LIMITS.blocks + 1, `stopped after ${gets} fetches`);
 
   // And the refusal is on the BUDGET, not on having assembled 2^30 bytes: the whole DAG is 31
@@ -194,7 +209,9 @@ test('12.2 a chain deeper than the depth limit is refused', () => {
   const budget = new Budget();
   const built = fileBlocks(text('deep'));
   assert.equal(
-    refusal(() => fetchFile(blockSourceOf(built.blocks), built.cid, FETCH_LIMITS.depth + 1, budget)),
+    refusal(() =>
+      fetchFile(blockSourceOf(built.blocks), built.cid, FETCH_LIMITS.depth + 1, budget),
+    ),
     'RESPONSE_TOO_LARGE',
   );
 });
@@ -211,7 +228,10 @@ test('12.2 a node carrying more links than the cap is refused', () => {
     tsize: 1,
   }));
   const bytes = encodePbNode(links, DIRECTORY_DATA);
-  assert.equal(refusal(() => decodeNode(bytes)), 'RESPONSE_TOO_LARGE');
+  assert.equal(
+    refusal(() => decodeNode(bytes)),
+    'RESPONSE_TOO_LARGE',
+  );
 
   // And one link under the cap still decodes, so the bound is a bound rather than a refusal of
   // anything large.
@@ -242,7 +262,10 @@ test('12.2 an over-sized single block is refused before it is hashed into anythi
   const big = new Uint8Array(FETCH_LIMITS.blockBytes + 1);
   const cid = encodeCid({ version: 1, codec: CID_PARAMETERS.codecRaw, digest: sha256(big) });
   const source: BlockSource = { get: () => big };
-  assert.equal(refusal(() => fetchFile(source, cid)), 'RESPONSE_TOO_LARGE');
+  assert.equal(
+    refusal(() => fetchFile(source, cid)),
+    'RESPONSE_TOO_LARGE',
+  );
 });
 
 /* -------------------------------------------------------------------------- */
@@ -258,15 +281,15 @@ test('12.3 a node declaring a filesize its chunks do not add up to is refused', 
   // lies. Anything else would let a different check take the credit for this one.
   const leaf = leafOf('four');
   const node = dagPbBlock(
-    encodePbNode(
-      [{ cid: leaf.cid, name: '', tsize: 4 }],
-      hostileFileData([4], 268_435_456),
-    ),
+    encodePbNode([{ cid: leaf.cid, name: '', tsize: 4 }], hostileFileData([4], 268_435_456)),
   );
   const source: BlockSource = {
     get: (cid) => (cid === node.cid ? node.bytes : cid === leaf.cid ? leaf.bytes : null),
   };
-  assert.equal(refusal(() => fetchFile(source, node.cid)), 'MALFORMED_BLOCK');
+  assert.equal(
+    refusal(() => fetchFile(source, node.cid)),
+    'MALFORMED_BLOCK',
+  );
 });
 
 test('12.3 a chunk whose length disagrees with its declared blocksize is refused', () => {
@@ -281,7 +304,10 @@ test('12.3 a chunk whose length disagrees with its declared blocksize is refused
   const source: BlockSource = {
     get: (cid) => (cid === node.cid ? node.bytes : cid === leaf.cid ? leaf.bytes : null),
   };
-  assert.equal(refusal(() => fetchFile(source, node.cid)), 'MALFORMED_BLOCK');
+  assert.equal(
+    refusal(() => fetchFile(source, node.cid)),
+    'MALFORMED_BLOCK',
+  );
 });
 
 test('12.3 a blocksizes list that does not match the link count is refused', () => {
@@ -304,7 +330,10 @@ test('12.3 a blocksizes list that does not match the link count is refused', () 
   const source: BlockSource = {
     get: (cid) => (cid === node.cid ? node.bytes : cid === leaf.cid ? leaf.bytes : null),
   };
-  assert.equal(refusal(() => fetchFile(source, node.cid)), 'MALFORMED_BLOCK');
+  assert.equal(
+    refusal(() => fetchFile(source, node.cid)),
+    'MALFORMED_BLOCK',
+  );
 });
 
 /* -------------------------------------------------------------------------- */
@@ -317,9 +346,18 @@ test('a path segment named .. is refused rather than interpreted', () => {
   // the format grants that, so the segment is refused instead of resolved either way.
   const { blocks, root } = importSite([{ path: 'index.html', content: text('home') }]);
   const source = blockSourceOf(blocks);
-  assert.equal(refusal(() => fetchPath(source, root, '../secret')), 'PATH_NOT_FOUND');
-  assert.equal(refusal(() => fetchPath(source, root, 'a/../index.html')), 'PATH_NOT_FOUND');
-  assert.equal(refusal(() => fetchPath(source, root, './index.html')), 'PATH_NOT_FOUND');
+  assert.equal(
+    refusal(() => fetchPath(source, root, '../secret')),
+    'PATH_NOT_FOUND',
+  );
+  assert.equal(
+    refusal(() => fetchPath(source, root, 'a/../index.html')),
+    'PATH_NOT_FOUND',
+  );
+  assert.equal(
+    refusal(() => fetchPath(source, root, './index.html')),
+    'PATH_NOT_FOUND',
+  );
 });
 
 test('a directory carrying two entries of one name is refused, not silently shadowed', () => {
@@ -344,23 +382,35 @@ test('a directory carrying two entries of one name is refused, not silently shad
     ),
   );
   const source = blockSourceOf([...a.blocks, ...b.blocks, dir]);
-  assert.equal(refusal(() => fetchPath(source, dir.cid, 'index.html')), 'MALFORMED_BLOCK');
+  assert.equal(
+    refusal(() => fetchPath(source, dir.cid, 'index.html')),
+    'MALFORMED_BLOCK',
+  );
 });
 
 test('descending into a file is a path error rather than a crash', () => {
   const { blocks, root } = importSite([{ path: 'index.html', content: text('home') }]);
   const source = blockSourceOf(blocks);
-  assert.equal(refusal(() => fetchPath(source, root, 'index.html/more')), 'PATH_NOT_FOUND');
+  assert.equal(
+    refusal(() => fetchPath(source, root, 'index.html/more')),
+    'PATH_NOT_FOUND',
+  );
 });
 
 test('a name the directory does not carry is a path error', () => {
   const { blocks, root } = importSite([{ path: 'index.html', content: text('home') }]);
-  assert.equal(refusal(() => fetchPath(blockSourceOf(blocks), root, 'nope.html')), 'PATH_NOT_FOUND');
+  assert.equal(
+    refusal(() => fetchPath(blockSourceOf(blocks), root, 'nope.html')),
+    'PATH_NOT_FOUND',
+  );
 });
 
 test('fetching a directory as a file is refused', () => {
   const { blocks, root } = importSite([{ path: 'index.html', content: text('home') }]);
-  assert.equal(refusal(() => fetchFile(blockSourceOf(blocks), root)), 'PATH_NOT_FOUND');
+  assert.equal(
+    refusal(() => fetchFile(blockSourceOf(blocks), root)),
+    'PATH_NOT_FOUND',
+  );
 });
 
 /* -------------------------------------------------------------------------- */
@@ -377,12 +427,19 @@ test('malformed protobuf is refused with a code rather than an exception from th
     // Wire type 5 (fixed32) — neither dag-pb nor UnixFS uses it.
     ['unsupported wire type', Uint8Array.of(0x15, 0x00, 0x00, 0x00, 0x00)],
     // A varint that never terminates.
-    ['unterminated varint', Uint8Array.of(0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff)],
+    [
+      'unterminated varint',
+      Uint8Array.of(0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff),
+    ],
     // Field number 0.
     ['field number zero', Uint8Array.of(0x02, 0x00)],
   ];
   for (const [why, bytes] of cases) {
-    assert.equal(refusal(() => decodeNode(bytes)), 'MALFORMED_BLOCK', why);
+    assert.equal(
+      refusal(() => decodeNode(bytes)),
+      'MALFORMED_BLOCK',
+      why,
+    );
   }
 });
 
@@ -399,7 +456,10 @@ test('a CID naming a codec that is not content is refused', () => {
   // dag-cbor (0x71) is a valid codec and is not something a site serves.
   const cid = encodeCid({ version: 1, codec: 0x71, digest: sha256(bytes) });
   const source: BlockSource = { get: () => bytes };
-  assert.equal(refusal(() => fetchFile(source, cid)), 'MALFORMED_BLOCK');
+  assert.equal(
+    refusal(() => fetchFile(source, cid)),
+    'MALFORMED_BLOCK',
+  );
 });
 
 /**

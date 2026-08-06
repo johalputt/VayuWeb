@@ -265,8 +265,16 @@ drop them.
 `registry/src/blockstore.ts` is the Helia integration, and it is deliberately thin: the
 blockstore is exposed as the `BlockSource` the verified traversal already takes, so every check
 in `fetch.ts` stays in front of the network rather than being replaced by a library's own
-assembly. Publishing a site into a real Helia node and fetching it back through the traversal
-works end to end.
+assembly. Publishing a site into a real Helia node and fetching it back through the traversal was
+verified once, by hand, and that run is **not reproducible from a clean checkout** — Helia is not
+a dependency of this package and nothing imports it.
+
+That is the design working rather than a limitation. Installing Helia and Hyperswarm took
+`registry/` from 5 resolved packages to 601, and the supply-chain gate refused the change at a
+ceiling of 40. The gate was right: a protocol whose Article 4 forbids making any operator
+load-bearing should not quietly make six hundred package maintainers load-bearing instead. Both
+modules take their library injected, so the interfaces are the contract and the libraries are the
+operator's choice.
 
 Writing it produced the phase's sharpest lesson so far, and it is about test doubles rather than
 about IPFS. The `AsyncBlocks` interface declared `Promise<Uint8Array>`, the whole suite passed

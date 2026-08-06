@@ -13,6 +13,12 @@
  * replaceable: it is one binding of a transport-agnostic state machine, not the way VayuWeb
  * works. A second binding should need nothing from `replicate.ts` that this one did not.
  *
+ * **Hyperswarm is therefore not a dependency of this package**, and nothing here imports it. The
+ * swarm arrives through {@link SwarmOptions}. Installing it alongside Helia took `registry/` from
+ * 5 resolved packages to 601 and `security.yml`'s supply-chain gate refused the change, which was
+ * the right answer: a protocol that says no operator may be load-bearing should not quietly make
+ * six hundred package maintainers load-bearing instead.
+ *
  * ## 2.3 is the rule this module is most able to break
  *
  * "An implementation MUST NOT treat the transport's authentication, if any, as evidence about a
@@ -363,7 +369,10 @@ export interface Swarm {
 export interface SwarmOptions {
   readonly swarm: {
     on(event: 'connection', listener: (stream: PeerStream, info: unknown) => void): void;
-    join(topic: Uint8Array, options?: { server?: boolean; client?: boolean }): { flushed(): Promise<void> };
+    join(
+      topic: Uint8Array,
+      options?: { server?: boolean; client?: boolean },
+    ): { flushed(): Promise<void> };
     destroy(): Promise<void>;
   };
   readonly sink: ReplicationSink;

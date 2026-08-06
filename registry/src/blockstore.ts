@@ -18,12 +18,29 @@
  * that referred it, and bounds the traversal. A library that returns the wrong bytes is caught
  * here exactly as a hostile peer is, because to this code they are the same thing.
  *
+ * ## Helia is not a dependency of this package, deliberately
+ *
+ * Nothing here imports it. The store arrives as {@link AsyncBlocks} and the CID codec as
+ * {@link CidCodec}, so a caller supplies whichever implementation they run and this module never
+ * decides. That is the same reason `swarm.ts` takes its swarm injected, and it is not only a
+ * design preference: installing Helia and Hyperswarm took `registry/`'s resolved dependency count
+ * from 5 packages to 601, and `security.yml`'s supply-chain gate refused it at a ceiling of 40 —
+ * a gate whose own comment says it should "fire on a change of kind rather than on ordinary
+ * maintenance". It fired exactly as designed. For a project whose Article 4 forbids making any
+ * party load-bearing, 601 packages is 596 more parties who can reach a user's resolver.
+ *
  * ## What is honestly not covered
  *
- * Bitswap over a real network is not exercised by this repository's tests. A blockstore on disk
- * is, and so is the traversal in front of it; the part where a stranger on the internet declines
- * to send a block, or sends a different one, needs two machines. HOSTING.md's acceptance test
- * says so and this module does not pretend otherwise.
+ * The adapter was verified once against a real Helia node — a site published into it and fetched
+ * back through the traversal, which is what found that this interface's declared shapes were all
+ * wrong. That run is **not reproducible from a clean checkout**, because the library is no longer
+ * installed; reproducing it means adding Helia yourself. The shapes it taught are pinned as
+ * tests, which is the part that survives.
+ *
+ * Bitswap over a real network is not exercised at all. A blockstore is, and so is the traversal
+ * in front of it; the part where a stranger on the internet declines to send a block, or sends a
+ * different one, needs two machines. HOSTING.md's acceptance test says so and this module does
+ * not pretend otherwise.
  */
 
 import { mkdirSync } from 'node:fs';
@@ -58,7 +75,11 @@ export interface AsyncBlocks {
 type MaybeGenerator = { next(sent?: unknown): { value: unknown; done?: boolean } };
 
 function isGenerator(value: unknown): value is MaybeGenerator {
-  return typeof value === 'object' && value !== null && typeof (value as MaybeGenerator).next === 'function';
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as MaybeGenerator).next === 'function'
+  );
 }
 
 function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
@@ -70,7 +91,11 @@ function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
 }
 
 function isThenable(value: unknown): value is Promise<unknown> {
-  return typeof value === 'object' && value !== null && typeof (value as Promise<unknown>).then === 'function';
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as Promise<unknown>).then === 'function'
+  );
 }
 
 /**

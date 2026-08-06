@@ -143,7 +143,10 @@ export function parseHead(text: string): RequestHead {
     }
     const name = line.slice(0, colon).toLowerCase();
     if (!/^[!#$%&'*+.^_`|~0-9a-z-]+$/.test(name)) {
-      throw new ServeError('MALFORMED_REQUEST', `header name ${JSON.stringify(name)} is not a token`);
+      throw new ServeError(
+        'MALFORMED_REQUEST',
+        `header name ${JSON.stringify(name)} is not a token`,
+      );
     }
     const value = line.slice(colon + 1).trim();
     // Last-wins and first-wins are both defensible, so a duplicate is refused rather than picked
@@ -206,7 +209,11 @@ function statusFor(code: ServeRejection): number {
  */
 function serveConnection(
   socket: Socket,
-  respond: (head: RequestHead) => { status: number; headers: ReadonlyMap<string, string>; body: string },
+  respond: (head: RequestHead) => {
+    status: number;
+    headers: ReadonlyMap<string, string>;
+    body: string;
+  },
 ): void {
   let buffer = '';
   let done = false;
@@ -449,7 +456,11 @@ export function serveControl(options: ControlServerOptions): Promise<Listener> {
           path: head.target,
           headers: head.headers,
         };
-        const response: ControlResponse = handleControlRequest(request, options.ports, options.token);
+        const response: ControlResponse = handleControlRequest(
+          request,
+          options.ports,
+          options.token,
+        );
         return {
           status: response.status,
           headers: response.headers,

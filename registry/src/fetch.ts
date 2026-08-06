@@ -265,7 +265,8 @@ function decodeLink(bytes: Uint8Array): DecodedLink {
   let tsize = 0;
   for (const field of readFields(bytes)) {
     if (field.number === 1) cid = linkCid(field.bytes);
-    else if (field.number === 2) name = new TextDecoder('utf-8', { fatal: false }).decode(field.bytes);
+    else if (field.number === 2)
+      name = new TextDecoder('utf-8', { fatal: false }).decode(field.bytes);
     else if (field.number === 3) tsize = field.varint;
     else throw new FetchError('MALFORMED_BLOCK', `PBLink has no field ${field.number}`);
   }
@@ -478,7 +479,10 @@ export function fetchPath(source: BlockSource, root: string, path: string): Uint
     // resolvers to disagree about which is the site, which is a fork with extra steps.
     const matches = node.links.filter((link) => link.name === segment);
     if (matches.length === 0) {
-      throw new FetchError('PATH_NOT_FOUND', `${cid} has no entry named ${JSON.stringify(segment)}`);
+      throw new FetchError(
+        'PATH_NOT_FOUND',
+        `${cid} has no entry named ${JSON.stringify(segment)}`,
+      );
     }
     if (matches.length > 1) {
       throw new FetchError(

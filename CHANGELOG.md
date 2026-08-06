@@ -111,6 +111,15 @@ unbuilt.
 
 ### Added — blocks on disk, with the verified traversal still in front of the network
 
+- **Helia is not a dependency, and that is the design working rather than a compromise.** Nothing
+  imports it: the store arrives as an interface and the CID codec as another, exactly as
+  `swarm.ts` takes its swarm injected. Installing Helia and Hyperswarm took `registry/` from **5
+  resolved packages to 601**, and `security.yml`'s supply-chain gate refused it at a ceiling of
+  40 — a gate whose own comment says it should "fire on a change of kind rather than on ordinary
+  maintenance". It fired exactly as designed, and it was right: for a project whose Article 4
+  forbids making any party load-bearing, 601 packages is 596 more parties who can reach a user's
+  resolver. The libraries are gone; the interfaces they taught are what remains.
+
 - **`registry/src/blockstore.ts` keeps `fetch.ts` in the path, which is the whole design
   constraint.** Helia will assemble a UnixFS tree itself, and using that would be shorter, faster
   to write, and would move every check in RESOLUTION.md 12.1 to 12.3 into somebody else's library

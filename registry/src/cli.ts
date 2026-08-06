@@ -546,7 +546,11 @@ async function cmdServe(args: Args): Promise<number> {
     // The process boundary is where the real clock is allowed to exist; every module below this
     // takes it as a parameter.
     now: () => Math.floor(Date.now() / 1000),
-    options: { get diagnostics() { return diagnostics; } },
+    options: {
+      get diagnostics() {
+        return diagnostics;
+      },
+    },
     ports: {
       lookup: (label, tld) => store.lookup(label, tld)?.current.record ?? null,
       hasVerifiedHead: () => true,

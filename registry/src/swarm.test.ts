@@ -86,7 +86,10 @@ test('two frames in one chunk both emerge, in order', () => {
   wire.set(a, 0);
   wire.set(b, a.length);
   const out = new Deframer().push(wire);
-  assert.deepEqual(out.map((p) => p[0]), [1, 2]);
+  assert.deepEqual(
+    out.map((p) => p[0]),
+    [1, 2],
+  );
 });
 
 test('a declared length over the limit is refused before anything is buffered against it', () => {
@@ -95,14 +98,20 @@ test('a declared length over the limit is refused before anything is buffered ag
   const prefix = new Uint8Array(4);
   new DataView(prefix.buffer).setUint32(0, SWARM_LIMITS.frameBytes + 1, false);
   const deframer = new Deframer();
-  assert.equal(refusal(() => deframer.push(prefix)), 'FRAME_TOO_LARGE');
+  assert.equal(
+    refusal(() => deframer.push(prefix)),
+    'FRAME_TOO_LARGE',
+  );
   assert.equal(deframer.pending, 4, 'and no allocation was made against the claim');
 });
 
 test('a zero-length frame is refused rather than looping', () => {
   const prefix = new Uint8Array(4);
   new DataView(prefix.buffer).setUint32(0, 0, false);
-  assert.equal(refusal(() => new Deframer().push(prefix)), 'FRAME_EMPTY');
+  assert.equal(
+    refusal(() => new Deframer().push(prefix)),
+    'FRAME_EMPTY',
+  );
 });
 
 test('framing an over-sized payload is refused at the sender too', () => {
@@ -441,7 +450,9 @@ test('a peer sending a record that fails local verification changes nothing', as
   const tampered = Uint8Array.from(genuine);
   tampered[tampered.length - 1] ^= 0xff; // break the signature
 
-  stream.feed(frame(encodeMessage({ t: 'HELLO', v: PROTOCOL_VERSION, len: 1, root: new Uint8Array(32) })));
+  stream.feed(
+    frame(encodeMessage({ t: 'HELLO', v: PROTOCOL_VERSION, len: 1, root: new Uint8Array(32) })),
+  );
   stream.feed(frame(encodeMessage({ t: 'RECORDS', from: 0, recs: [tampered] })));
   await new Promise((r) => setTimeout(r, 20));
 
