@@ -41,11 +41,20 @@ being confused with a DNS name in a log, a bookmark, or a person's memory.
 vayu-URI = "vayu://" label "." tld [ "/" path ] [ "?" query ] [ "#" fragment ]
 
 label    = 1*63( %x61-7A / %x30-39 / "-" )   ; a-z 0-9 -
-tld      = 2*12( %x61-7A )                   ; a-z
+tld      = %x61-7A *11( %x61-7A / %x30-39 )  ; letter, then letters/digits
 ```
 
-2.1 The authority is exactly `label "." tld`. It MUST match the grammar in
-[NAMES.md](NAMES.md): 1–63 characters, no leading or trailing `-`, lowercase ASCII only.
+2.1 The authority is exactly `label "." tld`. **[NAMES.md](NAMES.md) is authoritative for both
+productions**; the ABNF above is reproduced from it so a parser author has the syntax in one
+place, and `scripts/check-counts.py` fails if the two spellings diverge. The label rule is 1–63
+characters, no leading or trailing `-`, no `-` at both positions 3 and 4, lowercase NFC ASCII
+only, and not a reserved label.
+
+An earlier revision of the `tld` production here read `2*12( %x61-7A )` — letters only. That is
+not a narrower restatement of NAMES.md's rule, it is a different rule, and it excluded a TLD the
+charter names in Article 35.1's own text: `.p2p` contains a digit, so a parser built from this
+document would reject `vayu://site.p2p` while a resolver built from NAMES.md resolves it. Two
+conforming implementations, one of which cannot address a founding extension.
 
 2.2 A `vayu://` URI MUST NOT contain a **port**. There is no port to connect to; resolution is not
 a socket operation. A URI carrying one MUST be rejected, not ignored.

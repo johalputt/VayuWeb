@@ -202,12 +202,33 @@ retire one, and the bar is set to reflect that.
 
 ## 7. Conformance
 
-1. No implementation hard-codes an extension list; the valid set is derived from the log.
-2. A two-character extension proposal is rejected.
-3. A proposal duplicating a well-known ICANN gTLD is rejected.
-4. Registering one label across N extensions costs N times the proof-of-work of one.
-5. No client interface presents any extension as more legitimate, premium or official.
-6. First registration in a new extension is refused until the dormancy period has elapsed.
+1. Every implementation enforces the ratified set, and no extension outside the **Namespace
+   Annex** is accepted. The set is updated only by a Naming VWIP.
+2. A proposal for an extension already in the Annex is rejected as a duplicate.
+3. Registering one label across N extensions costs N times the proof-of-work of one.
+4. No client interface presents any extension as more legitimate, premium or official.
+5. First registration in a new extension is refused until the dormancy period has elapsed.
+
+Three of these were written against a namespace that no longer exists, and all three would now
+fail against the ratified set. They are recorded rather than quietly replaced.
+
+- **"No implementation hard-codes an extension list; the valid set is derived from the log."**
+  Section 2.3 of this document carried the same requirement, was found to be the opposite of what
+  is implementable — the record format has no TLD-creation operation, so the log carries nothing
+  to derive the set from, and Article 35.6 vests creation in a ratified proposal rather than in a
+  record anyone can append — and was corrected. This section was not touched in that change, so
+  the requirement survived here. Article 2.31 settles it: TLD membership is decided offline
+  against the copy the verifier holds, never fetched and never derived from the log.
+- **"A two-character extension proposal is rejected."** The Annex ratifies **60** two-letter
+  extensions. A conformance test asserting they are rejected contradicts the namespace this
+  document enumerates. [VWIP-0004](VWIP-0004.md)'s collision review states the position that
+  replaces it: 35 of the 60 share a string with an ISO 3166-1 code, the harm is real, the
+  mitigation is partial, and section 5.3 of this document holds that a two-letter string is a
+  string while a country *name* is what constitutes a claim.
+- **"A proposal duplicating a well-known ICANN gTLD is rejected."** Five ratified entries share a
+  string with a widely known ICANN generic — `.blog`, `.news`, `.forum`, `.wiki` and `.app` —
+  each carried deliberately and each recorded in VWIP-0004's collision review with its reason.
+  The rule as written would fail the Annex it is meant to guard.
 
 ## See also
 

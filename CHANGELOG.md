@@ -10,6 +10,49 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a URI parser that could not address a founding extension
+
+- **`URI-SCHEME.md`'s `tld` production was `2*12( %x61-7A )` — letters only.** `NAMES.md` is the
+  normative specification for what a name may contain and gives `%x61-7A *11( %x61-7A / %x30-39 )`
+  — a letter, then letters or digits. Those are not a stricter and a looser spelling of one rule,
+  they are two rules, and the difference is `.p2p`, an extension Constitution Article 35.1 names
+  in its own text. A parser built from `URI-SCHEME.md` rejects `vayu://site.p2p` while a resolver
+  built from `NAMES.md` resolves it: two conforming implementations, one of which cannot address
+  a founding extension.
+
+  Corrected, with `NAMES.md` named as authoritative for both productions and the ABNF reproduced
+  rather than restated. `check-counts.py` now pairs the two spellings; mutation-tested by
+  reverting each document in turn, both refused.
+
+### Fixed — three conformance items written against a namespace that no longer exists
+
+- **`NAMESPACE.md` section 7 would now fail against the Annex it is meant to guard.** All three
+  are recorded rather than quietly replaced, because each was true of an earlier design.
+
+  **"No implementation hard-codes an extension list; the valid set is derived from the log."**
+  Section 2.3 of the same document carried this, was found to require the opposite of what is
+  implementable — the record format has no TLD-creation operation, so the log carries nothing to
+  derive the set from, and Article 35.6 vests creation in a ratified proposal rather than in a
+  record anyone can append — and was corrected. The conformance section was not touched in that
+  change. Article 2.31 settles it: membership is decided offline against the copy the verifier
+  holds, never fetched and never derived from the log. **The second half-fix inside one document
+  found this week**, which is why the paired-statement guard exists.
+
+  **"A two-character extension proposal is rejected."** The Annex ratifies **60** two-letter
+  extensions, and VWIP-0004's collision review turns on that number — 35 of the 60 share a string
+  with an ISO 3166-1 code. A conformance item rejecting all sixty contradicts the namespace three
+  sections above it.
+
+  **"A proposal duplicating a well-known ICANN gTLD is rejected."** Five ratified entries share a
+  string with a widely known ICANN generic — `.blog`, `.news`, `.forum`, `.wiki`, `.app` — each
+  carried deliberately, each with its reason in VWIP-0004's collision review.
+
+  Two guards, because they catch different things. `check-counts.py` derives the two-letter count
+  from the Annex, so a document stating the wrong number fails; and a paired statement forbids the
+  rejection sentence outright, because a count rule catches a wrong *number* and says nothing
+  about a sentence that refuses all sixty. The first mutation proved that: reinstating the
+  rejection rule passed the count check untouched. Both now refuse it.
+
 ### Fixed — a ballot the charter forbids, withdrawn in one document and left standing in its sibling
 
 - **`NAMESPACE.md` still ratified extensions by "a two-thirds majority over a 30-day voting

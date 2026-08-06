@@ -103,6 +103,23 @@ def count_accompanying_headers():
     return len(names), None
 
 
+def count_two_letter_tlds():
+    """Two-letter extensions in the Annex.
+
+    Derived because a conformance item in NAMESPACE.md asserted that "a two-character extension
+    proposal is rejected" while the Annex it enumerates ratifies sixty of them, and because
+    VWIP-0004's collision review turns on the number: 35 of the 60 share a string with an ISO
+    3166-1 code, which is the whole substance of the review.
+    """
+    text = read("docs/spec/NAMESPACE-CATALOGUE.md")
+    if text is None:
+        return None, "docs/spec/NAMESPACE-CATALOGUE.md is missing"
+    tlds = re.findall(r"^\| `\.([a-z0-9]+)`", text, re.M)
+    if not tlds:
+        return None, "the Annex yielded no extensions -- the table format changed"
+    return len([t for t in tlds if len(t) == 2]), None
+
+
 def count_csp_relaxations():
     """Rows of the 2.3 table that grant something, rather than saying `None`.
 
@@ -153,6 +170,32 @@ AGREEMENTS = [
             "Article 35.6's window is for objections, not ballots."
         ),
     },
+    {
+        # No positive counterpart: this is a rule that must not be stated, anywhere. A count rule
+        # catches a wrong NUMBER of two-letter extensions; only this catches a sentence that
+        # rejects all sixty of them while the Annex three sections away ratifies them.
+        "label": "two-letter extensions are ratified, not refused",
+        "files": ["docs/spec/NAMESPACE.md", "docs/spec/NAMES.md"],
+        "absent": re.compile(r"^\s*\d+\. A two-(?:character|letter) extension[^\n]*rejected", re.M),
+        "note": (
+            "The Annex ratifies 60 of them and VWIP-0004's collision review turns on that number. "
+            "NAMESPACE.md section 5.3 holds that a two-letter string is a string and a country "
+            "*name* is what constitutes a claim."
+        ),
+    },
+    {
+        "label": "the TLD production",
+        "files": ["docs/spec/NAMES.md", "docs/spec/URI-SCHEME.md"],
+        "present": re.compile(r"tld\s+= %x61-7A \*11\( %x61-7A / %x30-39 \)"),
+        # The letters-only spelling, in an ABNF line rather than in prose recording it.
+        "absent": re.compile(r"^tld\s+= 2\*12", re.M),
+        "note": (
+            "URI-SCHEME.md once read `tld = 2*12( %x61-7A )` -- letters only -- which is not a "
+            "narrower restatement of NAMES.md's rule but a different one. It excluded `.p2p`, a "
+            "TLD Article 35.1 names in its own text, so a parser built from one document could "
+            "not address a founding extension a resolver built from the other resolves."
+        ),
+    },
 ]
 
 
@@ -178,6 +221,15 @@ RULES = [
         "patterns": [
             re.compile(r"\b(\w+) accompanying response headers\b", re.I),
             re.compile(r"\b(\w+) response headers are added\b", re.I),
+        ],
+    },
+    {
+        "label": "two-letter extensions",
+        "derive": count_two_letter_tlds,
+        "source": "docs/spec/NAMESPACE-CATALOGUE.md (the Namespace Annex)",
+        "patterns": [
+            re.compile(r"\bcontains ([\w,]+) two-letter extensions\b", re.I),
+            re.compile(r"\bAnnex ratifies \*\*([\w,]+)\*\* two-letter\b", re.I),
         ],
     },
     {
@@ -334,7 +386,8 @@ def check_agreements(failures):
             if text is None:
                 failures.append(f"{item['label']}: {rel} is missing")
                 continue
-            if item["present"].search(text) is None:
+            present = item.get("present")
+            if present is not None and present.search(text) is None:
                 failures.append(
                     f"{rel}: does not carry the settled rule '{item['label']}'. If it was "
                     f"amended, update this check in the same commit; if the other document was "
