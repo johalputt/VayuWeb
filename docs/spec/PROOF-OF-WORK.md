@@ -193,8 +193,11 @@ concrete attack, but timing-uniform comparison costs nothing and is therefore ma
 
 The honest cost note: 70 ms per record is cheap for one record and is not cheap for a
 full-history replay of a large log. A peer that has already verified a prefix of the log
-MAY trust its own signed local checkpoint and re-verify only the suffix, as described in
-[REGISTRY.md](REGISTRY.md). A peer that has never verified the history and wants full
+MAY trust its own local checkpoint and re-verify only the suffix, as described in
+[REGISTRY.md](REGISTRY.md). **Its own**, and unsigned: a checkpoint is a value the peer derived
+from a log it verified itself, so what makes it trustworthy is having computed it, not having
+signed it. This line said "signed local checkpoint" for a period, against `REGISTRY.md`, which
+states that a checkpoint "is not an authority and carries no signature that would make it one". A peer that has never verified the history and wants full
 assurance MUST pay the full cost once.
 
 ## Renewal

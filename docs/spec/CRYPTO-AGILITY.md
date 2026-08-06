@@ -183,7 +183,18 @@ Risk 2.3 cannot be fixed after a break, only before it. The defence is to make t
 history provable by hashes rather than signatures, since hashes survive quantum adversaries.
 
 6.1 The registry SHALL publish periodic **checkpoints**: a hash of the log state at a given
-length, signed under the then-current suite.
+length, **unsigned**. Their construction is in [REGISTRY.md](REGISTRY.md), which is authoritative
+for them.
+
+This clause said "signed under the then-current suite", and it contradicted two things at once.
+`REGISTRY.md`: a checkpoint "is not an authority and carries no signature that would make it
+one", because anyone can derive it from the same log — a signed one would be an attestation
+peers could be asked to *trust* rather than recompute, which is the privileged authority Article
+29.2 forbids. And this section's own opening two sentences above: the defence against retroactive
+repudiation is "to make the *ordering* of history provable by hashes rather than signatures,
+since hashes survive quantum adversaries". A signature over the checkpoint is precisely the thing
+that does not survive, so signing it would have made the anchoring mechanism rest on the
+primitive it exists to outlive.
 
 6.2 Checkpoints SHOULD be anchored externally — published where they cannot be retroactively
 altered, by whatever durable public medium exists at the time. The specification deliberately does

@@ -66,9 +66,12 @@ for `http://example.vayu/` arriving at the proxy.
    implementer conformed to whichever one they happened to read.
 3. **Non-VayuWeb host.** In the default `vayu-only` mode the proxy MUST return
    error 1403 `TLD_UNKNOWN`. In `passthrough` mode it MAY forward the request
-   to the operating system's networking stack. In neither mode is a VayuWeb TLD
-   eligible for step 3; that is what makes the no-DNS-fallback rule enforceable
-   rather than aspirational.
+   to the operating system's networking stack, subject to
+   [LOCAL-SURFACE.md](LOCAL-SURFACE.md) 2.1.1 — off by default, never available
+   in Private Mode, and refusing loopback, link-local, multicast and RFC 1918
+   destinations unconditionally. In neither mode is a VayuWeb TLD eligible for
+   step 3; that is what makes the no-DNS-fallback rule enforceable rather than
+   aspirational.
 4. **Label validation.** Normalise the label to NFC, lowercase, and check it
    against the grammar in [NAMES.md](NAMES.md). On failure return 1400
    `LABEL_INVALID`. Validating first keeps malformed input out of the network

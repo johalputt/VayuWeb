@@ -68,6 +68,32 @@ value with a port — MUST be rejected before routing. This is the DNS-rebinding
 attacker who rebinds a hostname they control to `127.0.0.1` still arrives carrying their own
 `Host`, which is not a VayuWeb name, and is refused.
 
+#### 2.1.1 `passthrough` mode, and why it is a carve-out rather than an exception
+
+[RESOLUTION.md](RESOLUTION.md) step 3 defines a `passthrough` mode in which a non-VayuWeb host
+"MAY be forwarded to the operating system's networking stack", and its browser-integration option
+2 requires it: a browser pointed at the proxy for **all** HTTP traffic cannot reach the clearnet
+otherwise. This document said nothing about it, and the word did not appear here at all — so an
+implementer reading this section alone built a proxy that cannot do option 2, and one reading
+RESOLUTION.md alone built an open relay. Both conformed.
+
+Where `passthrough` is implemented, all of the following are normative:
+
+- It MUST be **off by default**. `vayu-only` is the default mode, and a resolver that forwards
+  clearnet traffic without being asked has enlarged its own trust surface silently.
+- It MUST be unavailable in **Private Mode**, without exception and without a setting.
+  [CONTENT-SECURITY.md](CONTENT-SECURITY.md) 5.2 closes top-level navigation exfiltration
+  *precisely by refusing* the forwarded request with `1403 EGRESS_REFUSED`; a passthrough that
+  honoured it would reopen the one channel full-proxy configuration exists to close.
+- It MUST refuse loopback, link-local, multicast and RFC 1918 destinations **unconditionally**,
+  exactly as `CONNECT` must in 2.2. Forwarding to the reader's own network is an SSRF pivot
+  whether the verb is `GET` or `CONNECT`, and the rebinding defence above is not weakened by
+  passthrough for the same reason: a rebound host is still not a VayuWeb name, so it is forwarded
+  outward rather than routed internally, and the internal-address refusal is what stops it
+  arriving anywhere sensitive.
+- A VayuWeb TLD MUST NOT be eligible for it in either mode. That is what makes the
+  no-DNS-fallback rule enforceable rather than aspirational, and RESOLUTION.md step 3 says so.
+
 ### 2.2 `CONNECT`
 
 The proxy SHOULD NOT implement `CONNECT` at all. Where it is implemented for compatibility, it
@@ -161,7 +187,12 @@ regenerating it per run in Private Mode.
 1. The control API is not reachable over TCP on any address. A connection attempt to any port
    finds no control listener.
 2. `fetch` from a page to the control socket fails at the transport layer, not at authentication.
-3. A request to the proxy bearing a non-VayuWeb `Host` is rejected before routing.
+3. A request to the proxy bearing a non-VayuWeb `Host` is rejected before routing in the default
+   `vayu-only` mode, and in Private Mode under every mode setting.
+3.a Under `passthrough`, the same request is forwarded outward and a loopback, link-local,
+   multicast or RFC 1918 destination is still refused. Both halves, because a test that only
+   asserted the refusal would fail every resolver implementing browser-integration option 2, and
+   one that only asserted the forwarding would pass an open relay.
 4. `Access-Control-Allow-Private-Network` never appears on any response.
 5. `X-VayuWeb-*` headers are absent unless explicitly enabled.
 6. An endless stream of invalid names does not grow resident memory without bound.

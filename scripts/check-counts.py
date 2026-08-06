@@ -257,6 +257,44 @@ AGREEMENTS = [
         ),
     },
     {
+        # RESOLUTION.md defined a passthrough mode; LOCAL-SURFACE.md required every non-VayuWeb
+        # Host rejected before routing and never mentioned the word. An implementer reading one
+        # built a proxy that cannot do browser-integration option 2; one reading the other built
+        # an open relay. Both conformed, which is what makes this the audit's recurring shape.
+        "label": "passthrough is carved out, not silently contradicted",
+        "files": ["docs/spec/LOCAL-SURFACE.md", "docs/spec/RESOLUTION.md"],
+        "present": re.compile(r"passthrough"),
+        "note": (
+            "LOCAL-SURFACE.md 2.1.1 states the carve-out and its four constraints; RESOLUTION.md "
+            "step 3 references it. Neither may describe the mode without the other."
+        ),
+    },
+    {
+        # Three documents attached a signature to the checkpoint that REGISTRY.md and the code
+        # deliberately leave unsigned. CRYPTO-AGILITY.md's version was the sharpest: it made the
+        # anchoring mechanism rest on a signature two sentences after arguing that anchoring must
+        # rest on hashes because signatures do not survive a quantum adversary.
+        "label": "checkpoints are unsigned",
+        "files": [
+            "docs/spec/REGISTRY.md",
+            "docs/spec/PROOF-OF-WORK.md",
+            "docs/spec/CRYPTO-AGILITY.md",
+        ],
+        # Three spellings, because the three documents each had their own. The last is the
+        # literal CRYPTO-AGILITY.md used, and a length-bounded pattern missed it -- the clause
+        # puts 45 characters between "checkpoints" and ", signed", so a {0,40} window read as
+        # generous was not.
+        "absent": re.compile(
+            r"signed (?:local )?checkpoint"
+            r"|checkpoints?[^.]{0,80}?, signed"
+            r"|signed under the then-current suite"),
+        "note": (
+            "REGISTRY.md: a checkpoint 'is not an authority and carries no signature that would "
+            "make it one'. Anyone derives it from the same log, so trusting one is recomputing "
+            "it, and a signature would turn it into an attestation instead."
+        ),
+    },
+    {
         # ARCHITECTURE.md gave the IPNS-to-CID cache 300 seconds against RESOLUTION.md's 120,
         # with rationales arguing for opposite numbers -- and the 300 was not a mislabelled
         # reference to the record cache, which is separately 300 in the same list. An overview
@@ -580,6 +618,11 @@ def check_agreements(failures):
     """
     checked = 0
     for item in AGREEMENTS:
+        if item.get("present") is None and item.get("absent") is None:
+            failures.append(
+                f"{item['label']}: has neither a `present` nor an `absent` pattern, so it "
+                f"enforces nothing")
+            continue
         for rel in item["files"]:
             text = read(rel)
             if text is None:
@@ -593,8 +636,15 @@ def check_agreements(failures):
                     f"fixed and this one was not, that is the defect this rule exists for. "
                     f"{item['note']}")
                 continue
+            absent = item.get("absent")
+            if absent is None:
+                # Some rules are purely positive: the statement must be present in every listed
+                # document, with no withdrawn form to forbid. `present` is likewise optional for
+                # the mirror case. A rule with neither would check nothing, and is refused below.
+                checked += 1
+                continue
             unquoted = re.sub(r'"[^"]*"|\*\*[^*]+\*\*', " ", text)
-            stale = item["absent"].search(unquoted)
+            stale = absent.search(unquoted)
             if stale is not None:
                 failures.append(
                     f"{rel}: still states '{stale.group(0)}' outside a quotation, against "

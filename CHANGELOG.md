@@ -10,6 +10,44 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a signed checkpoint, and a proxy mode one document did not know existed
+
+- **Three documents signed a checkpoint that `REGISTRY.md` and the code deliberately leave
+  unsigned.** `REGISTRY.md`: a checkpoint "is not an authority and carries no signature that
+  would make it one" — anyone derives it from the same log, so trusting one *is* recomputing it,
+  and a signature would turn it into an attestation peers could be asked to accept instead.
+
+  `CRYPTO-AGILITY.md` 6.1 was the sharpest: it required the checkpoint "signed under the
+  then-current suite" **two sentences after** arguing that anchoring must rest on hashes rather
+  than signatures "since hashes survive quantum adversaries". Signing it would have made the
+  anti-repudiation mechanism rest on the primitive it exists to outlive. Corrected there and in
+  `PROOF-OF-WORK.md`; a paired statement forbids all three spellings, one of which slipped a
+  length-bounded pattern that had looked generous.
+
+- **`RESOLUTION.md` defined a `passthrough` mode `LOCAL-SURFACE.md` did not know existed.**
+  RESOLUTION step 3 lets a non-VayuWeb host be forwarded to the OS networking stack, and its
+  browser-integration option 2 *requires* it — a browser pointed at the proxy for all HTTP
+  traffic cannot reach the clearnet otherwise. `LOCAL-SURFACE.md` requires every non-VayuWeb
+  `Host` rejected before routing, makes it conformance item 3, and the word "passthrough" did not
+  appear in it at all.
+
+  An implementer reading one built a proxy that cannot do option 2; one reading the other built
+  an **open relay and SSRF pivot** into the reader's own network. Both conformed. That is the
+  shape this audit keeps producing, and it is why the fix is a carve-out with teeth rather than a
+  cross-reference: `LOCAL-SURFACE.md` 2.1.1 now states the mode and four normative constraints —
+  off by default, **never** available in Private Mode (5.2 closes top-level navigation
+  exfiltration *by refusing* the forwarded request, so an honouring passthrough reopens the one
+  channel full-proxy exists to close), loopback and RFC 1918 refused unconditionally as with
+  `CONNECT`, and no VayuWeb TLD eligible in either mode.
+
+  Conformance item 3 is split in two, and both halves are load-bearing: a test asserting only the
+  refusal fails every resolver implementing option 2, and one asserting only the forwarding
+  passes an open relay.
+
+- **The paired-statement mechanism gained a purely positive form**, since this rule has a
+  statement that must be present and no withdrawn form to forbid — with a guard refusing any
+  rule that has neither, because that one would check nothing while looking like a check.
+
 ### Fixed — every LOW finding: three claims that were arithmetically or logically wrong
 
 - **`pow-64x-ratio`.** `PROOF-OF-WORK.md` and `pow.ts` both said "a two-character name costs 64

@@ -84,8 +84,10 @@ Four outcomes are used, and the distinction between the last two matters:
 | `uri-scheme-conformance-2-identical-uris` (LOW) | **Fixed.** The item compared a name with itself; both origin components now tested |
 | `uri-scheme-s7-origin-isolation-self-comparison` (LOW) | **Fixed** with it — the same finding under a second name |
 | `resolution-cs-section-1-3` (LOW) | **Stale.** Corrected to section 2.3 with the other cross-references |
+| `pow-registry-signed-checkpoint` | **Fixed.** Checkpoints are unsigned in all three documents; a paired statement holds it |
+| `resolution-passthrough-vs-local-surface` | **Fixed.** `LOCAL-SURFACE.md` 2.1.1 carves the mode out with four constraints |
 
-**The remainder is not yet triaged**, and the count is worth stating rather than implying: six
+**The remainder is not yet triaged**, and the count is worth stating rather than implying: four
 MEDIUM, no LOW and fifteen UNRATED. That is a statement about this file rather than about the
 corpus — several are certainly stale in the way the entries above turned out to be, and finding
 out costs a re-read each time. Whoever works them should extend these tables rather than
