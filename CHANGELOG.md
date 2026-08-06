@@ -10,6 +10,36 @@ it.
 
 ## [Unreleased]
 
+### Fixed — the document defining the completeness bar was the one never measured against it
+
+- **`VWIP-0000` is `Status: Final` and was missing five of its own mandatory sections.**
+  Centralisation analysis, Migration and rollback, Activation epoch, Expiry of transitional
+  mechanisms and Test vectors — required by its own section 3 of every proposal that advances
+  beyond Draft, and absent from the document that requires them. Its section 3.2 says an analysis
+  identifying no dependent party "SHOULD be treated by reviewers as an unfinished analysis rather
+  than a clean result"; an absent one is worse.
+
+  All five written, and written as arguments rather than as placeholders, because 3.1 makes
+  "none" unacceptable and says why: the explanation is the reviewable artefact, and writing it is
+  where authors discover there was a consequence after all. Two examples of that happening here —
+  the editor panel is a real centralisation dependency and is named as the only one; and the
+  drafting window of section 2.4.b is the one transitional mechanism, self-extinguishing rather
+  than dated, because a date would either strand the corpus or outlive the anchor and leave a
+  live bypass of Article 58.
+
+- **`scripts/check-vwips.py`** does what section 3 describes and nobody performed: "An editor
+  checks their presence, never their merit." It reads the mandatory-sections table out of
+  `VWIP-0000` rather than restating it, applies the two conditional rows by `Category` and `Type`,
+  and **reports** incomplete Drafts rather than skipping them — `VWIP-0002` still needs Migration
+  and rollback, which is permitted at Draft and would otherwise surface on the day somebody tried
+  to advance it. Mutation-tested three ways; all refused.
+
+- **`check-workflows.py` now fails if any checker is not run by a workflow.** A checker nothing
+  invokes is a file that looks like a gate and is not one — and writing `check-vwips.py` and
+  nearly forgetting the CI step, in the same hour, is why the rule exists rather than a
+  hypothetical. `scripts/README.md` documents all nine and what each refuses; the listener check
+  promptly failed that README for naming the superseded port, which is the rule working.
+
 ### Fixed — CI cancelled a run on `main`, which its own comment says never happens
 
 - **`cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}` is inert.** GitHub evaluates an

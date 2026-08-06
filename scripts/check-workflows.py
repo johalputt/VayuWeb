@@ -115,11 +115,27 @@ def main():
                 f"{rel}: grants a write permission at workflow level. Scope it to the one job "
                 f"that needs it, so every other job in the file runs read-only")
 
+    # Every checker in scripts/ must be run by some workflow. A checker nobody invokes is a file
+    # that looks like a gate and is not one, and this rule exists because writing check-vwips.py
+    # and forgetting the CI step was a near miss in the same session that added it.
+    scripts_dir = os.path.join(ROOT, "scripts")
+    invoked = "\n".join(open(path, encoding="utf-8").read() for _, path in workflow_files())
+    checkers = sorted(
+        n for n in os.listdir(scripts_dir) if n.startswith("check-") and n.endswith(".py"))
+    for name in checkers:
+        if f"scripts/{name}" not in invoked:
+            violations.append(
+                f"scripts/{name}: no workflow runs it. A checker nothing invokes is a file that "
+                f"looks like a gate and is not one")
+
     if checked == 0:
         print("::error::no workflows found — this check is enforcing nothing", file=sys.stderr)
         return 1
+    if not checkers:
+        print("::error::no checkers found — this rule is enforcing nothing", file=sys.stderr)
+        return 1
 
-    print(f"checked {checked} workflow(s), {jobs} job(s)")
+    print(f"checked {checked} workflow(s), {jobs} job(s), {len(checkers)} checker(s)")
     if violations:
         print(f"\n{len(violations)} workflow violation(s):\n", file=sys.stderr)
         for v in violations:

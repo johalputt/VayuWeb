@@ -80,6 +80,13 @@ jobs:
         # wrong. A number derived from the source cannot drift from it.
         run: python3 scripts/check-counts.py
 
+      - name: Every VWIP carries the sections VWIP-0000 makes mandatory
+        # VWIP-0000 section 3 says "an editor checks their presence, never their merit" -- a
+        # mechanical check described in prose and performed by nobody. VWIP-0000 is itself Final
+        # and was missing five of its own mandatory sections, so the document defining the
+        # completeness bar was the one document never measured against it.
+        run: python3 scripts/check-vwips.py
+
   # ---------------------------------------------------------------------------
   # The registry implementation. This is the gate the repository did not have.
   # ---------------------------------------------------------------------------
