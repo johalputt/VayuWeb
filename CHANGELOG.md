@@ -10,6 +10,35 @@ it.
 
 ## [Unreleased]
 
+### Fixed — every LOW finding: three claims that were arithmetically or logically wrong
+
+- **`pow-64x-ratio`.** `PROOF-OF-WORK.md` and `pow.ts` both said "a two-character name costs 64
+  times a fifteen-character name". A fifteen-character label is on 5 bits and a two-character one
+  on 10, so the ratio is 2⁵ = **32**. Sixty-four is the gap to the sixteen-and-above branch — two
+  correct numbers from the same table, paired wrongly, overstating the anti-hoarding property
+  twofold at exactly the length where the schedule stops changing. Both corrected to sixteen, and
+  a test derives the ratio from `baseBits` rather than trusting either restatement, because the
+  restatements are what disagreed.
+
+- **`arch-resolution-ttl-status-contradiction`.** `ARCHITECTURE.md` gave the IPNS-to-CID cache
+  300 seconds — "updates visible within five minutes" — against `RESOLUTION.md`'s
+  `min(record validity, 120 seconds)` and "a publisher updating a site expects it live in about
+  two minutes". Same cache, two defaults, two rationales arguing for opposite numbers. Not a
+  mislabelled reference to the record cache either, which is separately 300 in the same list. An
+  overview that invents a figure the specification already sets is the overview's defect;
+  `ARCHITECTURE.md` now defers, and a paired statement holds it.
+
+- **`uri-scheme-conformance-2-identical-uris`**, also filed as
+  `uri-scheme-s7-origin-isolation-self-comparison`. Conformance item 2 read "`vayu://a.vayu` and
+  `vayu://a.vayu` do not share storage, permissions or scripting access" — the same URI on both
+  sides, requiring a name to be cross-origin with **itself**, which is the opposite of the origin
+  model in 3.1. Not a test nobody ran: a test nobody could pass. It now names both pairs, one
+  differing by label and one by TLD, because the origin tuple has two components and testing one
+  leaves the other unmeasured — and a test asserts exactly that, so a future edit cannot quietly
+  drop a component.
+
+  **Every LOW finding is now closed.** Six MEDIUM and fifteen UNRATED remain.
+
 ### Added — dispositions for the MEDIUM and LOW findings, and the count that caught me out
 
 - **Twenty more findings now carry an outcome**, alongside the eighteen HIGH ones. Ten fixed,

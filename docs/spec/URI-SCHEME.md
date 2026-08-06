@@ -197,7 +197,14 @@ single point of legal pressure — the three things this protocol exists to remo
 1. Every URI in section 2 that MUST be rejected is rejected with a distinct error, not
    normalised, not ignored: port, userinfo, IP literal, uppercase, percent-encoded authority,
    non-ASCII, punycode.
-2. `vayu://a.vayu` and `vayu://a.vayu` do not share storage, permissions or scripting access.
+2. `vayu://a.vayu` and `vayu://b.vayu` do not share storage, permissions or scripting access,
+   and neither do `vayu://a.vayu` and `vayu://a.shop`. Both pairs, because the origin tuple of
+   3.1 has two components and testing only one of them leaves the other unmeasured.
+
+   This item read `vayu://a.vayu` and `vayu://a.vayu` — the same URI on both sides, requiring a
+   name to be cross-origin with itself, which is the opposite of what 3.1 defines. It would have
+   failed every conforming implementation and passed none, so it was a test nobody could satisfy
+   rather than a test nobody ran.
 3. `serviceWorker.register()` rejects on a `vayu://` document.
 4. A `vayu://` document cannot script or read an `http://` or `https://` document, and vice versa.
 5. The compatibility mapping in 5.3 preserves authority and path byte for byte.

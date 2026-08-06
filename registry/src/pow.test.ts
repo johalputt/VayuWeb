@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   POW_ALGORITHM,
@@ -349,4 +350,42 @@ test('the tag is deterministic for one nonce and salt', () => {
   const salt = powSalt(record());
   const nonce = new Uint8Array(POW_NONCE_LENGTH).fill(9);
   assert.deepEqual(powTag(nonce, salt), powTag(nonce, salt));
+});
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT FINDING: the length-weighting claim named the wrong length             */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: the cost ratio in the prose is the one the schedule produces', () => {
+  // PROOF-OF-WORK.md and this module both said a two-character name costs 64 times a
+  // fifteen-character one. A fifteen-character label is on 5 bits and a two-character label on
+  // 10, so the ratio is 2^5 = 32. Sixty-four is the gap to the 16-and-above branch, which is a
+  // different row of the same table — two correct numbers, paired wrongly, overstating the
+  // anti-hoarding property twofold at exactly the length where the schedule stops changing.
+  //
+  // Derived from `baseBits` rather than from either restatement, because the restatements are
+  // what disagreed.
+  const shortest = baseBits(2);
+  const longest = baseBits(16);
+  const ratio = 2 ** (shortest - longest);
+  assert.equal(shortest, 10);
+  assert.equal(longest, 4);
+  assert.equal(ratio, 64);
+  assert.equal(2 ** (baseBits(2) - baseBits(15)), 32, 'fifteen characters is 32x, not 64x');
+
+  // The claim, in both places that make it.
+  const spec = readFileSync(new URL('../../docs/spec/PROOF-OF-WORK.md', import.meta.url), 'utf8');
+  const module = readFileSync(new URL('./pow.ts', import.meta.url), 'utf8');
+  for (const [name, text] of [
+    ['PROOF-OF-WORK.md', spec],
+    ['pow.ts', module],
+  ] as const) {
+    assert.match(
+      text,
+      // Whitespace-tolerant across a line break and a comment continuation: the same sentence
+      // is hard-wrapped differently in a markdown paragraph and in a JSDoc block.
+      /two-character(?:[\s*]|\n)+name costs? 64 times a(?:[\s*]|\n)+\*{0,2}sixteen\*{0,2}-character one/,
+      `${name} must pair 64 with sixteen characters`,
+    );
+  }
 });

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   parseHost,
@@ -336,4 +337,36 @@ test('query and fragment are stripped before matching', () => {
   const listing = new Set(['index.html']);
   assert.equal(mapPath('/?utm=1', listing), 'index.html');
   assert.equal(mapPath('/#top', listing), 'index.html');
+});
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT FINDING: a conformance item that required a name to differ from itself */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: the origin model is tested on both components of the tuple', () => {
+  // URI-SCHEME.md 3.1 makes the origin `("vayu", label "." tld)`, so two names differ if either
+  // component differs. Its conformance item 2 read `vayu://a.vayu` and `vayu://a.vayu` — the same
+  // URI on both sides, requiring a name to be cross-origin with itself. That is not a test nobody
+  // ran; it is a test nobody could pass, and the item it displaced was the one that would have
+  // measured the label and the TLD separately.
+  const spec = readFileSync(new URL('../../docs/spec/URI-SCHEME.md', import.meta.url), 'utf8');
+  const item = /^2\. (.+?)(?=\n\n|\n\d\. )/ms.exec(spec.slice(spec.indexOf('## 7. Conformance')));
+  assert.ok(item, 'conformance item 2 must exist, or this check is inert');
+
+  const pairs = [...item[1]!.matchAll(/`vayu:\/\/([a-z0-9.]+)`/g)].map((m) => m[1]!);
+  assert.ok(pairs.length >= 2, 'the item must name at least two URIs');
+  for (let i = 0; i + 1 < pairs.length; i += 2) {
+    assert.notEqual(pairs[i], pairs[i + 1], 'a name cannot be cross-origin with itself');
+  }
+  // Both components exercised: one pair differing by label, one by TLD.
+  const byLabel = pairs.some((p, i) => {
+    const other = pairs[i % 2 === 0 ? i + 1 : i - 1];
+    return other !== undefined && p.split('.')[1] === other.split('.')[1] && p !== other;
+  });
+  const byTld = pairs.some((p, i) => {
+    const other = pairs[i % 2 === 0 ? i + 1 : i - 1];
+    return other !== undefined && p.split('.')[0] === other.split('.')[0] && p !== other;
+  });
+  assert.ok(byLabel, 'no pair differs by label alone');
+  assert.ok(byTld, 'no pair differs by TLD alone');
 });

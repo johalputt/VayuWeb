@@ -79,9 +79,14 @@ Four outcomes are used, and the distinction between the last two matters:
 | `vwip0001-test-count` (LOW) | **Fixed.** Seventeen, derived from the two conformance sections |
 | `docs-spec-cross-reference-section-numbers` (LOW) | **Fixed** for the four found; not swept exhaustively |
 | `registry-worked-example-powproof` (MEDIUM ×3) | **Fixed** — the same finding as HIGH #1, raised four times |
+| `pow-64x-ratio` (LOW) | **Fixed.** 64× is the gap to a *sixteen*-character label; fifteen is 32× |
+| `arch-resolution-ttl-status-contradiction` (LOW) | **Fixed.** `ARCHITECTURE.md` defers the three cache lifetimes to `RESOLUTION.md` |
+| `uri-scheme-conformance-2-identical-uris` (LOW) | **Fixed.** The item compared a name with itself; both origin components now tested |
+| `uri-scheme-s7-origin-isolation-self-comparison` (LOW) | **Fixed** with it — the same finding under a second name |
+| `resolution-cs-section-1-3` (LOW) | **Stale.** Corrected to section 2.3 with the other cross-references |
 
 **The remainder is not yet triaged**, and the count is worth stating rather than implying: six
-MEDIUM, five LOW and fifteen UNRATED. That is a statement about this file rather than about the
+MEDIUM, no LOW and fifteen UNRATED. That is a statement about this file rather than about the
 corpus — several are certainly stale in the way the entries above turned out to be, and finding
 out costs a re-read each time. Whoever works them should extend these tables rather than
 repeating the survey.

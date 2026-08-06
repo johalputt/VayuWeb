@@ -60,8 +60,14 @@ export const RATE_FLOOR = 512;
 const SALT_PREFIX_BYTES = new TextEncoder().encode(POW_SALT_PREFIX);
 
 /**
- * Base difficulty by label length. Short labels are the ones worth hoarding, so a
- * two-character name costs 64 times a fifteen-character one.
+ * Base difficulty by label length. Short labels are the ones worth hoarding, so a two-character
+ * name costs 64 times a **sixteen**-character one: 10 bits against 4, the widest spread this
+ * table produces.
+ *
+ * This comment said "fifteen", which is 5 bits and therefore 32 times. The two figures come from
+ * different rows -- 64 is the gap to the 16-and-above branch, fifteen is the last length still
+ * on 5 bits -- and PROOF-OF-WORK.md carried the same pairing. A test derives both from this
+ * function rather than trusting either restatement.
  */
 export function baseBits(labelLength: number): number {
   if (labelLength <= 2) return 10;

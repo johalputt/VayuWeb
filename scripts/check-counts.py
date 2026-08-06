@@ -257,6 +257,21 @@ AGREEMENTS = [
         ),
     },
     {
+        # ARCHITECTURE.md gave the IPNS-to-CID cache 300 seconds against RESOLUTION.md's 120,
+        # with rationales arguing for opposite numbers -- and the 300 was not a mislabelled
+        # reference to the record cache, which is separately 300 in the same list. An overview
+        # that invents a figure the specification already sets is the overview's defect, so the
+        # rule is that only the specification states it.
+        "label": "the IPNS pointer cache lifetime",
+        "files": ["docs/spec/RESOLUTION.md", "docs/ARCHITECTURE.md"],
+        "present": re.compile(r"min\(record validity, 120 seconds\)"),
+        "absent": re.compile(r"IPNS-to-CID mapping for 300 seconds"),
+        "note": (
+            "RESOLUTION.md sets the three cache lifetimes and their reasons; ARCHITECTURE.md is "
+            "an overview and references them."
+        ),
+    },
+    {
         # A count rule only fires when a claim it can PARSE disagrees. Delete the number and the
         # claim goes unchecked -- which is how the overstatement below survived the first
         # mutation of the residual-channel count untouched. This forbids the overstatement itself.

@@ -115,7 +115,15 @@ function required_bits(label, tld, notBefore):
 ```
 
 Length weighting exists because short labels are the ones worth hoarding; the schedule makes
-a two-character name cost 64 times a fifteen-character name. The rate term is the
+a two-character name cost 64 times a sixteen-character one — 10 bits against 4, and the widest
+spread the table produces.
+
+It said "fifteen" for a period, which is 5 bits and therefore 32 times, not 64. The two numbers
+came from different rows: 64 is the gap to the `else` branch at 16 characters and above, and
+fifteen is the last length still on 5 bits. A reader sizing the anti-hoarding property from that
+sentence would have overstated it twofold at exactly the length where the schedule stops
+changing. A test derives both figures from `baseBits` and fails if the prose and the table part
+company. The rate term is the
 superlinear part: every doubling of a TLD's thirty-day registration volume above 512 adds
 one bit, doubling the cost of every subsequent registration in that TLD. A bulk registrant
 therefore raises the price of its own remaining work, and it raises it for the whole

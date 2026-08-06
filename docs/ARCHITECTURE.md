@@ -182,9 +182,18 @@ owner key ──sign──> record{seq=n+1, records:{ipns, cid}} ──> log ─
    with a 404 or 410. It MUST NOT fall back to DNS or any clearnet resolver.
 5. The proxy resolves the `ipns` entry to a CID and fetches through Helia. An `alias` entry is
    followed to another VayuWeb name, at most three hops, to bound loops.
-6. Content is streamed back. The proxy caches the IPNS-to-CID mapping for 300 seconds — cheap
-   page loads, updates visible within five minutes — and caches immutable CID content by
-   content hash with no expiry.
+6. Content is streamed back. The proxy caches the IPNS-to-CID mapping for
+   `min(record validity, 120 seconds)` — the mutable path, where a publisher updating a site
+   expects it live in about two minutes — the *record* for 300 seconds, and immutable CID
+   content by content hash with no expiry. The three lifetimes and their reasons are in
+   [spec/RESOLUTION.md](spec/RESOLUTION.md); this document does not restate them.
+
+   An earlier revision gave the IPNS mapping 300 seconds and justified it as "cheap page loads,
+   updates visible within five minutes", against RESOLUTION.md's 120 and "a publisher updating a
+   site expects it live in about two minutes". Same cache, two defaults, two rationales that
+   argue for opposite numbers — and the 300 was not a mislabelled reference to the record cache,
+   because that one is separately 300 in the same list. An overview inventing a figure the
+   specification already sets is the overview's defect.
 
 ```text
 browser ──> 127.0.0.1:7654 ──> grammar check ──> local Hyperbee (no network)
