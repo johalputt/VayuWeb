@@ -1,6 +1,13 @@
 # VayuWeb Roadmap
 
-**Nothing here is implemented, and no date is promised.**
+**No date is promised, and no phase past 0 is finished.**
+
+This line said "nothing here is implemented" until the day that stopped being true, and then for
+a while after — a stale claim at the top of the file whose whole subject is what is and is not
+done. Phases 1 to 4 are variously started or mostly built, each says so in its own words, and
+every one of them is held open by an acceptance test that a single machine in a sandbox cannot
+honestly pass. Understating progress is not the safe direction: it is as wrong as overstating it,
+and it teaches a reader to discount the rest of the page.
 
 This roadmap is organised by phase, not by calendar. Dates on a volunteer protocol project are a
 form of dishonesty: they are set by wishful thinking, missed, and then quietly deleted. Phases
@@ -114,9 +121,9 @@ equivocation detection; snapshot and checkpoint format so a light client can ver
 replaying all history.
 
 **Equivocation detection had no conformance vector, and writing one found the defect.** It was
-covered by unit tests alone — implemented, exercised, and measured against nothing but itself. Building the contract meant asking what a *second* implementation would do with a
-pair of records, and the answer was that this one recorded and forwarded evidence nobody had
-signed. An owner key is public, so two records naming a victim as owner for one name at one `seq`,
+covered by unit tests alone — implemented, exercised, and measured against nothing but itself.
+Building the contract meant asking what a *second* implementation would do with a pair of
+records, and the answer was that this one recorded and forwarded evidence nobody had signed. An owner key is public, so two records naming a victim as owner for one name at one `seq`,
 signed by the attacker, were verified and passed on by every peer that received them: 6.4's
 manufactured evidence, arriving by the front door of the mechanism that refuses it.
 
@@ -130,8 +137,21 @@ implemented as a transport-agnostic state machine in `registry/src/replicate.ts`
 against paired peers with real stores and real proofs of work: order independence over every
 permutation of a record set, partition-and-heal convergence, hostile batches, and the message
 limits. The convergence rule, equivocation detection and the checkpoint format were already
-there. **Discovery is what remains** — a Hyperswarm/HyperDHT binding, and running the whole thing
-against peers on other machines, which is the part a sandbox cannot honestly claim.
+there. The **reference transport binding** is now in `registry/src/swarm.ts` — the discovery
+topic, the length-prefix framing that section 2.1 asks for and a stream does not provide, and a
+driver that carries messages without ever reading the channel's authenticated remote key. Two
+peers driven over a pipe converge on identical state, each having verified locally.
+
+**Running it against peers on other machines is what remains**, and it is the part a sandbox
+cannot honestly claim: the acceptance test asks for independent peers, started in any order and
+deliberately partitioned, and a pipe between two objects in one process is not that however
+carefully it is wired.
+
+Writing the binding produced the phase's third consensus-shaped defect, and the same way as the
+first two. The first driver sent `HELLO`, answered what it was asked, and never called
+`nextWant` — so it could serve and could never catch up. Two of them complete a handshake, report
+no error, and sit permanently diverged while looking exactly like a working connection. A unit
+test on one driver cannot see it; the question "what do two of these do" found it immediately.
 
 Two defects surfaced the moment the work asked what *two* peers do, and both had passed a feature
 review and their own unit tests:
@@ -169,13 +189,28 @@ enumerates the canonical markers in the document rather than naming the one bloc
 is the sharpest example of this phase's own risk — the surfaces here are the ones a document can
 describe correctly while nothing emits them.
 
-**Mostly done.** The resolution algorithm — steps 1 to 10 and 13, the record-selection order,
-alias following with its hop budget, and the numbered error catalogue — is in
-`registry/src/resolve.ts`. The **browsing proxy** is in `registry/src/proxy.ts` and the
-**control API** in `registry/src/control.ts`, both as pure request handlers so that every refusal
-is exercised as data rather than assumed behind a socket. **Content fetching and the browser
-integration remain**, and so does the Article 14 outbound-connection test, which needs a real
-browser and a real network to mean anything.
+**The specification described publishing in byte-exact detail and fetching as if a CID addressed
+one resource.** Step 12 said "verify the bytes hash to the requested CID" — right for one block,
+silent about the other n − 1 — so an implementer following it verifies the root, gets an authentic
+directory node, and then believes whatever arrives for the files it points at. Substituting an
+`index.html` under a genuine root was free, and it is the one substitution a reader could never
+notice: the name, the record and the root are all real. Clauses 12.1 to 12.3 now state that
+verification is recursive, that the traversal is bounded rather than only its output, and that
+declared UnixFS metadata is content rather than authority. The pattern is the phase's own: the
+half of the design that consumes untrusted input was the half nobody had written down.
+
+**Mostly done, and now runnable.** The resolution algorithm — steps 1 to 10 and 13, the
+record-selection order, alias following with its hop budget, and the numbered error catalogue —
+is in `registry/src/resolve.ts`. The **browsing proxy** is in `registry/src/proxy.ts` and the
+**control API** in `registry/src/control.ts`, both still pure request handlers so that every
+refusal is exercised as data rather than assumed behind a socket; `registry/src/serve.ts` binds
+them, and `vayuweb-registry serve` starts both. A browser pointed at the proxy gets a numbered
+answer with the full header set on it, including on refusals — which is where a header set is
+most often forgotten. **Verified traversal** is in `registry/src/fetch.ts`: block-by-block verification against the referring CID, a bound on blocks
+and depth rather than on assembled bytes, and refusal of a node whose declared sizes disagree with
+what arrives. **The block-exchange transport and the browser integration remain**, and so does the
+Article 14 outbound-connection test, which needs a real browser and a real network to mean
+anything.
 
 The two surfaces are deliberately of different kinds. The proxy is TCP because a browser must
 reach it; the control API is a Unix domain socket because a browser must never reach it, and
@@ -291,8 +326,18 @@ is a defect against Constitution Article 4.
 
 ## How to help right now
 
-Honestly: not with code. There is no code to write against yet, and code written before the
-specification settles is code that will be thrown away.
+This section said "not with code — there is no code to write against yet" for as long as that was
+true, and it stopped being true without anybody editing it. There is now a registry, a
+replication state machine, a resolver, a browsing proxy, a control API, the content-addressing
+and UnixFS encoders, and six conformance suites. A contributor reading the old sentence would
+have been told the opposite of the situation, which is the same defect as any other stale claim
+in this corpus — it just happened to be in the paragraph telling people what to do about it.
+
+The reasoning behind it still holds where it applies: **code written before the specification
+settles is code that will be thrown away**, and every phase from 2 onward is still marked
+"mostly done" rather than done for that reason. So the ranking below is unchanged, and it is
+unchanged deliberately. Attacking a document is still worth more than writing a module, because
+every defect this project has found in its own implementation was a defect in a document first.
 
 What is worth doing today, in descending order of value:
 
@@ -306,6 +351,11 @@ What is worth doing today, in descending order of value:
    justification is weak, say so; that is a legitimate VWIP.
 5. **Find an overclaim.** Any sentence that makes VayuWeb sound more private, more available or more
    censorship-resistant than the design supports is a bug, and a serious one.
+6. **Run the conformance vectors against your own code.**
+   [`conformance/vectors.json`](../conformance/vectors.json) is readable without any of this
+   repository, and a disagreement is worth reporting whichever of us is wrong — the third
+   possibility, that the specification let two people read it differently, is the most valuable
+   of the three and the reason the file exists.
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for how, and [spec/VWIP-0000.md](spec/VWIP-0000.md) for
 the process.

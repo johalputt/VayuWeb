@@ -10,6 +10,218 @@ it.
 
 ## [Unreleased]
 
+### Added — the reference transport binding, and a driver that could only ever answer
+
+- **`registry/src/swarm.ts` carries the messages `replicate.ts` produces.** Discovery on
+  `BLAKE2b-256("VayuWeb-Replication-v1")`, computed rather than written down so the topic cannot
+  drift from the string the specification names. The Hyperswarm instance is injected rather than
+  constructed, which is not test scaffolding: REPLICATION.md 2.2 says this binding is **not
+  normative**, and a module that decided a VayuWeb node must speak HyperDHT would be the thing
+  Article 4 forbids, arriving through a dependency.
+
+- **Framing is the gap between "ordered stream" and "framed channel".** Hyperswarm delivers the
+  first; section 2.1 asks for the second, and the difference is a length prefix. A declared length
+  is checked against the limit *before* anything is buffered against it — four bytes naming a
+  gigabyte is the cheapest denial of service a framed protocol offers. A bad frame drops the
+  connection, because a stream cannot resynchronise; a bad *message* does not, because
+  REPLICATION.md 3.2 says refusing to speak to a peer that knows a message you do not is how a
+  protocol becomes unextendable.
+
+- **The remote public key is never read, and a test enforces it against the source.** Hyperswarm
+  hands over an authenticated remote key, and it is exactly what an implementer reaches for when
+  they want to skip work for a peer they have seen before. REPLICATION.md 2.3 forbids treating
+  the channel as evidence about a record: a record's authority is its signature, and skipping
+  verification for a "known" peer removes the only check there is.
+
+- **The first driver could serve and could never catch up.** It sent `HELLO`, answered what it
+  was asked, and never called `nextWant` — so two such peers connect, complete a handshake,
+  report no error, and sit there permanently diverged while looking exactly like a working
+  connection. The session answers questions and deliberately does not ask them, because how
+  aggressively to pull is a resource decision rather than a protocol one, and the transport is
+  where that decision belongs. Found by the convergence test rather than by reading, and now
+  pinned by its own test so it cannot return quietly.
+
+### Added — the resolver runs: sockets under the pure handlers
+
+- **`registry/src/serve.ts` binds what `proxy.ts` and `control.ts` only described.** The split is
+  kept: every policy decision stays in the pure handlers, so a refusal is still exercised as data.
+  What lives in the new file is the part that cannot be a pure function — listening, reading a
+  head, writing a response, and the file mode on a socket. `vayuweb-registry serve` starts both.
+
+- **The HTTP head parser is deliberately strict**, because every leniency in one is a
+  request-smuggling primitive waiting for a second parser to disagree with it. Obsolete line
+  folding, duplicate headers, non-token header names and anything but HTTP/1.0 or 1.1 are refused
+  rather than resolved: first-wins and last-wins are both defensible readings of a duplicate
+  header, which is exactly why picking one is the wrong move. No request body is read on either
+  surface, because nothing in either API takes one and a body reader is an unbounded allocation
+  controlled by whoever opened the connection.
+
+- **The control socket is `0600` inside a `0700` directory, and both halves are asserted.** A
+  socket anyone on the machine can connect to is a control API anyone on the machine has; a
+  `0600` socket in a world-writable directory is one anybody can replace. `assertSocketAddress`
+  runs before the bind, so a TCP address is a thrown error rather than a listening port.
+
+- **A control token that could never authenticate is now refused at bind.** A token that does not
+  decode to 32 bytes can never match, so the resolver would bind an API nobody can reach and say
+  nothing — every request answering 401 exactly as a wrong guess would. Found by writing the
+  tests with a 64-character token that decodes to 48 bytes and having nothing to distinguish a
+  bad token from bad code. The token is generated per run and printed once, never written to
+  disk: a token in a config file is a token in a backup, a screenshot and a support ticket.
+
+- **Two of the project's own gates caught this work**, which is the first time they have caught
+  something written after them. `check-listeners.py` refused a comment that merely *mentioned*
+  the retired control port — the number is not written anywhere here, including as a test
+  fixture, so it cannot be reintroduced by copying a line that looked authoritative.
+  `check-source-hygiene.py` refused a default clock reaching for `Date.now()`; the proxy's `now`
+  is required rather than defaulted, and the real clock exists only at the process boundary.
+
+- **Three test inadequacies, found by mutation and by the tests failing honestly.** The control
+  tests put the token in the marker header instead of `Authorization`, so every request 403'd and
+  the disclosure test passed while asserting nothing — a 403 body trivially contains no secret.
+  The directory-mode test let the resolver create a fresh directory, so it was testing `mkdir`
+  rather than the tightening, and passed with the `chmod` deleted; it now starts from a
+  deliberately world-writable directory. And the line-folding guard turned out to be **genuinely
+  redundant** — a folded line is already refused for having no colon or a non-token name — so its
+  comment says so rather than implying it is load-bearing.
+
+### Fixed — the deadcode gate, in four ways, none of them visible by reading it
+
+- **`export { X }` was never examined.** The pattern matched `export function`, `export const`
+  and their siblings; a bare re-export statement is none of those, so a whole syntactic form went
+  unchecked. A gate that silently declines to look at something is worse than one that looks and
+  is wrong, because nothing in its output says so.
+
+- **A hit could come from anywhere.** The search was for the bare word across the corpus, so any
+  symbol sharing a name with something used elsewhere was permanently invisible — an
+  `export const sha256Helper` counted as used because `sha256` appears in another module. The
+  evidence now has to be a dependency: a consuming file must name the symbol *and* import from
+  the module that defines it.
+
+- **A re-export could justify itself.** With both of those fixed, the case that started this
+  still passed. A re-export names its symbol twice in the defining file — once to import it, once
+  to export it — so the "used elsewhere in this file" rule was satisfied by the re-export
+  statement. That rule is right for an internal helper and exactly wrong here.
+
+- **There was no floor.** Narrowing the export pattern so `function`, `const`, `interface` and
+  `type` were ignored dropped the corpus from 305 matches to 18 and still printed OK. A gate that
+  has stopped matching is indistinguishable from one with nothing to report unless it says how
+  much it looked at.
+
+  Fixing the first three immediately surfaced a real finding: `store.ts` re-exported
+  `GRACE_SECONDS` and `QUARANTINE_SECONDS`, which every consumer imports from `lifecycle.ts`
+  instead. The re-export and the import feeding it were both inert and had been invisible
+  throughout. Two exports in `fetch.ts` — a protobuf field written and never read, and a
+  `ContentError` re-export that contradicted the module's own contract that no other error type
+  escapes it — were found the same way and removed.
+
+  Two of the mutations used to check this were themselves badly chosen, and both times the probe
+  was at fault rather than the fix: relaxing a restriction cannot fail a clean tree, and a name
+  the defining file already imports is covered by the same-file rule before the dependency rule
+  is reached. The discipline says distrust a mutation that does not fail; it does not say the
+  code is guilty.
+
+### Added — verified traversal, and the half of fetching the specification never described
+
+- **`RESOLUTION.md` specified fetching as though a CID addressed one resource.** Step 12 said
+  "verify the bytes hash to the requested CID" — exactly right for one block, and silent about the
+  other n − 1. A site root is a directory whose links are CIDs and a file over one chunk is a node
+  whose links are CIDs, so an implementer following step 12 literally verifies the root, gets an
+  authentic directory node, and then believes whatever arrives for the files it points at.
+  Substituting an `index.html` under a genuine root is then free, and it is the one substitution a
+  reader could never notice: the name, the record and the root are all real. Article 44.6 makes
+  that a defect in the document, not an omission a careful reader is expected to repair.
+
+  New clauses 12.1 to 12.3 state the three rules the old text left out — verification is
+  recursive; the traversal is bounded rather than only the output; declared UnixFS metadata is
+  content rather than authority.
+
+- **`registry/src/fetch.ts` implements them.** Every block is checked against the CID *that
+  referred it*, and nothing in a block is acted on before that block verifies. The bound is on
+  blocks and depth, not on assembled bytes, because a dag-pb node may link to the same child twice
+  — thirty blocks describe over a billion leaves, and a resolver that catches that on the 256 MiB
+  resource cap catches it only after doing the work an attacker wanted done. `filesize` and
+  `blocksizes` are publisher-chosen fields covered by the node's own hash, so a lie there is
+  self-consistent rather than detectable by hashing; nothing allocates on a declared size, and a
+  node whose declarations disagree with what arrives is refused.
+
+- **Every refusal maps to a numbered error, which needed fixing once.** `decodeCid` throws
+  `ContentError`, a type a caller catching `FetchError` would miss entirely — so a CID naming a
+  codec that is not content surfaced as an internal error rather than as a refusal, telling an
+  operator the resolver was broken when a peer had sent rubbish. Found by a test that expected a
+  code and got a stack trace.
+
+- **Three of the new tests were passing for unrelated reasons, and mutation found all three.**
+  The per-chunk size check and the blocksizes-count check were both being caught by the
+  *filesize* check instead, because the fixtures broke more than one relationship at a time;
+  each now breaks exactly one. The duplicate-directory-entry test built its UnixFS `Data` as a
+  field tag with no value after it, so the node was refused as malformed protobuf before the
+  duplicate was ever looked at — it passed while testing the varint decoder.
+
+- **Two of the five traversal bounds had no test when they were written.** `linksPerNode` and the
+  accumulated-bytes cap could each have been deleted with nothing to notice, which is the same
+  defect as any other guard nothing exercises — found by listing the limits and asking which the
+  tests mention. Both are covered now, the byte cap on its `Budget` rather than end to end,
+  because reaching 256 MiB through the traversal means allocating a quarter of a gigabyte in CI
+  to prove one comparison. Fourteen mutations of `fetch.ts` now fail, including an off-by-one at
+  the byte-cap boundary.
+
+- **One test could hang CI rather than fail it.** Removing the block budget did not make the
+  amplification test fail; it made it expand 2^30 leaves until the harness killed the run. A hang
+  reports as a timeout rather than as a missing defence, so the block source now counts its own
+  calls and gives up loudly above the budget.
+
+### Changed — the implementation language is not fixed by the protocol
+
+- **`ARCHITECTURE.md` gains "Implementation Language".** Everything a second implementation must
+  match is language-neutral by construction — CBOR, Ed25519, Argon2id, BLAKE2b-256, dag-pb,
+  base32 — and the conformance vectors are hex and JSON for the same reason. The reference
+  implementation is TypeScript because the reference *transport binding* is; Hypercore, Hyperbee,
+  Hyperswarm and HyperDHT have no mature equivalent elsewhere, and that dependency is now stated
+  rather than absorbed. A substrate only one ecosystem implements is a substrate whose ecosystem
+  is load-bearing, which is the concentration Article 4 refuses, arriving through the toolchain.
+
+  Rust is recorded as a first-class choice and the expected one for the desktop client (Tauri is
+  already a Rust backend), the resolver and proxy (long-running processes whose entire input is
+  bytes from strangers), and the proof-of-work worker. With two limits stated plainly: a component
+  in another language passes the same conformance suites or it is not the same component, and a
+  second language written by the same hands is not progress toward Phase 6, which asks for parties
+  with no common employer or funder.
+
+### Fixed — eleven documents saying the project has no implementation
+
+- **Nobody wrote a false sentence; a true one went stale, in eleven places at once.**
+  `ROADMAP.md` opened with "Nothing here is implemented" and told contributors "not with code —
+  there is no code to write against yet". `CONTRIBUTING.md`, the file a newcomer opens to decide
+  what to do, said "there is no implementation yet". `README.md`'s repository tree annotated
+  `registry/` as not yet implemented. Eight specifications carried "Status: Draft — not yet
+  implemented", `REGISTRY.md` among them — against sixteen modules that cite it by name as the
+  thing they implement.
+
+  Understating progress is not the safe direction. It is as wrong as overstating it, and it
+  teaches a reader to discount everything else on the page — which is expensive in a corpus whose
+  method rests on its documents being trustworthy about their own state. Each now says what is
+  true: which parts are built, which are not, and that no phase past 0 has met its acceptance
+  test. The reasoning the old sentences carried is kept where it still applies — code written
+  before the specification settles is code that will be thrown away, and attacking a document is
+  still worth more than writing a module.
+
+- **`scripts/check-status-claims.py` makes the class mechanical.** Two rules, both deriving their
+  evidence from the source rather than from a hand-written map, because a map is another
+  restatement and restatements are what go stale. A specification may not claim to be
+  unimplemented while a non-test module under `registry/src` cites it; a project-scope document
+  may not claim the project has no implementation while any module exists at all. Adding the code
+  is what fails the check — nobody has to remember the script is there.
+
+- **Two of the guard's own defects were found by mutating it, and both were structural.** The
+  first version could not see `README.md`, `CONTRIBUTING.md` or `ROADMAP.md` at all: nothing
+  implements a README, so the citation rule had no evidence to work from, and reverting
+  CONTRIBUTING.md's stale sentence passed cleanly. Hence the second rule. The second version
+  treated a triple-backtick fence as one enormous inline-code span and swallowed its contents, so
+  `README.md`'s directory tree could assert anything it liked; a fence in this corpus holds
+  pseudocode, wire formats and directory listings, every one an assertion rather than a
+  quotation. Eight mutations now fail, including emptying `registry/src` — a guard whose evidence
+  has vanished must say so rather than pass.
+
 ### Fixed — equivocation evidence nobody had to sign
 
 - **Any owner key was enough to manufacture equivocation evidence against its holder.**
