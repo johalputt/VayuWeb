@@ -91,13 +91,39 @@ conforming peer can hold. It is unit-tested against a constructed predecessor, a
 activates a second suite must add the wire vector. A test also fails if an exempted code
 acquires a vector, so the excuse cannot outlive the reason for it.
 
-The file carries four suites: `vectors` holds 72 record-verification vectors, and `convergence`,
-`resolution` and `replication` hold their own. Those three pin what implementations must *agree*
-about rather than what one of them accepts, which is where a fork lives.
+The file carries six suites: `vectors` holds 72 record-verification vectors, and `convergence`,
+`resolution`, `replication`, `equivocation` and `pow` hold their own. Those five pin what
+implementations must *agree* about rather than what one of them accepts, which is where a fork
+lives.
 
-It does **not** yet cover **equivocation detection** — `verifyEquivocation` is implemented and
-unit-tested, and has no vector, so a second implementation is not measured on it. Absence from
-this file is not evidence that an area is settled.
+**`equivocation` is a pair of record encodings and one boolean**, per `REPLICATION.md` 6.2: two
+records, no state, no clock, no prior view. A vector needing any of those would be describing
+something other than what the specification says an `EQUIVOCATION` report is.
+
+It went without a vector for a long time, and building one is what found the reason it needed a
+contract rather than a unit test. Neither half of a forged report is a record any verifier would
+accept, and neither half of a genuine one need be either — so what separates them is a question
+no record vector asks. An implementation checking a pair for everything except *who signed it*
+will record and forward a report that anyone can mint against anyone, because an owner key is
+public. Both answers are pinned, not only the refusals: a suite of nothing but forgeries passes
+against an implementation that never reports anything, and under-reporting here is silent.
+
+**`pow` is the proof-of-work arithmetic, with no Argon2id evaluation anywhere in it** — the base
+table at each of its boundaries, the rate term at every doubling, the trailing window either side
+of an epoch edge, the salt preimage, and the leading-zero-bit test. The split is deliberate:
+Argon2id is a standard with published vectors of its own, while everything around it is local to
+this protocol and therefore where two implementations actually diverge. **Passing `pow` does not
+demonstrate a correct Argon2id**, and it is not offered as evidence of one.
+
+Every expectation in `pow` is a literal transcribed from `PROOF-OF-WORK.md`, with one exception —
+the salt, which is a digest no human derives by hand, and which the committed file pins instead.
+The first version of the suite computed its expectations by calling the functions under test, and
+four of five deliberate mutations to those functions survived it. A vector whose expected value
+comes from the implementation is a snapshot of whatever that implementation does, which is the
+opposite of a specification.
+
+Absence from this file is still not evidence that an area is settled. What it does cover, it now
+covers as a contract between implementations rather than as a test of this one.
 
 ## `key-literal-allowlist.txt`
 

@@ -138,6 +138,23 @@ widening the window enough to be farmable.
 `min(20, ...)` is a ceiling, not a target. It exists only to stop a runaway land rush from
 making a TLD permanently unusable.
 
+**The rate term MUST be computed exactly, and `log2` is not an exact function.** The pseudocode
+above writes it as `floor(log2(n / 512))` because that is what it *means*, not because that is
+how it must be evaluated. ECMAScript, C, Python and Go all specify their `log2` as
+implementation-approximated: a result one unit in the last place below an integer, at an exact
+doubling, floors to one less. That is a one-bit difficulty disagreement between two peers that
+each believe they conform — one rejects a record the other accepted, permanently, on a record
+that is otherwise entirely valid, and the registrant has already paid 64 MiB per attempt to
+produce it. Everything else in this section is quantised precisely so that two peers agree on
+`n`; a transcendental at the last step would give that away for nothing.
+
+An implementation SHOULD therefore compute the rate as an integer count of doublings — how many
+times `n` can be halved before it falls below 512, clamped at 8 — which is the same value by
+construction and depends on nothing a floating-point library chooses. The `pow` suite in
+[`conformance/vectors.json`](../../conformance/vectors.json) states the answer at every doubling
+boundary, so an implementation whose `log2` rounds the wrong way fails there rather than in the
+field, on somebody's valid registration.
+
 **The ceiling does not currently bind.** `base` tops out at 10 and `rate` at 8, so the largest
 value this function can return is **18 bits** — roughly 262,144 expected evaluations, on the
 order of tens of minutes of CPU at 70 ms each. Twenty bits is not reachable, and an earlier
@@ -190,6 +207,16 @@ The zero-bit test MUST be implemented over the full fixed-length tag with no ear
 that verification time does not vary with how close a rejected candidate came to passing.
 The tag is not secret, so this is a hygiene requirement rather than a defence against a
 concrete attack, but timing-uniform comparison costs nothing and is therefore mandatory.
+
+**What a second implementation is measured on.** The `pow` suite in
+[`conformance/vectors.json`](../../conformance/vectors.json) pins every derivation in this
+document that does *not* require an Argon2id evaluation: the base table at each of its
+boundaries, the rate term at every doubling, the trailing window either side of an epoch edge,
+the salt preimage, and the leading-zero-bit test. Those are the parts local to this protocol, and
+therefore the parts two implementations diverge on; Argon2id itself is a standard with published
+vectors of its own. **Passing the `pow` suite does not demonstrate a correct Argon2id**, and it
+is not offered as evidence of one — solved nonces at real difficulty belong in an implementation's
+own tests, where the 64 MiB cost is paid once rather than by every reader of the artifact.
 
 The honest cost note: 70 ms per record is cheap for one record and is not cheap for a
 full-history replay of a large log. A peer that has already verified a prefix of the log

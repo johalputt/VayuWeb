@@ -25,12 +25,25 @@ earlier one, but it cannot *finish* early.
 | VWIP-0000, the improvement process | Complete |
 | Threat model | Complete (draft) |
 | Whitepaper, architecture, governance guide, glossary, FAQ | Complete (draft) |
-| Independent adversarial review of the above | **Open — this is the current work** |
-| Test vectors for every wire-visible rule | **Four suites**, in [`conformance/vectors.json`](../conformance/vectors.json): record verification (a vector for every rejection code), convergence, resolution and replication. The last three pin what implementations must *agree* about rather than what one accepts — which is where a fork lives, and where every consensus-critical defect found here so far has been |
+| Independent adversarial review of the above | **Findings all dispositioned; the review itself is not finished.** The 2026-08-04 audit raised 66 surviving findings and every one now carries an outcome in [AUDIT-FINDINGS.md](AUDIT-FINDINGS.md) — fixed, escalated to an amendment, or verified stale. That is one audit, by seven agents, on one corpus. It is not the *independent* review this row asks for, and it cannot be: Article 44.6's standard is a competent implementer reading the specifications alone, and the same party that wrote them cannot supply that reader |
+| Test vectors for every wire-visible rule | **Six suites**, in [`conformance/vectors.json`](../conformance/vectors.json): record verification (a vector for every rejection code), convergence, resolution, replication, equivocation and proof-of-work derivation. The last five pin what implementations must *agree* about rather than what one accepts — which is where a fork lives, and where every consensus-critical defect found here so far has been |
 
 **Done when:** a competent implementer can read the specifications alone — without access to any
 source code and without asking a question — and produce a client that would interoperate. That
 property is required by Constitution Article 44.6, and it is not satisfied today.
+
+**What the audit changed, and what it did not.** It closed every defect anyone found and it
+raised the floor a great deal: **six conflicts** are now held open deliberately rather than
+unnoticed, and the checkers refuse the classes of drift that produced most of the rest. It
+did not establish the done-when condition, and no self-administered review can. The strongest
+honest statement is the negative one: an implementer reading these documents today will not hit
+the sixty-six things that were found, which is a different claim from will not hit anything.
+
+The audit's own lesson is worth carrying into Phases 2 to 5. **Fourteen of the eighteen HIGH
+findings were invisible to reading any single document and obvious with two open at once** — a
+specification against the charter, a specification against its sibling, or the charter against
+itself. Every checker this project had before the audit compared prose to a list, or a number to
+its source. Nothing compared two documents to each other, and that is where the defects were.
 
 Implementing the registry against these specifications has so far found eight defects in them,
 each recorded in `CHANGELOG.md`: two that would have made proof-of-work free or unnecessary, one
@@ -41,16 +54,22 @@ enforce the grammar its own design rests on. Every one was invisible to reading 
 implementing, which is the argument for treating the vector set as part of the specification
 rather than as test scaffolding.
 
-The adversarial review has since found a second class, which reading alone *does* catch — but
-only for a reader holding two documents open at once: the specifications contradicting the
-charter, and the charter contradicting itself. `TRANSFER` moved ownership on acceptance where
-Article 33.4 mandates a fourteen-day settlement delay, and `NAMES.md` and `REGISTRY.md`
-specified two different transfer state machines, one of them using record types outside Article
-29.4's closed set. Both are fixed. Three quantities are not, and cannot be by an implementer: the
-registration term, the renewal window and the post-expiry interval each have three disagreeing
-sources, two of which are Articles of the Constitution.
-`scripts/check-charter-consistency.py` prints them on every run and refuses a one-sided edit,
-because settling them is an amendment rather than a commit.
+**Six conflicts are held open rather than decided**, and they are held open for the same reason
+each time: both sides are Articles of the Constitution, so Article 3.7 cannot rank them and
+Article 58 reserves the choice to an amendment. `scripts/check-charter-consistency.py` prints all
+six on every run and fails if one is closed by editing a single side.
+
+Three are **quantities** — the registration term, the renewal window and the post-expiry interval
+each have three disagreeing sources. One is a **term**: "epoch" is an interval under Article 2.5
+and an instant under Article 11.5. Two are **memberships**: `RENEW` is normative in Articles 11.6,
+11.8 and 31.1 and absent from Article 29.4's closed record set, so a peer obeying 29.4 literally
+must refuse every renewal; and `TLD-CREATE` is a record type in 29.4 while Article 35.6 vests
+extension creation in a ratified proposal.
+
+Held open is not deferred. Each is printed, each is guarded, and the specification says which side
+it implements and why — because a subordinate document that quietly does the sensible thing
+against a clause of the charter is indistinguishable, to a second implementer, from one that
+overlooked the clause.
 
 ## Phase 1 — Registry core
 
@@ -61,6 +80,23 @@ serialisation with domain separation; Ed25519 sign and verify; Argon2id proof-of
 and verification; the six operations (`REGISTER`, `UPDATE`, `RENEW`, `TRANSFER`, `RELINQUISH`,
 `REVOKE`) with their validation ordering; the lifecycle state machine including grace and
 quarantine.
+
+**The proof-of-work arithmetic is now a contract, and writing it found a way to fork.** The
+difficulty schedule was covered by unit tests alone, so the `pow` suite was written to expose it
+to a second implementation — and the exercise turned up that `PROOF-OF-WORK.md` specifies its
+rate term as `floor(log2(n / 512))` without saying that `log2` is implementation-approximated in
+every language a client is likely to be written in. One ulp at an exact doubling is one bit of
+difficulty, which is one peer rejecting a record another accepted, permanently. Nothing has
+diverged — this implementation agrees across the whole reachable range, now established by a
+test that walks it — but nothing in the document required that, which is the defect. It now gives
+the integer formulation, and the vectors pin every boundary for everyone else.
+
+Writing that suite also produced the sharper lesson of the two. Its first version computed
+`expect: baseBits(labelLength)` — the answer obtained by calling the function under test — and
+four of five deliberate mutations to `pow.ts` survived it, because breaking the implementation
+moved the expectation with it. It is the same failure as the hand-written coverage list and the
+CSP test that pinned its block by name: **a check derived from the thing it checks proves
+nothing, and reads exactly like one that does.**
 
 **Depends on:** Phase 0.
 
@@ -76,6 +112,18 @@ Hyperswarm and HyperDHT discovery; replication and verification of received reco
 convergence rule for conflicting first-registrations with its deterministic tie-break;
 equivocation detection; snapshot and checkpoint format so a light client can verify without
 replaying all history.
+
+**Equivocation detection had no conformance vector, and writing one found the defect.** It was
+covered by unit tests alone — implemented, exercised, and measured against nothing but itself. Building the contract meant asking what a *second* implementation would do with a
+pair of records, and the answer was that this one recorded and forwarded evidence nobody had
+signed. An owner key is public, so two records naming a victim as owner for one name at one `seq`,
+signed by the attacker, were verified and passed on by every peer that received them: 6.4's
+manufactured evidence, arriving by the front door of the mechanism that refuses it.
+
+The fix is a signature check, deliberately not a validity check — `REPLICATION.md` 6.2.1 to
+6.2.4, and the `equivocation` suite in `conformance/vectors.json`. The pattern is by now the
+familiar one: the gap was invisible from inside the implementation and obvious the moment the
+question became "what would somebody else's code do with these bytes".
 
 **Mostly done.** The protocol is specified in [spec/REPLICATION.md](spec/REPLICATION.md) and
 implemented as a transport-agnostic state machine in `registry/src/replicate.ts`, exercised
@@ -113,6 +161,13 @@ The loopback HTTP proxy on `127.0.0.1:7654`; the token-authenticated control API
 a Unix domain socket; the resolution algorithm with its cache and TTL policy including negative
 caching; per-name origin isolation and the default Content-Security-Policy; the numbered error
 catalogue.
+
+**The `Permissions-Policy` header was specified and never emitted**, found in the audit's final
+pass: the proxy sent the CSP and eight of the nine other canonical values, so every powerful
+feature `CONTENT-SECURITY.md` enumerates as denied was in fact permitted. Fixed, and the test now
+enumerates the canonical markers in the document rather than naming the one block it checks. It
+is the sharpest example of this phase's own risk — the surfaces here are the ones a document can
+describe correctly while nothing emits them.
 
 **Mostly done.** The resolution algorithm — steps 1 to 10 and 13, the record-selection order,
 alias following with its hop budget, and the numbered error catalogue — is in

@@ -31,7 +31,20 @@ import { encode, decode, compareBytes, type CborMap, type CborValue } from './cb
 import { LIMITS, PROTOCOL_VERSION, encodeMessage } from './replicate.ts';
 import { signingInput, recordHashFromBytes } from './domain.ts';
 import { sign, publicKeyFrom } from './signature.ts';
-import { POW_ALGORITHM, POW_NONCE_LENGTH } from './pow.ts';
+import {
+  POW_ALGORITHM,
+  POW_NONCE_LENGTH,
+  POW_TAG_LENGTH,
+  RATE_FLOOR,
+  MAX_DIFFICULTY_BITS,
+  EPOCH_SECONDS,
+  RATE_WINDOW_SECONDS,
+  // Deliberately NOT importing baseBits, requiredBits or rateWindow. Every expectation in the
+  // pow suite is a literal transcribed from PROOF-OF-WORK.md; computing one by calling the
+  // function under test is what made the first version of this suite survive four of five
+  // mutations to `pow.ts`. `powSalt` is the sole exception, and it is pinned by the artifact.
+  powSalt,
+} from './pow.ts';
 import { TERM_SECONDS, RENEWAL_WINDOW_SECONDS, SETTLEMENT_SECONDS } from './verify.ts';
 import { GRACE_SECONDS } from './lifecycle.ts';
 import { RESERVED_LABELS } from './names.ts';
@@ -964,6 +977,59 @@ export interface ReplicationVector {
     | { readonly decode: 'reject'; readonly code: string };
 }
 
+/**
+ * A pair of record encodings, and whether they constitute equivocation.
+ *
+ * The two records and nothing else — that is the whole claim of REPLICATION.md 6.2, so the vector
+ * carries no state, no clock and no prior view. A vector that needed any of those would be
+ * describing something other than what the specification says an EQUIVOCATION report is.
+ */
+export interface EquivocationVector {
+  readonly name: string;
+  readonly rule: string;
+  readonly a: string;
+  readonly b: string;
+  readonly expect: { readonly equivocation: boolean };
+}
+
+/**
+ * One proof-of-work derivation, stated as inputs and the single answer every implementation
+ * must produce.
+ *
+ * **No Argon2id.** That is the whole reason this suite can exist, and it is not a compromise:
+ * the evaluation is a standard primitive with its own published vectors, while the parts two
+ * implementations actually diverge on are the ones around it — how difficulty is derived from a
+ * label and a rate, which bytes go into the salt, and how leading zero bits are counted. Get any
+ * of those wrong and your records are refused by everyone, having cost you 64 MiB per attempt to
+ * produce. `conformance/README.md` has said since the beginning that verifying the record
+ * vectors "does not demonstrate a correct proof-of-work implementation"; this is the suite that
+ * demonstrates the checkable half of it.
+ */
+export type PowVector = {
+  readonly name: string;
+  readonly rule: string;
+} & (
+  | { readonly check: 'baseBits'; readonly labelLength: number; readonly expect: number }
+  | {
+      readonly check: 'requiredBits';
+      readonly labelLength: number;
+      readonly windowCount: number;
+      readonly expect: number;
+    }
+  | {
+      readonly check: 'rateWindow';
+      readonly notBefore: number;
+      readonly expect: { readonly start: number; readonly end: number };
+    }
+  | { readonly check: 'salt'; readonly record: string; readonly expect: string }
+  | {
+      readonly check: 'tagSatisfies';
+      readonly tag: string;
+      readonly bits: number;
+      readonly expect: boolean;
+    }
+);
+
 /** A registration by the other key, so a race is between strangers rather than equivocation. */
 const byOther = (over: Record<string, CborValue> = {}): Uint8Array =>
   build(
@@ -1134,4 +1200,346 @@ export function buildReplicationVectors(): ReplicationVector[] {
       expect: { decode: 'reject', code: 'UNKNOWN_TYPE' },
     },
   ];
+}
+
+/**
+ * Equivocation evidence, verifiable from the two encodings alone.
+ *
+ * The suite exists because the honest cases and the forgeries are indistinguishable to a record
+ * verifier: neither half of a forged report is a record any peer would accept, and neither half of
+ * a genuine one need be either. What separates them is a question no record vector asks — is this
+ * pair attributable to the key it accuses? Two implementations answering that differently do not
+ * merely disagree about a rejection code; one of them republishes, at every peer it talks to, that
+ * a name of the attacker's choosing is compromised.
+ */
+export function buildEquivocationVectors(): EquivocationVector[] {
+  /** A record naming VECTOR_OWNER_KEY as owner that VECTOR_OWNER_SECRET never signed. */
+  const forged = (over: Record<string, CborValue> = {}): Uint8Array =>
+    build(
+      {
+        version: 1,
+        suite: 1,
+        op: 'REGISTER',
+        name: 'atlas',
+        tld: 'vayu',
+        ownerKey: VECTOR_OWNER_KEY,
+        seq: 0,
+        notBefore: VECTOR_NOW,
+        notAfter: VECTOR_NOW + TERM_SECONDS,
+        records: [entry('txt', 'v=vayuweb1;forged')],
+        powProof: powProof(),
+        prevHash: new Uint8Array(32),
+        ...over,
+      },
+      VECTOR_OTHER_SECRET,
+    );
+
+  const one = registration();
+  const two = registration({ records: [entry('txt', 'v=vayuweb1;two')] });
+  const laterSeq = successor({ records: [entry('txt', 'v=vayuweb1;two')] });
+  const otherName = registration({ name: 'boreal' });
+  const otherTld = registration({ tld: 'web' });
+
+  /** Two TRANSFERs of one name at one seq, both countersigned by the recipient they name. */
+  const handover = (at: number): Uint8Array =>
+    successor(
+      {
+        op: 'TRANSFER',
+        ownerKey: VECTOR_OTHER_KEY,
+        notBefore: at,
+        notAfter: VECTOR_NOW + TERM_SECONDS,
+        records: [],
+      },
+      VECTOR_OWNER_SECRET,
+      VECTOR_OTHER_SECRET,
+    );
+
+  return [
+    {
+      name: 'equivocation/two-futures-for-one-name',
+      rule: 'REPLICATION.md 6.1: one owner key signing two different records at the same seq for one name.tld',
+      a: toHex(one),
+      b: toHex(two),
+      expect: { equivocation: true },
+    },
+    {
+      name: 'equivocation/two-owners-racing-is-not',
+      rule: 'REPLICATION.md 6.1: an honest partition conflict is two DIFFERENT owners racing for a free name',
+      a: toHex(one),
+      b: toHex(byOther()),
+      expect: { equivocation: false },
+    },
+    {
+      name: 'equivocation/duplicate-is-not',
+      rule: 'REPLICATION.md 6.3: a report whose two records do not in fact equivocate MUST be discarded',
+      a: toHex(one),
+      b: toHex(one),
+      expect: { equivocation: false },
+    },
+    {
+      name: 'equivocation/different-seq-is-a-chain',
+      rule: 'REPLICATION.md 6.1: records at different seq are a chain, not two futures',
+      a: toHex(one),
+      b: toHex(laterSeq),
+      expect: { equivocation: false },
+    },
+    {
+      name: 'equivocation/different-name-is-not',
+      rule: 'REPLICATION.md 6.1: equivocation is about one name.tld; one owner holding two names is ordinary',
+      a: toHex(one),
+      b: toHex(otherName),
+      expect: { equivocation: false },
+    },
+    {
+      name: 'equivocation/different-extension-is-not',
+      rule: 'REPLICATION.md 6.1: the same label in two extensions is two names',
+      a: toHex(one),
+      b: toHex(otherTld),
+      expect: { equivocation: false },
+    },
+    {
+      // The forgery, and the reason 6.2 lists signatures first. An owner key is public — it is in
+      // every record its holder ever published — so a pair that is checked for everything except
+      // who signed it can be minted by anyone, against anyone.
+      name: 'equivocation/neither-half-signed-by-the-accused',
+      rule: 'REPLICATION.md 6.2: a recipient checks BOTH SIGNATURES, both seq values, both names and that the owner keys are equal',
+      a: toHex(forged()),
+      b: toHex(forged({ records: [entry('txt', 'v=vayuweb1;forged2')] })),
+      expect: { equivocation: false },
+    },
+    {
+      // The halfway case an implementation checking "a signature" rather than "both" would pass:
+      // one genuine published record of the victim's, paired with one the attacker minted.
+      name: 'equivocation/one-half-signed-by-the-accused',
+      rule: 'REPLICATION.md 6.2: BOTH signatures, so a genuine record paired with a minted one is not evidence',
+      a: toHex(one),
+      b: toHex(forged()),
+      expect: { equivocation: false },
+    },
+    {
+      // The other side of the line. Neither of these would be ACCEPTED by any verifier — the
+      // successor carries no proof of work and chains onto a record the recipient may not hold —
+      // and both are genuinely signed by the key they name. An equivocator who could escape the
+      // record by breaking their own proof of work would have a one-line evasion.
+      name: 'equivocation/unacceptable-records-still-equivocate',
+      rule: 'REPLICATION.md 6.2: the evidence is the two encodings; acceptance is a separate question',
+      a: toHex(successor({ records: [entry('txt', 'v=vayuweb1;a')] })),
+      b: toHex(successor({ records: [entry('txt', 'v=vayuweb1;b')] })),
+      expect: { equivocation: true },
+    },
+    {
+      // TRANSFER is the one operation whose `sig` is not the named owner's: it is the
+      // transferor's, whose key is nowhere in these bytes. `coSig` is, and verifies under
+      // `ownerKey`. An implementation reading `sig` for every operation refuses every report
+      // involving a transfer — silently, and precisely in the window Article 33.4 leaves a name
+      // in flux.
+      name: 'equivocation/transfer-attributed-by-cosig',
+      rule: 'REGISTRY.md: a TRANSFER is signed by the transferor and countersigned by the incoming owner under coSig',
+      a: toHex(handover(VECTOR_NOW + 600)),
+      b: toHex(handover(VECTOR_NOW + 1200)),
+      expect: { equivocation: true },
+    },
+    {
+      name: 'equivocation/undecodable-halves',
+      rule: 'REPLICATION.md 6.2: evidence that does not decode as two records is not evidence',
+      a: toHex(Uint8Array.of(0x01)),
+      b: toHex(Uint8Array.of(0x02)),
+      expect: { equivocation: false },
+    },
+  ];
+}
+
+/**
+ * Proof-of-work derivation, without a single Argon2id evaluation.
+ *
+ * The suite exists because the expensive part is the part two implementations are least likely
+ * to get wrong. Argon2id is a standard with its own vectors; what is local to this protocol is
+ * the arithmetic around it, and every piece of that arithmetic is consensus-critical. A rate
+ * term off by one bit means one peer rejects a record another accepted, permanently, on a record
+ * that is otherwise entirely valid — and the registrant paid 64 MiB per attempt to produce it.
+ *
+ * ## Every expectation here is a literal, and that is not a style choice
+ *
+ * The first draft of this suite wrote `expect: baseBits(labelLength)` — computing the answer by
+ * calling the function under test. It passed, and it was worthless: four of five deliberate
+ * mutations to `pow.ts` survived it, because breaking the implementation moved the expectation
+ * with it. A vector whose expected value is derived from the implementation is a snapshot of
+ * whatever that implementation currently does, which is the opposite of a specification.
+ *
+ * So the figures below are transcribed from PROOF-OF-WORK.md section 4 and can be checked
+ * against it by reading. The one exception is the salt, which is a SHA-256 digest that no human
+ * derives by hand; it is pinned by the committed artifact instead, and the runner reads the
+ * committed file rather than regenerating — so a change to the preimage rule appears as a diff
+ * in `conformance/vectors.json` and fails the comparison.
+ */
+export function buildPowVectors(): PowVector[] {
+  const baseRule =
+    'PROOF-OF-WORK.md 4: base difficulty by label length — 10 bits at 1-2 characters, 9 at 3, ' +
+    '8 at 4, 7 at 5-6, 6 at 7-9, 5 at 10-15, 4 at 16 and above';
+  const rateRule =
+    'PROOF-OF-WORK.md 4: rate = 0 below 512, else min(8, floor(log2(n / 512))); total = ' +
+    'min(20, base + rate)';
+
+  /** `[labelLength, bits]`, read off the table in PROOF-OF-WORK.md 4 — every boundary and its neighbours. */
+  const BASE: readonly (readonly [number, number])[] = [
+    [1, 10],
+    [2, 10],
+    [3, 9],
+    [4, 8],
+    [5, 7],
+    [6, 7],
+    [7, 6],
+    [9, 6],
+    [10, 5],
+    [15, 5],
+    [16, 4],
+    [63, 4],
+  ];
+
+  /**
+   * `[windowCount, totalBitsForA16CharacterLabel]`. Base is 4 at sixteen characters, so the
+   * figure past the first is `4 + rate` and the rate term is readable straight off it.
+   *
+   * The exact doublings are the interesting ones, and the reason is a hazard the specification's
+   * pseudocode does not mention: it writes the rate as `floor(log2(n / 512))`, and `log2` is an
+   * implementation-approximated function in most languages — ECMAScript, C, Python and Go all
+   * say so in terms. A result one ulp below an integer at an exact doubling floors to one less,
+   * which is a one-bit difficulty DISAGREEMENT between two peers that both believe they conform.
+   * Stated as vectors, an implementation whose `log2` does that fails here rather than in the
+   * field, on somebody's valid record.
+   */
+  const RATE: readonly (readonly [number, number])[] = [
+    [0, 4],
+    [1, 4],
+    [511, 4],
+    [512, 4],
+    [513, 4],
+    [1023, 4],
+    [1024, 5],
+    [2048, 6],
+    [4096, 7],
+    [8192, 8],
+    [16_384, 9],
+    [32_768, 10],
+    [65_536, 11],
+    [131_072, 12],
+    // Past the rate clamp: the eighth doubling is the last that buys a bit, so these are equal.
+    [262_144, 12],
+    [51_200_000, 12],
+  ];
+
+  /**
+   * `[label, notBefore, start, end]` for the trailing window.
+   *
+   * The quantisation exists, in the specification's own words, "so that two peers with slightly
+   * different clocks agree on `n`". One second either side of an epoch boundary is where an
+   * implementation rounding the wrong way stops agreeing, and the window is half-open, so the
+   * instant at the boundary belongs to the NEW epoch and its window ends there.
+   */
+  const WINDOWS: readonly (readonly [string, number, number, number])[] = [
+    ['epoch-boundary', VECTOR_NOW, 1_779_926_400, 1_782_518_400],
+    ['one-second-before', VECTOR_NOW - 1, 1_779_922_800, 1_782_514_800],
+    ['one-second-after', VECTOR_NOW + 1, 1_779_926_400, 1_782_518_400],
+    ['mid-epoch', VECTOR_NOW + EPOCH_SECONDS / 2, 1_779_926_400, 1_782_518_400],
+  ];
+
+  /** A record whose salt preimage exercises both strip rules: `sig` out, `powProof.nonce` out. */
+  const saltSubject = registration();
+
+  const vectors: PowVector[] = [];
+
+  for (const [labelLength, expect] of BASE) {
+    vectors.push({
+      name: `pow/base-bits-length-${labelLength}`,
+      rule: baseRule,
+      check: 'baseBits',
+      labelLength,
+      expect,
+    });
+  }
+
+  for (const [windowCount, expect] of RATE) {
+    // A sixteen-character label sits on the flat part of the base table, so the vector isolates
+    // the rate term instead of measuring the two together.
+    vectors.push({
+      name: `pow/required-bits-rate-${windowCount}`,
+      rule: rateRule,
+      check: 'requiredBits',
+      labelLength: 16,
+      windowCount,
+      expect,
+    });
+  }
+
+  // The hardest registration the schedule can ask for: the shortest label under the busiest
+  // extension. 10 + 8 is 18, so the `min(20, ...)` ceiling never binds — the reachable maximum
+  // is 18 bits, roughly 262,000 evaluations, and a reader sizing worst-case cost from the 20 in
+  // the formula would overstate it fourfold. Pinned as 18 rather than 20 for exactly that
+  // reason: the vector states what the schedule does, not what its clamp allows for.
+  vectors.push({
+    name: 'pow/required-bits-hardest-reachable',
+    rule: `${rateRule} — and 10 + 8 = 18, so the ${MAX_DIFFICULTY_BITS}-bit ceiling is a headroom allowance rather than a limit the schedule reaches`,
+    check: 'requiredBits',
+    labelLength: 2,
+    windowCount: RATE_FLOOR * 256,
+    expect: 18,
+  });
+
+  for (const [label, notBefore, start, end] of WINDOWS) {
+    vectors.push({
+      name: `pow/rate-window-${label}`,
+      rule: `PROOF-OF-WORK.md 4: the window is the ${RATE_WINDOW_SECONDS}s before the start of notBefore's ${EPOCH_SECONDS}s epoch, half-open`,
+      check: 'rateWindow',
+      notBefore,
+      expect: { start, end },
+    });
+  }
+
+  vectors.push({
+    // The salt is what binds a proof to one record. REGISTRY.md refuses to let a record carry
+    // one precisely because a carried salt is a free parameter, and a single ground
+    // `(salt, nonce)` pair would then satisfy every record an attacker cared to mint. An
+    // implementation deriving it from different bytes produces proofs nobody accepts.
+    //
+    // The one computed expectation in this suite, because it is a digest. The committed artifact
+    // is what pins it: change the preimage rule and the diff shows up in `vectors.json`.
+    name: 'pow/salt-derivation',
+    rule: 'REGISTRY.md: salt = SHA-256("vayuweb-pow-v1" || record without sig and without powProof.nonce)[0..16]',
+    check: 'salt',
+    record: toHex(saltSubject),
+    expect: toHex(powSalt(decode(saltSubject) as CborMap)),
+  });
+
+  // The leading-zero-bit test, most significant bit first. The divergence to catch is an
+  // implementation that counts whole zero BYTES rather than bits: it agrees on a tag beginning
+  // `00 80` (eight either way) and disagrees on one beginning `0f`, which has four leading zero
+  // bits and no leading zero bytes at all. Both vectors are here, because a suite carrying only
+  // the first would pass against the wrong implementation.
+  for (const [label, bytes, bits, expect] of [
+    ['all-zero-tag-meets-any', new Uint8Array(POW_TAG_LENGTH), MAX_DIFFICULTY_BITS, true],
+    ['exactly-eight-bits', withLeadingByte(0x00, 0x80), 8, true],
+    ['eight-bits-is-not-nine', withLeadingByte(0x00, 0x80), 9, false],
+    ['four-bits-within-a-byte', withLeadingByte(0x0f, 0xff), 4, true],
+    ['four-bits-is-not-five', withLeadingByte(0x0f, 0xff), 5, false],
+    ['zero-bits-is-satisfied-by-anything', withLeadingByte(0xff, 0xff), 0, true],
+  ] as const) {
+    vectors.push({
+      name: `pow/tag-${label}`,
+      rule: 'PROOF-OF-WORK.md: leading zero bits over the whole tag, most-significant bit first, counted without early exit',
+      check: 'tagSatisfies',
+      tag: toHex(bytes),
+      bits,
+      expect,
+    });
+  }
+
+  return vectors;
+}
+
+/** A tag of the protocol's length whose first two bytes are given and whose rest is 0xff. */
+function withLeadingByte(first: number, second: number): Uint8Array {
+  const tag = new Uint8Array(POW_TAG_LENGTH).fill(0xff);
+  tag[0] = first;
+  tag[1] = second;
+  return tag;
 }

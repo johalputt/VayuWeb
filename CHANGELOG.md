@@ -10,6 +10,96 @@ it.
 
 ## [Unreleased]
 
+### Fixed — equivocation evidence nobody had to sign
+
+- **Any owner key was enough to manufacture equivocation evidence against its holder.**
+  `verifyEquivocation` checked that two records named one `name.tld`, at one `seq`, with one
+  `ownerKey`, and that their hashes differed — everything the report claims except *who signed
+  it*. An owner key is public; it appears in every record its holder ever published. So the
+  attack was: take a victim's key, mint two records naming it as owner for one name at one `seq`,
+  sign both with a key of your own, and send the pair. Every peer receiving it verified it,
+  recorded it, and forwarded it on. Nothing in the pair was the victim's but their public key.
+
+  `REPLICATION.md` 6.2 already listed signatures first among what a recipient checks, and 6.4
+  already named the consequence of skipping them — "a mechanism able to strip a name on evidence
+  is a mechanism able to strip a name on *manufactured* evidence". The gap was between the
+  document and the code, and the unit test covering the area stated the exact threat in a comment
+  ("a report taken on trust is a way to get any name reported as compromised by anyone who can
+  send a message") while exercising only a duplicate and two bytes of garbage.
+
+  The fix is a signature check and deliberately **not** a validity check. Expiry, proof of work,
+  chain position and lifecycle state are reasons a record would be *refused*, and requiring them
+  would hand an equivocator a one-line evasion: break your own proof of work in both halves and
+  no report of you can be verified. A signature is different in kind — it is the only thing that
+  makes a record attributable, and equivocation is a claim about who signed. Both are now written
+  into the specification rather than left as an implementation opinion (6.2.1 and 6.2.4).
+
+- **`TRANSFER` is attributed by its countersignature, not its signature.** A `TRANSFER`'s `sig`
+  is the *transferor's*, and the transferor's key is not in those bytes at all — the same
+  self-containment gap that gives `VectorState.transferorKey` its reason to exist. The named
+  owner's own signature is `coSig`, which the schema requires on `TRANSFER` and forbids
+  everywhere else. An implementation reading `sig` for every operation would refuse every report
+  involving a transfer, silently, and precisely in the window Article 33.4 leaves a name in flux.
+  Written down as a table in 6.2.2 so it is not a thing each implementer has to rediscover.
+
+- **One limit is now stated rather than left to be discovered.** Attribution is by `ownerKey`, so
+  a transferor signing two different `TRANSFER`s of one name at one `seq` to two *different*
+  recipients is not reported: the records name different owners. Detecting it needs the
+  transferor's key, which is not in the evidence, and evidence that needs outside state is
+  evidence that can be faked by whoever supplies the state. `REPLICATION.md` 6.2.3.
+
+### Added — the `pow` conformance suite, and a `log2` that two peers can disagree about
+
+- **`PROOF-OF-WORK.md` now requires the rate term to be computed exactly.** Its pseudocode says
+  `floor(log2(n / 512))`, and `log2` is an implementation-approximated function in ECMAScript, C,
+  Python and Go alike — a result one ulp below an integer at an exact doubling floors to one
+  less. That is a one-bit difficulty disagreement between two peers that each believe they
+  conform: one rejects a record the other accepted, permanently, on a record that is otherwise
+  entirely valid and cost 64 MiB per attempt to produce. Every other quantity in that section is
+  quantised specifically so two peers agree on `n`; a transcendental at the last step gave it
+  away for nothing. The document now states the integer formulation (count the doublings) and the
+  vectors pin every boundary. This implementation agrees across the whole reachable range, which
+  is now established by a test walking it rather than assumed.
+
+- **`pow` vectors in `conformance/vectors.json`** — 40 of them, and not one Argon2id evaluation.
+  The split is the point: Argon2id is a standard with published vectors of its own, while the
+  base table, the rate term, the trailing window, the salt preimage and the leading-zero-bit test
+  are local to this protocol and are therefore what two implementations diverge on. Passing the
+  suite does not demonstrate a correct Argon2id and does not claim to.
+
+- **Four of five mutations survived the first version of that suite, which is why it was
+  rewritten.** It computed `expect: baseBits(labelLength)` — calling the function under test — so
+  breaking the implementation moved the expectation with it. Every expectation is now a literal
+  transcribed from `PROOF-OF-WORK.md`, the salt excepted because it is a digest, and the runner
+  reads the committed artifact rather than regenerating. All six mutations fail against the
+  rewrite. A vector whose expected value comes from the implementation is a snapshot of what that
+  implementation does, which is the opposite of a specification — and it is the same shape as the
+  hand-written coverage list and the CSP test that pinned its block by name.
+
+### Added — the equivocation conformance suite, and what building it found
+
+- **`equivocation` vectors in `conformance/vectors.json`** — eleven pairs of record encodings and
+  the one boolean each must produce, per `REPLICATION.md` 6.2: two records, no state, no clock,
+  no prior view. Equivocation had been covered by unit tests alone, and writing the contract is
+  what surfaced the forgery above. That is the pattern this project keeps
+  producing: the defect was invisible from inside the implementation and obvious the moment the
+  question became "what would somebody else's code do with these bytes".
+
+  Both answers are pinned, not only the refusals, and a test enforces it — a suite made entirely
+  of forgeries passes against an implementation that never reports anything, and under-reporting
+  here is silent.
+
+- **The artifact comparison now covers all five suites.** The record suite had been compared
+  against a fresh generation since the beginning; `convergence`, `resolution` and `replication`
+  were only checked for existence, so a generator change could have moved their bytes without the
+  diff appearing in the committed file — which is the entire purpose of committing it.
+
+- **`scripts/check-counts.py` derives the suite count.** Two documents were left asserting "four
+  suites" while the file carried five. The vector *count* was already derived; the *suite* count
+  was not, and the two go stale for different reasons — one drifts when the generator changes,
+  the other the moment somebody adds a suite. Conformance items 8.5 and 8.6 in `REPLICATION.md`
+  now name the vectors that pin them.
+
 ### Fixed — the last three findings: a clock that could stop, and a revocation that said "expired"
 
 - **The epoch counter could stall forever, justified by a paragraph naming that exact failure.**

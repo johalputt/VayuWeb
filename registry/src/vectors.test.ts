@@ -8,14 +8,18 @@ import {
   buildConvergenceVectors,
   buildReplicationVectors,
   buildResolutionVectors,
+  buildEquivocationVectors,
+  buildPowVectors,
   fromHex,
+  toHex,
   type Vector,
+  type PowVector,
 } from './vectors.ts';
 import { resolveConflict, type Candidate } from './converge.ts';
 import { resolveName } from './resolve.ts';
-import { decodeMessage, ReplicationError } from './replicate.ts';
+import { decodeMessage, verifyEquivocation, ReplicationError } from './replicate.ts';
 import { recordHashFromBytes } from './domain.ts';
-import { compareBytes } from './cbor.ts';
+import { compareBytes, decode, type CborMap } from './cbor.ts';
 import {
   verify,
   predecessorFrom,
@@ -24,6 +28,7 @@ import {
   type Verdict,
 } from './verify.ts';
 import { parseRecordBytes } from './record.ts';
+import { baseBits, requiredBits, rateWindow, powSalt, tagSatisfies, RATE_FLOOR } from './pow.ts';
 
 const ARTIFACT = fileURLToPath(new URL('../../conformance/vectors.json', import.meta.url));
 
@@ -161,7 +166,7 @@ test('vector names are unique, so a failure names exactly one case', () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* The three suites that pin what implementations must AGREE about             */
+/* The five suites that pin what implementations must AGREE about              */
 /* -------------------------------------------------------------------------- */
 
 test('every convergence vector picks the same winner, whichever way round it is given', () => {
@@ -229,14 +234,140 @@ test('every replication vector decodes, or is refused with the code the specific
   assert.deepEqual(failures, []);
 });
 
-test('the committed artifact carries all four suites', () => {
+test('every equivocation vector is judged the same way by every implementation', () => {
+  // The suite the record vectors are structurally blind to. Neither half of a forged report is a
+  // record any verifier would accept, and neither half of a genuine one need be either — so what
+  // separates them is a question no record vector asks. Two implementations answering it
+  // differently do not merely disagree about a code: one of them republishes, at every peer it
+  // talks to, that a name of the attacker's choosing is compromised.
+  const failures: string[] = [];
+  for (const vector of buildEquivocationVectors()) {
+    const actual = verifyEquivocation({
+      t: 'EQUIVOCATION',
+      a: fromHex(vector.a),
+      b: fromHex(vector.b),
+    });
+    if (actual !== vector.expect.equivocation) {
+      failures.push(
+        `${vector.name}\n      rule:     ${vector.rule}` +
+          `\n      expected: ${vector.expect.equivocation}\n      actual:   ${actual}`,
+      );
+    }
+  }
+  assert.deepEqual(failures, [], `\n  ${failures.join('\n  ')}\n`);
+});
+
+test('the equivocation suite pins both answers, not only refusals', () => {
+  // A suite of nothing but forgeries passes against an implementation that never reports
+  // anything, which is the failure mode this whole area has: under-reporting is silent.
+  const answers = new Set(buildEquivocationVectors().map((v) => v.expect.equivocation));
+  assert.ok(answers.has(true), 'evidence that IS equivocation must be pinned');
+  assert.ok(answers.has(false), 'and evidence that is not');
+});
+
+test('every proof-of-work vector produces the value the specification requires', () => {
+  // Read from the COMMITTED artifact, not from `buildPowVectors()`. A second implementation runs
+  // against the file, so running against the file is the only version of this test that means
+  // what it says — and the salt vector, which is the one expectation a human cannot transcribe
+  // from the specification, is pinned by nothing else.
+  const onDisk = JSON.parse(readFileSync(ARTIFACT, 'utf8')) as { pow: PowVector[] };
+  const failures: string[] = [];
+  for (const vector of onDisk.pow) {
+    let actual: unknown;
+    switch (vector.check) {
+      case 'baseBits':
+        actual = baseBits(vector.labelLength);
+        break;
+      case 'requiredBits':
+        actual = requiredBits(vector.labelLength, vector.windowCount);
+        break;
+      case 'rateWindow':
+        actual = rateWindow(vector.notBefore);
+        break;
+      case 'salt':
+        actual = toHex(powSalt(decode(fromHex(vector.record)) as CborMap));
+        break;
+      case 'tagSatisfies':
+        actual = tagSatisfies(fromHex(vector.tag), vector.bits);
+        break;
+    }
+    let same: boolean;
+    try {
+      assert.deepEqual(actual, vector.expect);
+      same = true;
+    } catch {
+      same = false;
+    }
+    if (!same) {
+      failures.push(
+        `${vector.name}\n      rule:     ${vector.rule}` +
+          `\n      expected: ${JSON.stringify(vector.expect)}` +
+          `\n      actual:   ${JSON.stringify(actual)}`,
+      );
+    }
+  }
+  assert.deepEqual(failures, [], `\n  ${failures.join('\n  ')}\n`);
+});
+
+test('the rate term never depends on how accurate a language’s log2 is', () => {
+  // PROOF-OF-WORK.md 4 writes the rate as `floor(log2(n / 512))`. `log2` is
+  // implementation-approximated in most languages — ECMAScript requires only that it be an
+  // implementation-approximated function, and the same is true of C, Python and Go. A result one
+  // ulp below an integer at an exact doubling floors to one less, which is a one-bit difficulty
+  // DISAGREEMENT between two peers that both believe they conform: one rejects a record the
+  // other accepted, permanently, on a record that is otherwise entirely valid.
+  //
+  // This implementation happens to agree across the whole reachable range, and that is a fact to
+  // be established rather than assumed — the vectors pin the boundaries for everyone else, and
+  // this test pins the range for this one.
+  const exact = (n: number): number => {
+    if (n < RATE_FLOOR) return 0;
+    // Integer-only: how many times can n be halved before it drops below the floor.
+    let doublings = 0;
+    let value = Math.floor(n / RATE_FLOOR);
+    while (value >= 2) {
+      value = Math.floor(value / 2);
+      doublings += 1;
+    }
+    return Math.min(8, doublings);
+  };
+
+  const disagreements: string[] = [];
+  // Past the eighth doubling the clamp makes them agree trivially, so the range that matters is
+  // the one below it, walked exhaustively rather than sampled.
+  for (let n = 0; n <= RATE_FLOOR * 300; n += 1) {
+    const viaFloat = requiredBits(16, n) - baseBits(16);
+    if (viaFloat !== exact(n)) {
+      disagreements.push(`n=${n}: float ${viaFloat}, integer ${exact(n)}`);
+    }
+  }
+  assert.deepEqual(disagreements.slice(0, 5), []);
+});
+
+test('the committed artifact carries all six suites', () => {
   // A suite that exists in code and not in the artifact is a suite no second implementation can
   // run, which makes it a test of this implementation rather than a contract between two.
   const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')) as Record<string, unknown>;
-  for (const suite of ['vectors', 'convergence', 'resolution', 'replication']) {
+  for (const suite of [
+    'vectors',
+    'convergence',
+    'resolution',
+    'replication',
+    'equivocation',
+    'pow',
+  ]) {
     assert.ok(Array.isArray(artifact[suite]), `${suite} must be an array in the artifact`);
     assert.ok((artifact[suite] as unknown[]).length > 0, `${suite} must not be empty`);
   }
+
+  // And the artifact's own copy must match, not merely exist. The record suite has had this check
+  // since the beginning; the three that pin agreement did not, so a generator change could move
+  // their bytes without the diff appearing in the committed file.
+  assert.deepEqual(artifact['equivocation'], buildEquivocationVectors());
+  assert.deepEqual(artifact['pow'], buildPowVectors());
+  assert.deepEqual(artifact['convergence'], buildConvergenceVectors());
+  assert.deepEqual(artifact['resolution'], buildResolutionVectors());
+  assert.deepEqual(artifact['replication'], buildReplicationVectors());
 });
 
 /** Build a convergence candidate from a record's hex, as a second implementation would. */

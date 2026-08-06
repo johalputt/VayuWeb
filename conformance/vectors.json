@@ -4,12 +4,12 @@
   "generatedFor": "docs/spec/REGISTRY.md",
   "notes": {
     "clock": "now is a Unix timestamp in seconds. Vectors never depend on the wall clock of the machine running them.",
-    "proofOfWork": "state.powVerified injects the result of proof-of-work verification rather than requiring a 64 MiB Argon2id evaluation per vector. The proof construction has its own vectors, with real solved nonces, in the implementation test suite.",
+    "proofOfWork": "state.powVerified injects the result of proof-of-work verification rather than requiring a 64 MiB Argon2id evaluation per vector. The `pow` suite covers the derivations around the evaluation — difficulty from label length and rate, the rate window, salt derivation and the leading-zero-bit test — none of which need an Argon2id call. The evaluation itself is a standard primitive with its own published vectors; solved nonces at real difficulty live in the implementation test suite. Passing `pow` does not demonstrate a correct Argon2id.",
     "keys": "Fixed test keys, derived from all-0x42 and all-0x77 seeds. Not secret. Never to be used for anything real.",
     "ownerKey": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12",
     "otherKey": "c853ad0f0cd2b619aea92ceec4fd56a24d6499d584ce79257e45cfd8139b60a7",
     "baseInstant": 1782518400,
-    "suites": "record pins what a verifier accepts. convergence, resolution and replication pin what implementations must AGREE about after that, which is where a fork lives — every consensus-critical defect found in this project so far was invisible to record verification and visible only to the question \"what would a second implementation do\"."
+    "suites": "record pins what a verifier accepts. convergence, resolution, replication, equivocation and pow pin what implementations must AGREE about after that, which is where a fork lives — every consensus-critical defect found in this project so far was invisible to record verification and visible only to the question \"what would a second implementation do\"."
   },
   "vectors": [
     {
@@ -1302,6 +1302,424 @@
         "decode": "reject",
         "code": "UNKNOWN_TYPE"
       }
+    }
+  ],
+  "equivocation": [
+    {
+      "name": "equivocation/two-futures-for-one-name",
+      "rule": "REPLICATION.md 6.1: one owner key signing two different records at the same seq for one name.tld",
+      "a": "ad626f706852454749535445526373657100637369675840859cf60530b0f672147dc595144fce3db1aabed26230bc5fd699161b63dacf4466ef5c085834816a2b1ec7e253c4881fea82ef647a480bbe02da06407556f00c63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656a763d76617975776562316776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "b": "ad626f706852454749535445526373657100637369675840a4b6026c78fcc3c3fdc17cd90d6620fc7ef26b7486ae5349efb151f0690ec355718ffa967d740bd587fea2581bfde806d9c16723d7bc3580d463ddb3b6ef7d0263746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656e763d76617975776562313b74776f6776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "expect": {
+        "equivocation": true
+      }
+    },
+    {
+      "name": "equivocation/two-owners-racing-is-not",
+      "rule": "REPLICATION.md 6.1: an honest partition conflict is two DIFFERENT owners racing for a free name",
+      "a": "ad626f706852454749535445526373657100637369675840859cf60530b0f672147dc595144fce3db1aabed26230bc5fd699161b63dacf4466ef5c085834816a2b1ec7e253c4881fea82ef647a480bbe02da06407556f00c63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656a763d76617975776562316776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "b": "ad626f7068524547495354455263736571006373696758403fcf2e49ef4044a29e3cb60041b7f83217f20164215025c08c499afc733be1a555bc543fa4adf690b6be7e7912b914e77682fd815a32cced706af66a4bf1200c63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c756570763d76617975776562313b6f746865726776657273696f6e01686e6f7441667465721a6c204600686f776e65724b65795820c853ad0f0cd2b619aea92ceec4fd56a24d6499d584ce79257e45cfd8139b60a768706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "expect": {
+        "equivocation": false
+      }
+    },
+    {
+      "name": "equivocation/duplicate-is-not",
+      "rule": "REPLICATION.md 6.3: a report whose two records do not in fact equivocate MUST be discarded",
+      "a": "ad626f706852454749535445526373657100637369675840859cf60530b0f672147dc595144fce3db1aabed26230bc5fd699161b63dacf4466ef5c085834816a2b1ec7e253c4881fea82ef647a480bbe02da06407556f00c63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656a763d76617975776562316776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "b": "ad626f706852454749535445526373657100637369675840859cf60530b0f672147dc595144fce3db1aabed26230bc5fd699161b63dacf4466ef5c085834816a2b1ec7e253c4881fea82ef647a480bbe02da06407556f00c63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656a763d76617975776562316776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "expect": {
+        "equivocation": false
+      }
+    },
+    {
+      "name": "equivocation/different-seq-is-a-chain",
+      "rule": "REPLICATION.md 6.1: records at different seq are a chain, not two futures",
+      "a": "ad626f706852454749535445526373657100637369675840859cf60530b0f672147dc595144fce3db1aabed26230bc5fd699161b63dacf4466ef5c085834816a2b1ec7e253c4881fea82ef647a480bbe02da06407556f00c63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656a763d76617975776562316776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "b": "ad626f70665550444154456373657101637369675840ef85120cfb79b01e7c9bcd0fae8100ec4e8610251cce82a770c17e78508a0b938802532fcb436986b833dbe57bf3e4d0d13244e352297d4ade60967a20de640a63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656e763d76617975776562313b74776f6776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66f66870726576486173685820339aa2a96b991d731810495453cc3dc1d9b2bc27e54f7e5a81c9362f68554eb0696e6f744265666f72651a6a3f14d8",
+      "expect": {
+        "equivocation": false
+      }
+    },
+    {
+      "name": "equivocation/different-name-is-not",
+      "rule": "REPLICATION.md 6.1: equivocation is about one name.tld; one owner holding two names is ordinary",
+      "a": "ad626f706852454749535445526373657100637369675840859cf60530b0f672147dc595144fce3db1aabed26230bc5fd699161b63dacf4466ef5c085834816a2b1ec7e253c4881fea82ef647a480bbe02da06407556f00c63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656a763d76617975776562316776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "b": "ad626f70685245474953544552637365710063736967584076280ea9aae582886a38ec50d85c1998672dfeac5704bfff0c811ad544285da157b1597af4ecf0142b0f398f544c90a177a072ad3d6cce7c63412b3b4c885d0463746c646476617975646e616d6566626f7265616c65737569746501677265636f72647381a26474797065637478746576616c75656a763d76617975776562316776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "expect": {
+        "equivocation": false
+      }
+    },
+    {
+      "name": "equivocation/different-extension-is-not",
+      "rule": "REPLICATION.md 6.1: the same label in two extensions is two names",
+      "a": "ad626f706852454749535445526373657100637369675840859cf60530b0f672147dc595144fce3db1aabed26230bc5fd699161b63dacf4466ef5c085834816a2b1ec7e253c4881fea82ef647a480bbe02da06407556f00c63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656a763d76617975776562316776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "b": "ad626f706852454749535445526373657100637369675840e6ab2dc0e65c405702952cba64830f96975ed7e7f621f89912e629e7cf719a09410ff8cda6fe1637915daf420bc04b3bded9e10312ee51fa374b9c31b2fa9a0263746c6463776562646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656a763d76617975776562316776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "expect": {
+        "equivocation": false
+      }
+    },
+    {
+      "name": "equivocation/neither-half-signed-by-the-accused",
+      "rule": "REPLICATION.md 6.2: a recipient checks BOTH SIGNATURES, both seq values, both names and that the owner keys are equal",
+      "a": "ad626f7068524547495354455263736571006373696758405de3ed83c78b21c71f471a4bba131cb2204d973d7ac049f97dc7e69b59407e9115e8997234ee9b59b691519a14f2a4f0afab4085e4dce92a1abeb54c81be4e0b63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c756571763d76617975776562313b666f726765646776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "b": "ad626f7068524547495354455263736571006373696758403a103cb8ec1788766d4fff2be2cd857ba585ec85410bf47a7a27cffb448167143fe2571a88c35caf281ff929ac5c41da1cb672f7d20bbfc855988a7243d4a40563746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c756572763d76617975776562313b666f72676564326776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "expect": {
+        "equivocation": false
+      }
+    },
+    {
+      "name": "equivocation/one-half-signed-by-the-accused",
+      "rule": "REPLICATION.md 6.2: BOTH signatures, so a genuine record paired with a minted one is not evidence",
+      "a": "ad626f706852454749535445526373657100637369675840859cf60530b0f672147dc595144fce3db1aabed26230bc5fd699161b63dacf4466ef5c085834816a2b1ec7e253c4881fea82ef647a480bbe02da06407556f00c63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656a763d76617975776562316776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "b": "ad626f7068524547495354455263736571006373696758405de3ed83c78b21c71f471a4bba131cb2204d973d7ac049f97dc7e69b59407e9115e8997234ee9b59b691519a14f2a4f0afab4085e4dce92a1abeb54c81be4e0b63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c756571763d76617975776562313b666f726765646776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "expect": {
+        "equivocation": false
+      }
+    },
+    {
+      "name": "equivocation/unacceptable-records-still-equivocate",
+      "rule": "REPLICATION.md 6.2: the evidence is the two encodings; acceptance is a separate question",
+      "a": "ad626f70665550444154456373657101637369675840d5bcec5699debd7f22db402f15fe496380af1193f1fb6d87b863ce004f2febac97bc4fd8704de75ba09193aa07233f852636a18042d322218c7399c74c22730b63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656c763d76617975776562313b616776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66f66870726576486173685820339aa2a96b991d731810495453cc3dc1d9b2bc27e54f7e5a81c9362f68554eb0696e6f744265666f72651a6a3f14d8",
+      "b": "ad626f7066555044415445637365710163736967584001012e87ac7180903b778719cdd0d357fc29e237c5bca49b323e131075722ca4d82bda455995b8387769f4c3db768dc2569e903310043ef15bd6769aa8eba80763746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656c763d76617975776562313b626776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66f66870726576486173685820339aa2a96b991d731810495453cc3dc1d9b2bc27e54f7e5a81c9362f68554eb0696e6f744265666f72651a6a3f14d8",
+      "expect": {
+        "equivocation": true
+      }
+    },
+    {
+      "name": "equivocation/transfer-attributed-by-cosig",
+      "rule": "REGISTRY.md: a TRANSFER is signed by the transferor and countersigned by the incoming owner under coSig",
+      "a": "ae626f70685452414e53464552637365710163736967584059ccf2c00e4c5d6ab6ab4afaa3a82644104291e1a22ba654dca19978e2a985eca4394387b437c7b768b86c975cbd27778ae1cac496168e5a8ac7ed9dc4954d0b63746c646476617975646e616d656561746c617365636f53696758401a093a7d3018a950f8cb94f79eb7e8b3a6066162a6958d7f428bb1175036c57a3382f471a2c63f01513b8486c3642c33ef98015515bc500b1cc7dc5e02af680865737569746501677265636f726473806776657273696f6e01686e6f7441667465721a6c204600686f776e65724b65795820c853ad0f0cd2b619aea92ceec4fd56a24d6499d584ce79257e45cfd8139b60a768706f7750726f6f66f66870726576486173685820339aa2a96b991d731810495453cc3dc1d9b2bc27e54f7e5a81c9362f68554eb0696e6f744265666f72651a6a3f14d8",
+      "b": "ae626f70685452414e534645526373657101637369675840cfbb0a66d6c85b99970295dfefb3f1fa871f557e52a7b9f0789f616c85419a6d9facc90d4afd6738435bc1f672d53d9f0a9285cdc525b2e375742c6fcc7b4a0b63746c646476617975646e616d656561746c617365636f536967584035b89f3efc2649e3657ddb4bc9140d8fb3a06fe8d0d22ea272c3dcd2e51d96ec651c3d4f54c84fdfc35170ccce7c90a333cbdd45a343e0cf8c0ce023f6ea1a0565737569746501677265636f726473806776657273696f6e01686e6f7441667465721a6c204600686f776e65724b65795820c853ad0f0cd2b619aea92ceec4fd56a24d6499d584ce79257e45cfd8139b60a768706f7750726f6f66f66870726576486173685820339aa2a96b991d731810495453cc3dc1d9b2bc27e54f7e5a81c9362f68554eb0696e6f744265666f72651a6a3f1730",
+      "expect": {
+        "equivocation": true
+      }
+    },
+    {
+      "name": "equivocation/undecodable-halves",
+      "rule": "REPLICATION.md 6.2: evidence that does not decode as two records is not evidence",
+      "a": "01",
+      "b": "02",
+      "expect": {
+        "equivocation": false
+      }
+    }
+  ],
+  "pow": [
+    {
+      "name": "pow/base-bits-length-1",
+      "rule": "PROOF-OF-WORK.md 4: base difficulty by label length — 10 bits at 1-2 characters, 9 at 3, 8 at 4, 7 at 5-6, 6 at 7-9, 5 at 10-15, 4 at 16 and above",
+      "check": "baseBits",
+      "labelLength": 1,
+      "expect": 10
+    },
+    {
+      "name": "pow/base-bits-length-2",
+      "rule": "PROOF-OF-WORK.md 4: base difficulty by label length — 10 bits at 1-2 characters, 9 at 3, 8 at 4, 7 at 5-6, 6 at 7-9, 5 at 10-15, 4 at 16 and above",
+      "check": "baseBits",
+      "labelLength": 2,
+      "expect": 10
+    },
+    {
+      "name": "pow/base-bits-length-3",
+      "rule": "PROOF-OF-WORK.md 4: base difficulty by label length — 10 bits at 1-2 characters, 9 at 3, 8 at 4, 7 at 5-6, 6 at 7-9, 5 at 10-15, 4 at 16 and above",
+      "check": "baseBits",
+      "labelLength": 3,
+      "expect": 9
+    },
+    {
+      "name": "pow/base-bits-length-4",
+      "rule": "PROOF-OF-WORK.md 4: base difficulty by label length — 10 bits at 1-2 characters, 9 at 3, 8 at 4, 7 at 5-6, 6 at 7-9, 5 at 10-15, 4 at 16 and above",
+      "check": "baseBits",
+      "labelLength": 4,
+      "expect": 8
+    },
+    {
+      "name": "pow/base-bits-length-5",
+      "rule": "PROOF-OF-WORK.md 4: base difficulty by label length — 10 bits at 1-2 characters, 9 at 3, 8 at 4, 7 at 5-6, 6 at 7-9, 5 at 10-15, 4 at 16 and above",
+      "check": "baseBits",
+      "labelLength": 5,
+      "expect": 7
+    },
+    {
+      "name": "pow/base-bits-length-6",
+      "rule": "PROOF-OF-WORK.md 4: base difficulty by label length — 10 bits at 1-2 characters, 9 at 3, 8 at 4, 7 at 5-6, 6 at 7-9, 5 at 10-15, 4 at 16 and above",
+      "check": "baseBits",
+      "labelLength": 6,
+      "expect": 7
+    },
+    {
+      "name": "pow/base-bits-length-7",
+      "rule": "PROOF-OF-WORK.md 4: base difficulty by label length — 10 bits at 1-2 characters, 9 at 3, 8 at 4, 7 at 5-6, 6 at 7-9, 5 at 10-15, 4 at 16 and above",
+      "check": "baseBits",
+      "labelLength": 7,
+      "expect": 6
+    },
+    {
+      "name": "pow/base-bits-length-9",
+      "rule": "PROOF-OF-WORK.md 4: base difficulty by label length — 10 bits at 1-2 characters, 9 at 3, 8 at 4, 7 at 5-6, 6 at 7-9, 5 at 10-15, 4 at 16 and above",
+      "check": "baseBits",
+      "labelLength": 9,
+      "expect": 6
+    },
+    {
+      "name": "pow/base-bits-length-10",
+      "rule": "PROOF-OF-WORK.md 4: base difficulty by label length — 10 bits at 1-2 characters, 9 at 3, 8 at 4, 7 at 5-6, 6 at 7-9, 5 at 10-15, 4 at 16 and above",
+      "check": "baseBits",
+      "labelLength": 10,
+      "expect": 5
+    },
+    {
+      "name": "pow/base-bits-length-15",
+      "rule": "PROOF-OF-WORK.md 4: base difficulty by label length — 10 bits at 1-2 characters, 9 at 3, 8 at 4, 7 at 5-6, 6 at 7-9, 5 at 10-15, 4 at 16 and above",
+      "check": "baseBits",
+      "labelLength": 15,
+      "expect": 5
+    },
+    {
+      "name": "pow/base-bits-length-16",
+      "rule": "PROOF-OF-WORK.md 4: base difficulty by label length — 10 bits at 1-2 characters, 9 at 3, 8 at 4, 7 at 5-6, 6 at 7-9, 5 at 10-15, 4 at 16 and above",
+      "check": "baseBits",
+      "labelLength": 16,
+      "expect": 4
+    },
+    {
+      "name": "pow/base-bits-length-63",
+      "rule": "PROOF-OF-WORK.md 4: base difficulty by label length — 10 bits at 1-2 characters, 9 at 3, 8 at 4, 7 at 5-6, 6 at 7-9, 5 at 10-15, 4 at 16 and above",
+      "check": "baseBits",
+      "labelLength": 63,
+      "expect": 4
+    },
+    {
+      "name": "pow/required-bits-rate-0",
+      "rule": "PROOF-OF-WORK.md 4: rate = 0 below 512, else min(8, floor(log2(n / 512))); total = min(20, base + rate)",
+      "check": "requiredBits",
+      "labelLength": 16,
+      "windowCount": 0,
+      "expect": 4
+    },
+    {
+      "name": "pow/required-bits-rate-1",
+      "rule": "PROOF-OF-WORK.md 4: rate = 0 below 512, else min(8, floor(log2(n / 512))); total = min(20, base + rate)",
+      "check": "requiredBits",
+      "labelLength": 16,
+      "windowCount": 1,
+      "expect": 4
+    },
+    {
+      "name": "pow/required-bits-rate-511",
+      "rule": "PROOF-OF-WORK.md 4: rate = 0 below 512, else min(8, floor(log2(n / 512))); total = min(20, base + rate)",
+      "check": "requiredBits",
+      "labelLength": 16,
+      "windowCount": 511,
+      "expect": 4
+    },
+    {
+      "name": "pow/required-bits-rate-512",
+      "rule": "PROOF-OF-WORK.md 4: rate = 0 below 512, else min(8, floor(log2(n / 512))); total = min(20, base + rate)",
+      "check": "requiredBits",
+      "labelLength": 16,
+      "windowCount": 512,
+      "expect": 4
+    },
+    {
+      "name": "pow/required-bits-rate-513",
+      "rule": "PROOF-OF-WORK.md 4: rate = 0 below 512, else min(8, floor(log2(n / 512))); total = min(20, base + rate)",
+      "check": "requiredBits",
+      "labelLength": 16,
+      "windowCount": 513,
+      "expect": 4
+    },
+    {
+      "name": "pow/required-bits-rate-1023",
+      "rule": "PROOF-OF-WORK.md 4: rate = 0 below 512, else min(8, floor(log2(n / 512))); total = min(20, base + rate)",
+      "check": "requiredBits",
+      "labelLength": 16,
+      "windowCount": 1023,
+      "expect": 4
+    },
+    {
+      "name": "pow/required-bits-rate-1024",
+      "rule": "PROOF-OF-WORK.md 4: rate = 0 below 512, else min(8, floor(log2(n / 512))); total = min(20, base + rate)",
+      "check": "requiredBits",
+      "labelLength": 16,
+      "windowCount": 1024,
+      "expect": 5
+    },
+    {
+      "name": "pow/required-bits-rate-2048",
+      "rule": "PROOF-OF-WORK.md 4: rate = 0 below 512, else min(8, floor(log2(n / 512))); total = min(20, base + rate)",
+      "check": "requiredBits",
+      "labelLength": 16,
+      "windowCount": 2048,
+      "expect": 6
+    },
+    {
+      "name": "pow/required-bits-rate-4096",
+      "rule": "PROOF-OF-WORK.md 4: rate = 0 below 512, else min(8, floor(log2(n / 512))); total = min(20, base + rate)",
+      "check": "requiredBits",
+      "labelLength": 16,
+      "windowCount": 4096,
+      "expect": 7
+    },
+    {
+      "name": "pow/required-bits-rate-8192",
+      "rule": "PROOF-OF-WORK.md 4: rate = 0 below 512, else min(8, floor(log2(n / 512))); total = min(20, base + rate)",
+      "check": "requiredBits",
+      "labelLength": 16,
+      "windowCount": 8192,
+      "expect": 8
+    },
+    {
+      "name": "pow/required-bits-rate-16384",
+      "rule": "PROOF-OF-WORK.md 4: rate = 0 below 512, else min(8, floor(log2(n / 512))); total = min(20, base + rate)",
+      "check": "requiredBits",
+      "labelLength": 16,
+      "windowCount": 16384,
+      "expect": 9
+    },
+    {
+      "name": "pow/required-bits-rate-32768",
+      "rule": "PROOF-OF-WORK.md 4: rate = 0 below 512, else min(8, floor(log2(n / 512))); total = min(20, base + rate)",
+      "check": "requiredBits",
+      "labelLength": 16,
+      "windowCount": 32768,
+      "expect": 10
+    },
+    {
+      "name": "pow/required-bits-rate-65536",
+      "rule": "PROOF-OF-WORK.md 4: rate = 0 below 512, else min(8, floor(log2(n / 512))); total = min(20, base + rate)",
+      "check": "requiredBits",
+      "labelLength": 16,
+      "windowCount": 65536,
+      "expect": 11
+    },
+    {
+      "name": "pow/required-bits-rate-131072",
+      "rule": "PROOF-OF-WORK.md 4: rate = 0 below 512, else min(8, floor(log2(n / 512))); total = min(20, base + rate)",
+      "check": "requiredBits",
+      "labelLength": 16,
+      "windowCount": 131072,
+      "expect": 12
+    },
+    {
+      "name": "pow/required-bits-rate-262144",
+      "rule": "PROOF-OF-WORK.md 4: rate = 0 below 512, else min(8, floor(log2(n / 512))); total = min(20, base + rate)",
+      "check": "requiredBits",
+      "labelLength": 16,
+      "windowCount": 262144,
+      "expect": 12
+    },
+    {
+      "name": "pow/required-bits-rate-51200000",
+      "rule": "PROOF-OF-WORK.md 4: rate = 0 below 512, else min(8, floor(log2(n / 512))); total = min(20, base + rate)",
+      "check": "requiredBits",
+      "labelLength": 16,
+      "windowCount": 51200000,
+      "expect": 12
+    },
+    {
+      "name": "pow/required-bits-hardest-reachable",
+      "rule": "PROOF-OF-WORK.md 4: rate = 0 below 512, else min(8, floor(log2(n / 512))); total = min(20, base + rate) — and 10 + 8 = 18, so the 20-bit ceiling is a headroom allowance rather than a limit the schedule reaches",
+      "check": "requiredBits",
+      "labelLength": 2,
+      "windowCount": 131072,
+      "expect": 18
+    },
+    {
+      "name": "pow/rate-window-epoch-boundary",
+      "rule": "PROOF-OF-WORK.md 4: the window is the 2592000s before the start of notBefore's 3600s epoch, half-open",
+      "check": "rateWindow",
+      "notBefore": 1782518400,
+      "expect": {
+        "start": 1779926400,
+        "end": 1782518400
+      }
+    },
+    {
+      "name": "pow/rate-window-one-second-before",
+      "rule": "PROOF-OF-WORK.md 4: the window is the 2592000s before the start of notBefore's 3600s epoch, half-open",
+      "check": "rateWindow",
+      "notBefore": 1782518399,
+      "expect": {
+        "start": 1779922800,
+        "end": 1782514800
+      }
+    },
+    {
+      "name": "pow/rate-window-one-second-after",
+      "rule": "PROOF-OF-WORK.md 4: the window is the 2592000s before the start of notBefore's 3600s epoch, half-open",
+      "check": "rateWindow",
+      "notBefore": 1782518401,
+      "expect": {
+        "start": 1779926400,
+        "end": 1782518400
+      }
+    },
+    {
+      "name": "pow/rate-window-mid-epoch",
+      "rule": "PROOF-OF-WORK.md 4: the window is the 2592000s before the start of notBefore's 3600s epoch, half-open",
+      "check": "rateWindow",
+      "notBefore": 1782520200,
+      "expect": {
+        "start": 1779926400,
+        "end": 1782518400
+      }
+    },
+    {
+      "name": "pow/salt-derivation",
+      "rule": "REGISTRY.md: salt = SHA-256(\"vayuweb-pow-v1\" || record without sig and without powProof.nonce)[0..16]",
+      "check": "salt",
+      "record": "ad626f706852454749535445526373657100637369675840859cf60530b0f672147dc595144fce3db1aabed26230bc5fd699161b63dacf4466ef5c085834816a2b1ec7e253c4881fea82ef647a480bbe02da06407556f00c63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656a763d76617975776562316776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "expect": "c5e5c1becf6b4609b0c8c196cb87363f"
+    },
+    {
+      "name": "pow/tag-all-zero-tag-meets-any",
+      "rule": "PROOF-OF-WORK.md: leading zero bits over the whole tag, most-significant bit first, counted without early exit",
+      "check": "tagSatisfies",
+      "tag": "0000000000000000000000000000000000000000000000000000000000000000",
+      "bits": 20,
+      "expect": true
+    },
+    {
+      "name": "pow/tag-exactly-eight-bits",
+      "rule": "PROOF-OF-WORK.md: leading zero bits over the whole tag, most-significant bit first, counted without early exit",
+      "check": "tagSatisfies",
+      "tag": "0080ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "bits": 8,
+      "expect": true
+    },
+    {
+      "name": "pow/tag-eight-bits-is-not-nine",
+      "rule": "PROOF-OF-WORK.md: leading zero bits over the whole tag, most-significant bit first, counted without early exit",
+      "check": "tagSatisfies",
+      "tag": "0080ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "bits": 9,
+      "expect": false
+    },
+    {
+      "name": "pow/tag-four-bits-within-a-byte",
+      "rule": "PROOF-OF-WORK.md: leading zero bits over the whole tag, most-significant bit first, counted without early exit",
+      "check": "tagSatisfies",
+      "tag": "0fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "bits": 4,
+      "expect": true
+    },
+    {
+      "name": "pow/tag-four-bits-is-not-five",
+      "rule": "PROOF-OF-WORK.md: leading zero bits over the whole tag, most-significant bit first, counted without early exit",
+      "check": "tagSatisfies",
+      "tag": "0fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "bits": 5,
+      "expect": false
+    },
+    {
+      "name": "pow/tag-zero-bits-is-satisfied-by-anything",
+      "rule": "PROOF-OF-WORK.md: leading zero bits over the whole tag, most-significant bit first, counted without early exit",
+      "check": "tagSatisfies",
+      "tag": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "bits": 0,
+      "expect": true
     }
   ]
 }

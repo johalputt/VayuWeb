@@ -104,6 +104,26 @@ def count_accompanying_headers():
     return len(names), None
 
 
+def count_open_conflicts():
+    """Conflicts check-charter-consistency.py holds open: quantities + terms + memberships.
+
+    Derived because the first draft of ROADMAP.md's sentence said four and the answer was six --
+    written in the same paragraph that explains why numbers in this corpus have to be derived.
+    """
+    text = read("scripts/check-charter-consistency.py")
+    if text is None:
+        return None, "scripts/check-charter-consistency.py is missing"
+    total = 0
+    for listname in ("QUANTITIES", "TERMS", "MEMBERSHIPS"):
+        block = re.search(rf"^{listname} = \[(.*?)^\]", text, re.S | re.M)
+        if block is None:
+            return None, f"could not locate {listname} -- the checker's format changed"
+        total += len(re.findall(r'^        "name": ', block.group(1), re.M))
+    if total == 0:
+        return None, "no tracked conflicts parsed -- the checker's format changed"
+    return total, None
+
+
 def count_untriaged_medium():
     """MEDIUM findings with no row in AUDIT-FINDINGS.md's disposition table.
 
@@ -187,6 +207,27 @@ def count_record_vectors():
     if not isinstance(vectors, list) or not vectors:
         return None, "conformance/vectors.json has no `vectors` array"
     return len(vectors), None
+
+
+def count_vector_suites():
+    """Top-level vector suites in the committed artifact.
+
+    A separate rule from the vector count, because the two go stale for different reasons. The
+    count drifts when the generator changes. The suite count drifts when somebody ADDS a suite —
+    which is exactly the moment two documents were left asserting "four suites" while the file
+    carried five, each of them a sentence somebody had written once and had no reason to reread.
+    """
+    text = read("conformance/vectors.json")
+    if text is None:
+        return None, "conformance/vectors.json is missing"
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        return None, f"conformance/vectors.json is not valid JSON: {exc}"
+    suites = [k for k, v in data.items() if isinstance(v, list) and v]
+    if not suites:
+        return None, "conformance/vectors.json carries no non-empty suite arrays"
+    return len(suites), None
 
 
 def count_two_letter_tlds():
@@ -463,11 +504,29 @@ RULES = [
         ],
     },
     {
+        "label": "conflicts held open for an amendment",
+        "derive": count_open_conflicts,
+        "source": "scripts/check-charter-consistency.py",
+        "patterns": [
+            re.compile(r"\*\*([\w]+) conflicts\*\* are now held open", re.I),
+            re.compile(r"\*\*([\w]+) conflicts are held open\*\*", re.I),
+        ],
+    },
+    {
         "label": "record-verification vectors",
         "derive": count_record_vectors,
         "source": "conformance/vectors.json",
         "patterns": [
             re.compile(r"`vectors` holds ([\w,]+) record-verification vectors", re.I),
+        ],
+    },
+    {
+        "label": "conformance vector suites",
+        "derive": count_vector_suites,
+        "source": "conformance/vectors.json",
+        "patterns": [
+            re.compile(r"[Tt]he file carries ([\w]+) suites", re.I),
+            re.compile(r"\*\*([\w]+) suites\*\*, in \[`conformance/vectors\.json`\]", re.I),
         ],
     },
     {

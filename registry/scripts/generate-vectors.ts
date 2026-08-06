@@ -17,6 +17,8 @@ import {
   buildConvergenceVectors,
   buildResolutionVectors,
   buildReplicationVectors,
+  buildEquivocationVectors,
+  buildPowVectors,
   VECTOR_NOW,
   VECTOR_OWNER_KEY,
   VECTOR_OTHER_KEY,
@@ -29,6 +31,8 @@ const vectors = buildVectors();
 const convergence = buildConvergenceVectors();
 const resolution = buildResolutionVectors();
 const replication = buildReplicationVectors();
+const equivocation = buildEquivocationVectors();
+const pow = buildPowVectors();
 
 const artifact = {
   $comment:
@@ -46,8 +50,12 @@ const artifact = {
       'machine running them.',
     proofOfWork:
       'state.powVerified injects the result of proof-of-work verification rather than ' +
-      'requiring a 64 MiB Argon2id evaluation per vector. The proof construction has its own ' +
-      'vectors, with real solved nonces, in the implementation test suite.',
+      'requiring a 64 MiB Argon2id evaluation per vector. The `pow` suite covers the ' +
+      'derivations around the evaluation — difficulty from label length and rate, the rate ' +
+      'window, salt derivation and the leading-zero-bit test — none of which need an Argon2id ' +
+      'call. The evaluation itself is a standard primitive with its own published vectors; ' +
+      'solved nonces at real difficulty live in the implementation test suite. Passing `pow` ' +
+      'does not demonstrate a correct Argon2id.',
     keys:
       'Fixed test keys, derived from all-0x42 and all-0x77 seeds. Not secret. Never to be ' +
       'used for anything real.',
@@ -55,20 +63,24 @@ const artifact = {
     otherKey: toHex(VECTOR_OTHER_KEY),
     baseInstant: VECTOR_NOW,
     suites:
-      'record pins what a verifier accepts. convergence, resolution and replication pin what ' +
-      'implementations must AGREE about after that, which is where a fork lives — every ' +
-      'consensus-critical defect found in this project so far was invisible to record ' +
-      'verification and visible only to the question "what would a second implementation do".',
+      'record pins what a verifier accepts. convergence, resolution, replication, ' +
+      'equivocation and pow pin what implementations must AGREE about after that, which is ' +
+      'where a fork lives — every consensus-critical defect found in this project so far was ' +
+      'invisible to record verification and visible only to the question "what would a second ' +
+      'implementation do".',
   },
   vectors,
   convergence,
   resolution,
   replication,
+  equivocation,
+  pow,
 };
 
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8');
 process.stdout.write(
   `wrote ${vectors.length} record, ${convergence.length} convergence, ${resolution.length} ` +
-    `resolution and ${replication.length} replication vectors to ${OUT}\n`,
+    `resolution, ${replication.length} replication, ${equivocation.length} equivocation and ` +
+    `${pow.length} proof-of-work vectors to ${OUT}\n`,
 );
