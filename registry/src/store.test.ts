@@ -34,6 +34,7 @@ function successorBytes(
 ): Uint8Array {
   const map = new Map<string | Uint8Array, CborValue>([
     ['version', 1],
+    ['suite', 1],
     ['op', 'UPDATE'],
     ['name', LABEL],
     ['tld', 'vayu'],
@@ -89,6 +90,7 @@ function solveRegistration(over: Record<string, CborValue>, at: number): Uint8Ar
   const skeleton = (nonce: Uint8Array): CborMap =>
     new Map<string | Uint8Array, CborValue>([
       ['version', 1],
+      ['suite', 1],
       ['op', 'REGISTER'],
       ['name', (over['name'] as string | undefined) ?? LABEL],
       ['tld', 'vayu'],

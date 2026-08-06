@@ -122,6 +122,7 @@ function build(
 const registration = (over: Record<string, CborValue> = {}): Uint8Array =>
   build({
     version: 1,
+    suite: 1,
     op: 'REGISTER',
     name: 'atlas',
     tld: 'vayu',
@@ -146,6 +147,7 @@ const successor = (
   build(
     {
       version: 1,
+      suite: 1,
       op: 'UPDATE',
       name: 'atlas',
       tld: 'vayu',
@@ -206,6 +208,7 @@ const afterHandover = (
   build(
     {
       version: 1,
+      suite: 1,
       op: 'UPDATE',
       name: 'atlas',
       tld: 'vayu',
@@ -270,6 +273,45 @@ export function buildVectors(): Vector[] {
       state: FRESH,
       expect: rejectWith('NON_CANONICAL'),
     },
+
+    /* -- cryptographic suites (CRYPTO-AGILITY.md) ---------------------------- */
+    //
+    // The agility mechanism is the one property the design says cannot be retrofitted, and
+    // until these existed no vector measured it at all: a second implementation could omit the
+    // `suite` field entirely and pass the whole suite.
+    {
+      name: 'suite/unknown',
+      rule: 'CRYPTO-AGILITY.md 4.2: reject a record whose suite the verifier does not know',
+      record: toHex(registration({ suite: 99 })),
+      now: VECTOR_NOW,
+      state: FRESH,
+      expect: rejectWith('UNKNOWN_SUITE'),
+    },
+    {
+      name: 'suite/reserved-is-not-active',
+      rule: 'CRYPTO-AGILITY.md 3.1: suites 2, 3 and 4 are reserved, not active',
+      record: toHex(registration({ suite: 3 })),
+      now: VECTOR_NOW,
+      state: FRESH,
+      expect: rejectWith('UNKNOWN_SUITE'),
+    },
+    {
+      name: 'suite/zero',
+      rule: 'CRYPTO-AGILITY.md 3: suite identifiers are assigned by VWIP; 0 is not one',
+      record: toHex(registration({ suite: 0 })),
+      now: VECTOR_NOW,
+      state: FRESH,
+      expect: rejectWith('UNKNOWN_SUITE'),
+    },
+    //
+    // **There is deliberately no `suite/downgrade` vector, and there cannot be one yet.**
+    // CRYPTO-AGILITY.md 5.1 requires a name's suite to move forward only, and its conformance
+    // item 3 asks for exactly that test. A vector states a predecessor as bytes, and 4.2 makes
+    // a verifier reject any record naming an inactive suite — so the suite-3 predecessor a
+    // downgrade needs is not a record any conforming implementation can hold. The rule is
+    // therefore unit-tested against a constructed predecessor instead, and the VWIP that
+    // activates a second suite MUST add the wire vector in the same change. Saying so here is
+    // the point: an absent vector that nobody wrote down reads exactly like a covered rule.
 
     /* -- reserved labels ----------------------------------------------------- */
     //
@@ -855,6 +897,7 @@ const byOther = (over: Record<string, CborValue> = {}): Uint8Array =>
   build(
     {
       version: 1,
+      suite: 1,
       op: 'REGISTER',
       name: 'atlas',
       tld: 'vayu',

@@ -76,6 +76,7 @@ function registration(build: Build = {}): Uint8Array {
   const skeleton = (nonce: Uint8Array): CborMap =>
     new Map<string | Uint8Array, CborValue>([
       ['version', 1],
+      ['suite', 1],
       ['op', 'REGISTER'],
       ['name', label],
       ['tld', 'vayu'],
@@ -124,6 +125,7 @@ function unsolvedRegistration(
   nonce[1] = (salt >> 8) & 0xff;
   const map: CborMap = new Map<string | Uint8Array, CborValue>([
     ['version', 1],
+    ['suite', 1],
     ['op', 'REGISTER'],
     ['name', label],
     ['tld', 'vayu'],

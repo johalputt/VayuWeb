@@ -45,18 +45,19 @@ marked otherwise. JSON renderings encode byte strings as unpadded base64url.
 | Field | Type | Encoding | Constraints |
 | --- | --- | --- | --- |
 | `version` | uint | CBOR uint | `1` at launch; a verifier MUST reject a major version it does not implement. |
+| `suite` | uint | CBOR uint | The cryptographic suite that produced the signatures, per [CRYPTO-AGILITY.md](CRYPTO-AGILITY.md) section 3. `1` at launch; a verifier MUST reject a suite it does not implement and MUST NOT treat the record as unsigned. |
 | `op` | text | ASCII | `REGISTER`, `UPDATE`, `RENEW`, `TRANSFER`, `RELINQUISH` or `REVOKE`. |
 | `name` | text | NFC, lowercase ASCII | 1-63 bytes from `[a-z0-9-]`, per [docs/spec/NAMES.md](NAMES.md). |
 | `tld` | text | ASCII, no leading dot | A member of the Namespace Annex — the 1,270 ratified extensions of [NAMESPACE-CATALOGUE.md](NAMESPACE-CATALOGUE.md); any other is rejected. Membership is decided offline against the copy the verifier holds, never fetched or derived from the log (Constitution Art. 2.31). |
-| `ownerKey` | bstr | 32 bytes | Ed25519 public key: incoming owner for `TRANSFER`, current owner otherwise. |
+| `ownerKey` | bstr | suite key length | Public key under `suite`: incoming owner for `TRANSFER`, current owner otherwise. 32 bytes under suite 1. |
 | `seq` | uint | CBOR uint | 0 for `REGISTER`, `prev.seq + 1` otherwise; max 2^32-1. |
 | `notBefore` | uint | Unix seconds, UTC | Second at which the record takes effect. |
 | `notAfter` | uint | Unix seconds, UTC | Expiry; computed per operation for `REGISTER` and `RENEW`, else copied from `prev`. |
 | `records` | array | array of maps | 0-32 entries; schema below. |
 | `powProof` | map or null | see below | REQUIRED for `REGISTER` and `RENEW`, CBOR `null` otherwise. |
 | `prevHash` | bstr | 32 bytes | Record hash of the previous accepted record; 32 `0x00` when `seq` is 0. |
-| `sig` | bstr | 64 bytes | Ed25519 signature over the signing input. |
-| `coSig` | bstr, optional | 64 bytes | `TRANSFER` only: incoming owner's signature over the same input. |
+| `sig` | bstr | suite signature length | Signature under `suite` over the signing input. 64 bytes under suite 1. |
+| `coSig` | bstr, optional | suite signature length | `TRANSFER` only: incoming owner's signature over the same input. |
 
 `op` and `coSig` extend the field list in [docs/ARCHITECTURE.md](../ARCHITECTURE.md). Inferring
 the operation from a field diff is ambiguous, and an ambiguous validation rule is a fork waiting
@@ -110,7 +111,7 @@ have several defensible JSON spellings and exactly one CBOR spelling, and becaus
 are native, so keys, hashes and signatures never round-trip through text.
 
 ```text
-signing_input = "VayuWeb-Registry-Record-v1" || 0x00 || det_cbor(core)
+signing_input = "VayuWeb-Registry-Record-v1" || 0x00 || uint8(suite) || det_cbor(core)
 record_hash   = BLAKE2b-256("VayuWeb-Registry-Hash-v1" || 0x00 || det_cbor(full))
 ```
 
@@ -120,10 +121,21 @@ registry-record signature can never be replayed over another VayuWeb structure a
 read as a hash preimage; every other signed structure SHALL use a distinct prefix. BLAKE2b-256
 is chosen because Hypercore already uses it, so a node needs one hash primitive.
 
-`sig` is Ed25519 (RFC 8032) over `signing_input`. Verifiers MUST verify strictly: reject
-non-canonical encodings of `S`, small-order public keys, and small-order `R`. Permissive
-verification makes a signature malleable and therefore the record hash malleable, which hands an
-attacker a free grinding surface at the tie-break.
+The single `uint8(suite)` byte after the separator is required by
+[CRYPTO-AGILITY.md](CRYPTO-AGILITY.md) 4.3, so that a signature made under one suite cannot be
+replayed as another. It is deliberately belt and braces: `suite` is also a field inside `core`,
+so it is already covered by the signature, and a verifier that read the field but not the prefix
+byte would still be safe. The requirement is kept because the cost is one byte and the failure it
+prevents — a cross-suite replay during the one migration this protocol gets — is unrecoverable.
+The suite byte goes *after* the `0x00` separator rather than into the prefix string, so the
+prefix stays a fixed ASCII literal that a reader can find in the bytes.
+
+`sig` is verified under the algorithm named by `suite`. Under suite 1 that is Ed25519 (RFC 8032),
+and verifiers MUST verify strictly: reject non-canonical encodings of `S`, small-order public
+keys, and small-order `R`. Permissive verification makes a signature malleable and therefore the
+record hash malleable, which hands an attacker a free grinding surface at the tie-break. A
+verifier MUST NOT assume a 32-byte key or a 64-byte signature anywhere; both lengths come from
+the suite table.
 
 A peer MUST NOT re-serialise a record it did not author: received bytes are stored and
 replicated verbatim, so a record carrying unknown fields still verifies downstream. Received
@@ -180,13 +192,15 @@ revoke a pending transfer in an Article 34 recovery path that `DELEGATE` and pre
 succession material would carry, is the worked example.
 
 Common preconditions, checked before any operation-specific rule: deterministic CBOR encoding;
-at most 4096 bytes; `version` implemented; `name` and `tld` satisfying the grammar and the
-ratified TLD set; `sig` verifying against the relevant key.
+within the size limit its `suite` sets; `version` and `suite` both implemented; `name` and `tld`
+satisfying the grammar and the ratified TLD set; `sig` verifying against the relevant key, at the
+length that suite specifies.
 
 Chain rules, required by every operation except `REGISTER`: a previous accepted record `prev`
 for `name.tld` still inside its term or grace period, `seq == prev.seq + 1`,
-`prevHash == record_hash(prev)`, `notBefore >= prev.notBefore + 300`, `sig` verifying against
-`prev.ownerKey`, and — except for `TRANSFER` — `ownerKey == prev.ownerKey`. The 300-second
+`prevHash == record_hash(prev)`, `notBefore >= prev.notBefore + 300`, `suite >= prev.suite`,
+`sig` verifying against `prev.ownerKey`, and — except for `TRANSFER` — `ownerKey ==
+prev.ownerKey`. The 300-second
 minimum interval caps churn at 288 records per name per day, about 1.1 MiB of log at worst, so
 update-flooding is expensive and no real editor is inconvenienced.
 
@@ -369,16 +383,21 @@ cost nothing and won outright.
 
 ```text
 verify(rec, bytes, state):
+  if len(bytes) > max_active_suite_bytes:     reject TOO_LARGE   // 4096 today; pre-decode
   if bytes != det_cbor(rec):                  reject NON_CANONICAL
-  if len(bytes) > 4096:                       reject TOO_LARGE
   if rec.version != 1:                        reject UNSUPPORTED_VERSION
+  if rec.suite not in ACTIVE_SUITES:          reject UNKNOWN_SUITE
+  if len(bytes) > suite(rec.suite).maxBytes:  reject TOO_LARGE   // per-suite; post-decode
+  if len(rec.ownerKey) != suite(rec.suite).keyLen: reject BAD_KEY
+  if len(rec.sig) != suite(rec.suite).sigLen:      reject BAD_SIG_LENGTH
   if rec.op not in OPS:                       reject UNKNOWN_OP
   if not grammar_ok(rec.name):                reject BAD_LABEL
   if rec.tld not in RATIFIED_TLDS:            reject UNKNOWN_TLD
   if len(rec.records) > 32:                   reject TOO_MANY_RECORDS
   if not entries_ok(rec.records):             reject BAD_RECORD_ENTRY
 
-  input = "VayuWeb-Registry-Record-v1" || 0x00 || det_cbor(strip(rec, sig, coSig))
+  input = "VayuWeb-Registry-Record-v1" || 0x00 || uint8(rec.suite)
+                                            || det_cbor(strip(rec, sig, coSig))
   prev  = state.current(rec.name, rec.tld)     // may be absent
 
   // Clock discipline. Applies to EVERY operation, not to REGISTER alone -- see
@@ -400,6 +419,9 @@ verify(rec, bytes, state):
   if rec.seq != prev.seq + 1:                 reject BAD_SEQ
   if rec.prevHash != record_hash(prev):       reject BAD_CHAIN
   if rec.notBefore < prev.notBefore + 300:    reject TOO_SOON
+  // CRYPTO-AGILITY.md 5.1: a name's suite moves FORWARD only. This is what stops an adversary
+  // who breaks suite 1 downgrading a suite-3 name back to a scheme they can forge.
+  if rec.suite < prev.suite:                  reject SUITE_DOWNGRADE
   clock_check(rec)
   if revoked(rec.name, rec.tld):              reject REVOKED
   // The chain rules require prev "still inside its term or grace period". RENEW may act in
@@ -767,12 +789,26 @@ stated bound.
 
 ## Size Limits
 
-A serialised record SHALL be at most 4096 bytes, the `records` array SHALL hold at most 32
-entries, and no entry value exceeds 512 bytes. At 4 KiB per record, one million names averaging
-four records each is roughly 16 GiB of log — large, but within reach of a volunteer peer, which
-is the premise of full replication. A verifier MUST reject an oversized record rather than
-truncate it, and raising either number requires a ratified VWIP, per
-[docs/spec/VWIP-0000.md](VWIP-0000.md).
+A serialised record SHALL be at most the limit its `suite` sets, the `records` array SHALL hold
+at most 32 entries, and no entry value exceeds 512 bytes. Under suite 1 the record limit is
+**4096 bytes**. At 4 KiB per record, one million names averaging four records each is roughly
+16 GiB of log — large, but within reach of a volunteer peer, which is the premise of full
+replication. A verifier MUST reject an oversized record rather than truncate it, and raising
+either number requires a ratified VWIP, per [docs/spec/VWIP-0000.md](VWIP-0000.md).
+
+**Per suite, not one global constant**, per [CRYPTO-AGILITY.md](CRYPTO-AGILITY.md) 3.2: an
+ML-DSA-65 key is roughly 1,952 bytes and its signature 3,309, so a suite-3 record cannot fit in
+suite 1's allowance, and a flat limit would make the migration impossible without changing a
+number every deployed verifier already enforces. The reserved limits are 12,288 bytes for suites
+2 and 3 and 16,384 for suite 4 — suite 1's non-signature content plus that suite's own key and
+signature material, rounded to a whole number of KiB. They are not extra room.
+
+The check therefore happens **twice**, and a second implementation will meet this: `suite` is a
+field *inside* the record, so nothing can consult a per-suite limit until the bytes are decoded,
+and decoding unbounded input is the denial-of-service the limit exists to prevent. So the bound
+applied before decoding is the maximum over **active** suites — 4096 today — and the suite's own
+bound is applied after parsing. Sizing the outer bound to the largest *reserved* suite instead
+would hand an attacker four times the parsing work per record for suites no key can sign with.
 
 ## Worked Example
 
@@ -781,6 +817,7 @@ A registration of `atlas.vayu` as JSON, byte strings in unpadded base64url.
 ```json
 {
   "version": 1,
+  "suite": 1,
   "op": "REGISTER",
   "name": "atlas",
   "tld": "vayu",

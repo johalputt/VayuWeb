@@ -3,7 +3,7 @@
  *
  * docs/spec/REGISTRY.md, "Canonical Serialisation and Signing":
  *
- *   signing_input = "VayuWeb-Registry-Record-v1" || 0x00 || det_cbor(core)
+ *   signing_input = "VayuWeb-Registry-Record-v1" || 0x00 || uint8(suite) || det_cbor(core)
  *   record_hash   = BLAKE2b-256("VayuWeb-Registry-Hash-v1" || 0x00 || det_cbor(full))
  *
  * `core` is the record map with `sig` and `coSig` removed; `full` is the complete map
@@ -71,12 +71,17 @@ if (
   throw new Error('domain prefixes must not be prefixes of one another');
 }
 
-/** Concatenate a domain prefix, its 0x00 separator, and a body. */
-function withDomain(prefix: Uint8Array, body: Uint8Array): Uint8Array {
-  const out = new Uint8Array(prefix.length + 1 + body.length);
+/** Concatenate a domain prefix, its 0x00 separator, optional extra bytes, and a body. */
+function withDomain(
+  prefix: Uint8Array,
+  body: Uint8Array,
+  extra: readonly number[] = [],
+): Uint8Array {
+  const out = new Uint8Array(prefix.length + 1 + extra.length + body.length);
   out.set(prefix, 0);
   out[prefix.length] = 0x00;
-  out.set(body, prefix.length + 1);
+  out.set(extra, prefix.length + 1);
+  out.set(body, prefix.length + 1 + extra.length);
   return out;
 }
 
@@ -106,7 +111,23 @@ export function core(record: CborMap): CborMap {
  * whatever the author actually signed rather than only the fields we recognise.
  */
 export function signingInput(record: CborMap): Uint8Array {
-  return withDomain(SIGNING_PREFIX_BYTES, encode(core(record)));
+  // CRYPTO-AGILITY.md 4.3 puts the suite identifier inside the domain-separated prefix, so a
+  // signature made under one suite cannot be replayed as another. Belt and braces: `suite` is
+  // also a field inside `core` and so already covered. The requirement is kept because the cost
+  // is one byte and the failure it prevents — a cross-suite replay during the one migration this
+  // protocol gets — is not recoverable.
+  //
+  // A missing or malformed `suite` throws rather than defaulting. This function is called to
+  // BUILD records as well as to check them, and a builder that omitted the field would otherwise
+  // produce a signature over the pre-agility input — valid-looking bytes that no verifier
+  // implementing 4.3 will accept, discovered only when a peer refuses them.
+  const suite = record.get('suite');
+  if (typeof suite !== 'number' || !Number.isInteger(suite) || suite < 0 || suite > 255) {
+    throw new Error(
+      'signingInput: a record needs an integer `suite` in 0..255 (CRYPTO-AGILITY 4.3)',
+    );
+  }
+  return withDomain(SIGNING_PREFIX_BYTES, encode(core(record)), [suite]);
 }
 
 /**

@@ -59,6 +59,45 @@ RULES = [
         "an unresolved marker. Either do it or write down why it is not being done",
         (),
     ),
+    (
+        re.compile(r"\b(PUBLIC_KEY_LENGTH|SIGNATURE_LENGTH)\b"),
+        "a suite-1 primitive size used outside its suite module. CRYPTO-AGILITY.md conformance "
+        "item 1 requires that no primitive be referenced outside its suite module and item 7 "
+        "that no code path assume a 32-byte key or a 64-byte signature. Lengths come from the "
+        "suite table in suites.ts; ML-DSA-65 signs in 3,309 bytes and SLH-DSA-SHAKE-128s in "
+        "about 7,856, so a constant named after Ed25519 is a migration that cannot happen",
+        ("signature.ts", "signature.test.ts", "suites.ts"),
+    ),
+]
+
+# (file, exact string that must appear, why)
+#
+# The inverse of a forbidden pattern, and a different job: these rules hold a call site that
+# nothing else can reach. Both cover suite handling that is correct today and UNEXERCISED today,
+# because only one suite is active — so the per-suite limit equals the global one and the
+# suite's key and signature lengths equal Ed25519's. Deleting either check leaves every test
+# passing. That is not a reason to skip the check; it is the reason it has to be static.
+#
+# Exact strings rather than a proximity heuristic, for the reason check-listeners.py records:
+# three heuristic versions of that check each survived a mutation before the shape changed.
+REQUIRED = [
+    (
+        "record.ts",
+        "suite.publicKeyLength",
+        "the owner key's length must come from the suite table, not from a constant",
+    ),
+    (
+        "record.ts",
+        "suite.signatureLength",
+        "the signature's length must come from the suite table, not from a constant",
+    ),
+    (
+        "record.ts",
+        "suiteOf(record.suite)?.maxRecordBytes",
+        "the per-suite size limit must be applied AFTER parsing. The bound before decoding "
+        "cannot know the suite, so a verifier that checked only that one would accept records "
+        "the suite forbids the day a second suite activates",
+    ),
 ]
 
 
@@ -109,6 +148,23 @@ def strip_comments(text):
     return "".join(out)
 
 
+def check_required(violations):
+    """Every REQUIRED string must still be present in the file that has to carry it."""
+    found = 0
+    for name, needle, why in REQUIRED:
+        path = os.path.join(SRC, "src", name)
+        if not os.path.exists(path):
+            violations.append(f"{name}: file is missing, so its required call site cannot be checked")
+            continue
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+        if needle not in text:
+            violations.append(f"registry/src/{name}: '{needle}' is gone — {why}")
+            continue
+        found += 1
+    return found
+
+
 def main():
     violations = []
     checked = 0
@@ -138,12 +194,18 @@ def main():
                     continue
                 violations.append(f"{rel}:{line}: '{match.group(0).strip()}' — {message}")
 
+    required = check_required(violations)
+
     if checked == 0:
         print("::error::no source files found — this check is enforcing nothing", file=sys.stderr)
         return 1
+    if required == 0:
+        print("::error::no required call site verified — this check is enforcing nothing",
+              file=sys.stderr)
+        return 1
 
-    print(f"checked {checked} source file(s) against {len(RULES)} rules; "
-          f"{allowed} explicit waiver(s)")
+    print(f"checked {checked} source file(s) against {len(RULES)} rules and {required} "
+          f"required call site(s); {allowed} explicit waiver(s)")
     if violations:
         print(f"\n{len(violations)} hygiene violation(s):\n", file=sys.stderr)
         for v in violations:

@@ -39,6 +39,7 @@ function rec(
 ): RegistryRecord {
   const m = new Map<string | Uint8Array, CborValue>([
     ['version', 1],
+    ['suite', 1],
     ['op', 'REGISTER'],
     ['name', name],
     ['tld', 'vayu'],

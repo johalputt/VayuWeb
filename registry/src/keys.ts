@@ -37,7 +37,24 @@
  * against keys chosen to contain embedded zero bytes.
  */
 
-import { PUBLIC_KEY_LENGTH } from './signature.ts';
+/**
+ * Width of the `ownerKey` field in the `o` keyspace, in bytes.
+ *
+ * A property of the KEYSPACE LAYOUT, not of the signature scheme, which is why it is a constant
+ * here rather than a lookup into the suite table. The field is read positionally at a fixed
+ * offset; making its width depend on the record's suite would silently produce a different
+ * keyspace the day a second suite activates, and a silently different keyspace is worse than a
+ * deliberate rebuild.
+ *
+ * **What has to happen at migration.** A suite-3 owner key is 1,952 bytes and does not fit. The
+ * `o` keyspace must then be re-specified — a length prefix, or a hash of the key in place of the
+ * key — and every peer rebuilds its index. That is affordable precisely because REGISTRY.md
+ * makes the index derived state: "it SHALL be rebuildable from the log alone... nothing in it is
+ * authority". No record changes, no name moves, and no peer has to agree with another about the
+ * layout. This is deferred rather than overlooked, and the VWIP activating a second suite must
+ * carry it.
+ */
+export const OWNER_KEY_FIELD_BYTES = 32;
 
 export const TAG_CURRENT = 0x6e;
 export const TAG_BY_OWNER = 0x6f;
@@ -140,8 +157,8 @@ export function currentKey(tld: string, label: string): Uint8Array {
 
 /** `o`: presence marker, so "every name this key holds" is one prefix scan. */
 export function byOwnerKey(ownerKey: Uint8Array, tld: string, label: string): Uint8Array {
-  if (ownerKey.length !== PUBLIC_KEY_LENGTH) {
-    throw new KeyError(`ownerKey must be ${PUBLIC_KEY_LENGTH} bytes`);
+  if (ownerKey.length !== OWNER_KEY_FIELD_BYTES) {
+    throw new KeyError(`ownerKey must be ${OWNER_KEY_FIELD_BYTES} bytes`);
   }
   return concat([
     tag(TAG_BY_OWNER),
@@ -198,8 +215,8 @@ export function currentPrefix(tld: string): Uint8Array {
 
 /** Every name held by one key. */
 export function byOwnerPrefix(ownerKey: Uint8Array): Uint8Array {
-  if (ownerKey.length !== PUBLIC_KEY_LENGTH) {
-    throw new KeyError(`ownerKey must be ${PUBLIC_KEY_LENGTH} bytes`);
+  if (ownerKey.length !== OWNER_KEY_FIELD_BYTES) {
+    throw new KeyError(`ownerKey must be ${OWNER_KEY_FIELD_BYTES} bytes`);
   }
   return concat([tag(TAG_BY_OWNER), sep, ownerKey, sep]);
 }
@@ -270,7 +287,7 @@ export function decodeByOwnerKey(key: Uint8Array): {
 } {
   expectTag(key, TAG_BY_OWNER, 'by-owner');
   // Positional, not separator-scanned: an owner key contains a zero byte about 12% of the time.
-  const end = 2 + PUBLIC_KEY_LENGTH;
+  const end = 2 + OWNER_KEY_FIELD_BYTES;
   if (key.length < end + 1 || key[end] !== SEPARATOR) throw new KeyError('truncated ownerKey');
   const ownerKey = key.slice(2, end);
   const tld = readText(key, end + 1, 'tld');

@@ -32,6 +32,14 @@ checkpoints are anchored so a future break cannot retroactively make all history
 **Verdict:** structurally addressed. This is the one thing that could not have been retrofitted —
 a record format without a suite field can never migrate — and it is present from record zero.
 
+That claim was false when it was first written, and is worth leaving visible rather than quietly
+correcting. The mechanism was fully specified and had no field to read: `REGISTRY.md`'s record
+schema contained no `suite` at all, and pinned `ownerKey` to 32 bytes and `sig` to 64 — exactly
+what CRYPTO-AGILITY.md's own conformance item 7 calls defective. The field, the per-suite size
+limits, the unknown-suite rejection and the forward-only rule now exist, with conformance
+vectors. Until they did, this verdict was a review asserting a property of a document it had not
+checked, which is the failure mode a longevity review is least able to afford.
+
 ## 2. Substrate
 
 Hypercore, Hyperbee, Hyperswarm, HyperDHT, IPFS and Helia are all young. Assume at least one does

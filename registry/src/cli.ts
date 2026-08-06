@@ -184,6 +184,7 @@ function cmdRegister(args: Args): number {
   const skeleton = (nonce: Uint8Array): CborMap =>
     new Map<string | Uint8Array, CborValue>([
       ['version', 1],
+      ['suite', 1],
       ['op', 'REGISTER'],
       ['name', label],
       ['tld', tld],
@@ -244,6 +245,7 @@ function cmdSuccessor(op: string, args: Args): number {
   const build = (proof: CborValue): CborMap =>
     new Map<string | Uint8Array, CborValue>([
       ['version', 1],
+      ['suite', 1],
       ['op', op],
       ['name', label],
       ['tld', tld],

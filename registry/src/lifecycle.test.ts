@@ -27,6 +27,7 @@ const pow = (): CborMap =>
 function make(op: string, over: Record<string, CborValue> = {}) {
   const m = new Map<string | Uint8Array, CborValue>([
     ['version', 1],
+    ['suite', 1],
     ['op', op],
     ['name', 'atlas'],
     ['tld', 'vayu'],

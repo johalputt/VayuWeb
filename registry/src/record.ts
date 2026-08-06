@@ -19,7 +19,8 @@
 
 import { decode, isDeterministic, type CborMap, type CborValue } from './cbor.ts';
 import { isRatifiedTld, labelRejection, parseAlias } from './names.ts';
-import { PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH, isSmallOrderKey } from './signature.ts';
+import { isSmallOrderKey } from './signature.ts';
+import { suiteOf, MAX_ACTIVE_RECORD_BYTES } from './suites.ts';
 import { RECORD_HASH_LENGTH } from './domain.ts';
 import { POW_ALGORITHM, POW_NONCE_LENGTH } from './pow.ts';
 
@@ -47,8 +48,14 @@ export type Operation = (typeof OPERATIONS)[number];
 /** Protocol version implemented here. A verifier must reject a major version it lacks. */
 export const SUPPORTED_VERSION = 1;
 
-/** Maximum serialised record size in bytes. */
-export const MAX_RECORD_BYTES = 4096;
+/**
+ * The pre-decode size bound: the largest record any ACTIVE suite admits.
+ *
+ * Re-exported from the suite table rather than restated, because CRYPTO-AGILITY.md 3.2 makes the
+ * record limit a property of the suite. The check runs twice — see {@link MAX_ACTIVE_RECORD_BYTES}
+ * for why it must, and {@link parseRecordBytes} for where the second half happens.
+ */
+export const MAX_RECORD_BYTES = MAX_ACTIVE_RECORD_BYTES;
 
 /** Maximum number of entries in `records`. */
 export const MAX_RECORD_ENTRIES = 32;
@@ -76,6 +83,7 @@ export type RecordRejection =
   | 'MISSING_FIELD'
   | 'BAD_FIELD_TYPE'
   | 'UNSUPPORTED_VERSION'
+  | 'UNKNOWN_SUITE'
   | 'UNKNOWN_OP'
   | 'BAD_LABEL'
   | 'UNKNOWN_TLD'
@@ -117,6 +125,13 @@ export interface RecordEntry {
 
 export interface RegistryRecord {
   readonly version: number;
+  /**
+   * The cryptographic suite that produced the signatures.
+   *
+   * Not a formality: CRYPTO-AGILITY.md calls a record format without this field "a record format
+   * that can never migrate", and it is the one property that cannot be added after launch.
+   */
+  readonly suite: number;
   readonly op: Operation;
   readonly name: string;
   readonly tld: string;
@@ -299,6 +314,15 @@ export function parseRecord(map: CborMap): RegistryRecord {
     fail('UNSUPPORTED_VERSION', `version ${version} is not implemented`);
   }
 
+  // CRYPTO-AGILITY.md 4.2: "A verifier MUST reject a record whose `suite` it does not know. It
+  // MUST NOT skip the signature, treat the record as unsigned, or accept it provisionally." A
+  // reserved suite is unknown for this purpose — 3.1 makes "reserved" mean the format can carry
+  // it and no record may use it, so accepting one would admit a signature scheme nothing here
+  // can verify.
+  const suiteId = uintField(map, 'suite');
+  const suite = suiteOf(suiteId);
+  if (suite === null) fail('UNKNOWN_SUITE', `suite ${suiteId} is not an active suite`);
+
   const op = textField(map, 'op');
   if (!(OPERATIONS as readonly string[]).includes(op)) fail('UNKNOWN_OP', `unknown op: ${op}`);
 
@@ -309,11 +333,17 @@ export function parseRecord(map: CborMap): RegistryRecord {
   const tld = textField(map, 'tld');
   if (!isRatifiedTld(tld)) fail('UNKNOWN_TLD', `${tld} is not a ratified TLD`);
 
-  const ownerKey = bytesField(map, 'ownerKey', PUBLIC_KEY_LENGTH);
+  // Length from the suite, never assumed. CRYPTO-AGILITY.md conformance item 7: "No code path
+  // assumes a 32-byte key or a 64-byte signature."
+  const ownerKey = bytesField(map, 'ownerKey', suite.publicKeyLength);
   // A small-order key certifies itself: signatures verify under it that its holder never
   // made. It cannot arise from key generation, so it is refused at schema level rather than
-  // reaching signature verification where it would appear to succeed.
-  if (isSmallOrderKey(ownerKey)) fail('BAD_KEY', 'ownerKey is a small-order point');
+  // reaching signature verification where it would appear to succeed. The check is Ed25519's;
+  // a suite whose signature scheme is not Ed25519 will need its own, which is why it asks the
+  // suite rather than running unconditionally.
+  if (suite.signature === 'Ed25519' && isSmallOrderKey(ownerKey)) {
+    fail('BAD_KEY', 'ownerKey is a small-order point');
+  }
 
   const seq = uintField(map, 'seq');
   if (seq > MAX_SEQ) fail('BAD_SEQ', `seq ${seq} exceeds 2^32-1`);
@@ -362,13 +392,13 @@ export function parseRecord(map: CborMap): RegistryRecord {
   if (!needsPow && powProof !== null) fail('UNEXPECTED_POW', `${op} must carry powProof null`);
 
   const prevHash = bytesField(map, 'prevHash', RECORD_HASH_LENGTH);
-  const sig = bytesField(map, 'sig', SIGNATURE_LENGTH);
+  const sig = bytesField(map, 'sig', suite.signatureLength);
 
   const rawCoSig = map.get('coSig');
   let coSig: Uint8Array | null = null;
   if (rawCoSig !== undefined && rawCoSig !== null) {
-    if (!(rawCoSig instanceof Uint8Array) || rawCoSig.length !== SIGNATURE_LENGTH) {
-      fail('BAD_COSIG', 'coSig must be a 64-byte signature');
+    if (!(rawCoSig instanceof Uint8Array) || rawCoSig.length !== suite.signatureLength) {
+      fail('BAD_COSIG', `coSig must be a ${suite.signatureLength}-byte signature`);
     }
     coSig = rawCoSig as Uint8Array;
   }
@@ -379,6 +409,7 @@ export function parseRecord(map: CborMap): RegistryRecord {
 
   return {
     version,
+    suite: suiteId,
     op: op as Operation,
     name,
     tld,
@@ -410,5 +441,16 @@ export function parseRecordBytes(bytes: Uint8Array): RegistryRecord {
 
   const value = decode(bytes);
   if (!(value instanceof Map)) fail('NOT_A_MAP', 'a record must be a CBOR map');
-  return parseRecord(value as CborMap);
+  const record = parseRecord(value as CborMap);
+
+  // The second half of the size check. `suite` is a field inside the record, so its limit cannot
+  // be consulted until the bytes are decoded — and decoding unbounded input is the very thing the
+  // outer bound prevents. Today the two bounds coincide, because suite 1 is the only active
+  // suite; they will not on the day a second one activates, and a verifier that checked only the
+  // outer bound would then accept records the suite forbids.
+  const limit = suiteOf(record.suite)?.maxRecordBytes ?? MAX_RECORD_BYTES;
+  if (bytes.length > limit) {
+    fail('TOO_LARGE', `${bytes.length} bytes exceeds suite ${record.suite}'s limit of ${limit}`);
+  }
+  return record;
 }

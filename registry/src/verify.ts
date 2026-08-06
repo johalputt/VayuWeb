@@ -76,6 +76,7 @@ export type VerifyRejection =
   | 'TOO_SOON'
   | 'REVOKED'
   | 'BAD_OWNER'
+  | 'SUITE_DOWNGRADE'
   | 'UNSETTLED'
   | 'EXPIRED';
 
@@ -301,6 +302,20 @@ export function verify(
   }
   if (record.notBefore < prev.notBefore + MIN_INTERVAL_SECONDS) {
     return reject('TOO_SOON', 'notBefore is less than 300s after the predecessor');
+  }
+  // CRYPTO-AGILITY.md 5.1: a name's suite moves FORWARD only. This is the rule that stops an
+  // adversary who has broken suite 1 from downgrading a suite-3 name back to a scheme they can
+  // forge — without it, migrating a name to a stronger suite would buy nothing, because the
+  // attacker holding the broken key could simply move it back.
+  //
+  // Checked against `prev` rather than against a per-name high-water mark, because the chain IS
+  // the record of what the name has used: every record names its predecessor by hash, so a
+  // suite that appears in the chain cannot be skipped over.
+  if (record.suite < prev.suite) {
+    return reject(
+      'SUITE_DOWNGRADE',
+      `suite ${record.suite} is below the predecessor's ${prev.suite}; suites move forward only`,
+    );
   }
   // See clockVerdict: this bound is absent from the pseudocode outside REGISTER, and its
   // absence is what makes a single RENEW able to buy an unbounded term.

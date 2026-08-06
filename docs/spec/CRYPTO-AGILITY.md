@@ -56,12 +56,24 @@ retains 128 bits). The CID layer is comparatively future-proof; the signature la
 Every signed object carries a `suite` field: a small unsigned integer, assigned only by VWIP,
 never reused, never renumbered.
 
-| Suite | Signature | Hash | Status | Notes |
-|---|---|---|---|---|
-| 1 | Ed25519 | SHA-256 | **Launch default** | Fast, small, universally implemented. Not quantum-resistant. |
-| 2 | Ed25519 **+** ML-DSA-65 (hybrid) | SHA-256 | Reserved — transition | Both signatures MUST verify. Secure if *either* remains unbroken. |
-| 3 | ML-DSA-65 | SHA3-256 | Reserved — post-quantum | FIPS 204. Larger keys and signatures; see 3.2. |
-| 4 | SLH-DSA-SHAKE-128s | SHAKE-256 | Reserved — conservative fallback | FIPS 205. Hash-based, minimal assumptions, very large signatures. The break-glass suite if lattice assumptions fall. |
+| Suite | Signature | Record hash | Key / signature bytes | Record limit | Status |
+|---|---|---|---|---|---|
+| 1 | Ed25519 | BLAKE2b-256 | 32 / 64 | 4,096 | **Launch default.** Fast, small, universally implemented. Not quantum-resistant. |
+| 2 | Ed25519 **+** ML-DSA-65 (hybrid) | BLAKE2b-256 | 1,984 / 3,373 | 12,288 | Reserved — transition. Both signatures MUST verify; secure if *either* remains unbroken. |
+| 3 | ML-DSA-65 | SHA3-256 | 1,952 / 3,309 | 12,288 | Reserved — post-quantum. FIPS 204. |
+| 4 | SLH-DSA-SHAKE-128s | SHAKE-256 | 32 / 7,856 | 16,384 | Reserved — conservative fallback. FIPS 205. Hash-based, minimal assumptions, very large signatures. The break-glass suite if lattice assumptions fall. |
+
+The **Record hash** column is the hash a record's `record_hash` uses, not the hash inside the
+signature scheme. Suite 1 previously read `SHA-256` here, which disagreed with
+[REGISTRY.md](REGISTRY.md) — it specifies BLAKE2b-256, "because Hypercore already uses it, so a
+node needs one hash primitive" — with the conformance vectors, and with every implementation. The
+specification that defines record bytes is authoritative for them, so this table was the error.
+The reserved rows' hashes are proposals the activating VWIP settles, not commitments.
+
+The **Key / signature bytes** and **Record limit** columns are the figures a verifier reads
+instead of assuming; suite 2's are the concatenation of its two components, since 4.4 requires
+both. `registry/src/suites.ts` holds the same table and a test compares the two, because a table
+in code and a table in a document that drift apart are worse than either alone.
 
 3.1 Suites 2, 3 and 4 are **reserved, not active**. They are specified now so that the record
 format, the verification path and the conformance vectors can accommodate them from day one. A
@@ -73,6 +85,12 @@ and a signature 64. ML-DSA-65 is roughly 1,952 and 3,309. SLH-DSA-SHAKE-128s is 
 limits in [REGISTRY.md](REGISTRY.md) MUST therefore be expressed **per suite**, not as one global
 constant, and the index and replication design must tolerate the larger figures. An
 implementation that assumes 64-byte signatures anywhere is defective.
+
+A verifier consequently checks the size **twice**: once before decoding, against the largest
+limit any *active* suite admits, because `suite` is a field inside the record and cannot be read
+until the bytes are parsed; and once after, against that record's own suite. Bounding the first
+check by the largest *reserved* suite instead would hand an attacker several times the parsing
+work per record for suites no key can sign with.
 
 3.3 Suite 4 exists because suites 2 and 3 both rest on lattice assumptions. If those fall,
 hash-based signatures remain, resting only on the hash function. It is deliberately the least
@@ -88,11 +106,18 @@ silently invalidates history and is prohibited.
 signature, treat the record as unsigned, or accept it provisionally.
 
 4.3 The bytes that get signed MUST include the suite identifier inside the domain-separation
-prefix, so that a signature made under one suite cannot be replayed as another:
+prefix, so that a signature made under one suite cannot be replayed as another. The exact bytes
+are specified in [REGISTRY.md](REGISTRY.md), which is authoritative for record encoding, and are
+reproduced here so the two cannot drift:
 
 ```text
-signing input = "vayuweb-record-v1" || uint8(suite) || canonical_cbor(record_without_sig)
+signing_input = "VayuWeb-Registry-Record-v1" || 0x00 || uint8(suite) || det_cbor(core)
 ```
+
+An earlier revision of this clause showed a different prefix literal — `"vayuweb-record-v1"`,
+with no `0x00` separator — which no implementation used and which would have produced signatures
+REGISTRY.md's verifier rejects. The requirement was always the *structure*: the suite identifier
+inside the domain separation. The literal belongs to the document that defines the bytes.
 
 4.4 For hybrid suite 2, **both** component signatures MUST verify. Accepting either alone would
 reduce the hybrid to whichever component an attacker prefers, which is the classic hybrid
@@ -212,7 +237,7 @@ and must not require a single name to be re-registered.
 
 ## See also
 
-- [Registry specification](REGISTRY.md) — the record format that carries `suite`
+- [Registry specification](REGISTRY.md) — the record format that carries `suite`, the per-suite size limits, and the downgrade check
 - [Naming and TLD policy](NAMES.md) — renewal as the migration forcing point
 - [Longevity review](../LONGEVITY.md) — the non-cryptographic future-proofing
 - [The VayuWeb Constitution](../../constitution/CONSTITUTION.md) — Articles 11, 34, 47, 57

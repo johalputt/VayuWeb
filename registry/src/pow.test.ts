@@ -41,6 +41,7 @@ const proof = (over: Record<string, CborValue> = {}): CborMap => {
 const record = (over: Record<string, CborValue> = {}): CborMap => {
   const m = new Map<string | Uint8Array, CborValue>([
     ['version', 1],
+    ['suite', 1],
     ['op', 'REGISTER'],
     ['name', 'atlas'],
     ['tld', 'vayu'],

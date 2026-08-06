@@ -59,6 +59,7 @@ function build(
 const registration = (over: Record<string, CborValue> = {}): Uint8Array =>
   build({
     version: 1,
+    suite: 1,
     op: 'REGISTER',
     name: 'atlas',
     tld: 'vayu',
@@ -103,6 +104,7 @@ const successor = (
   build(
     {
       version: 1,
+      suite: 1,
       op: 'UPDATE',
       name: 'atlas',
       tld: 'vayu',
@@ -320,6 +322,7 @@ const afterHandover = (
   build(
     {
       version: 1,
+      suite: 1,
       op: 'UPDATE',
       name: 'atlas',
       tld: 'vayu',
@@ -598,6 +601,7 @@ test('proof of work is checked last, so an invalid signature never costs an Argo
   let powRuns = 0;
   const forged = build({
     version: 1,
+    suite: 1,
     op: 'REGISTER',
     name: 'atlas',
     tld: 'vayu',
@@ -683,4 +687,59 @@ test('non-canonical bytes are refused rather than normalised', () => {
   const indefinite = Uint8Array.of(0xbf, 0x61, 0x61, 0x01, 0xff);
   const verdict = verify(indefinite, view(), NOW);
   assert.notEqual(verdict.outcome, 'accept');
+});
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT FINDING: a name's suite could be downgraded back to a broken scheme    */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: a suite moves forward only, so a broken scheme cannot be reinstated', () => {
+  // CRYPTO-AGILITY.md 5.1. Without this rule, migrating a name to a stronger suite buys nothing:
+  // an adversary who has broken suite 1 still holds a key that verifies under it, and would
+  // simply sign a suite-1 record for a name that had moved to suite 3. The migration would be
+  // decorative — every name would remain exactly as secure as the weakest suite it ever used.
+  //
+  // There is no conformance vector for this and cannot be one yet: a vector states its
+  // predecessor as bytes, and 4.2 makes any record naming an inactive suite unparseable, so the
+  // suite-3 predecessor is not a record a conforming peer can hold. The predecessor is therefore
+  // constructed directly here. The VWIP that activates a second suite must add the wire vector.
+  const future: Predecessor = {
+    ...PREV,
+    record: { ...PREV.record, suite: 3 },
+  };
+  const downgrade = successor({ records: [entry('txt', 'v=downgraded')] as CborValue });
+  assert.equal(
+    code(verify(downgrade, view({ current: () => future }), NOW + 600)),
+    'SUITE_DOWNGRADE',
+  );
+
+  // Same suite is not a downgrade, and moving up is the migration itself.
+  const same: Predecessor = { ...PREV, record: { ...PREV.record, suite: 1 } };
+  assert.equal(code(verify(downgrade, view({ current: () => same }), NOW + 600)), 'accept');
+});
+
+test('AUDIT: the signing input separates suites, so a signature cannot be replayed across one', () => {
+  // CRYPTO-AGILITY.md 4.3 and conformance item 5: "Signing inputs for the same record under two
+  // suites differ (domain separation holds)." The suite is also a field inside the signed CBOR,
+  // so this is belt and braces — but the failure it guards is a cross-suite replay during the
+  // one migration the protocol gets, which is not recoverable, and one byte is a cheap premium.
+  const base: CborMap = new Map<string | Uint8Array, CborValue>([
+    ['version', 1],
+    ['suite', 1],
+    ['op', 'UPDATE'],
+  ]);
+  const other: CborMap = new Map(base);
+  other.set('suite', 2);
+  const a = signingInput(base);
+  const b = signingInput(other);
+  assert.notDeepEqual(a, b);
+  // The difference is the suite byte immediately after the separator, not merely the CBOR body.
+  assert.equal(a[26], 0x00);
+  assert.equal(a[27], 1);
+  assert.equal(b[27], 2);
+
+  // A record with no suite throws rather than silently producing the pre-agility input, which
+  // would be valid-looking bytes no conforming verifier accepts.
+  const legacy: CborMap = new Map<string | Uint8Array, CborValue>([['version', 1]]);
+  assert.throws(() => signingInput(legacy), /suite/);
 });

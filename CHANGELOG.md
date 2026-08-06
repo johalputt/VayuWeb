@@ -10,6 +10,74 @@ it.
 
 ## [Unreleased]
 
+### Fixed — the agility mechanism had no field to read
+
+- **`CRYPTO-AGILITY.md` is fully specified and was entirely unimplementable.** Its section 1:
+  "No primitive is named in the protocol. Only suites are, and every signed object carries the
+  identifier of the suite that produced it." The record schema had no `suite` field at all, so
+  4.2 (reject an unknown suite), 4.3 (the suite inside the signing input), 5.1 (suites move
+  forward only) and conformance items 2, 3, 6 and 7 each tested a field that did not exist —
+  while the schema pinned `ownerKey` to 32 bytes and `sig` to 64, which the same document calls
+  defective in terms.
+
+  It matters more than an ordinary gap because that document says why: **"a record format
+  without a suite identifier is a record format that can never migrate."** Every other
+  future-proofing decision here can be made later. This one could not.
+
+- **`suite` is now a required field**, and the four rules that depend on it exist:
+  - Unknown or **reserved** suites are rejected `UNKNOWN_SUITE`. Reserved counts as unknown —
+    3.1 makes "reserved" mean the format can carry it and no record may use it, so accepting one
+    would admit a signature scheme nothing can verify.
+  - The signing input carries `uint8(suite)` after the separator, per 4.3. Belt and braces, since
+    `suite` is also inside the signed CBOR; kept because the cost is one byte and the failure —
+    a cross-suite replay during the one migration this protocol gets — is unrecoverable. A record
+    with no suite now throws rather than silently producing the pre-agility input.
+  - `suite >= prev.suite`, or `SUITE_DOWNGRADE`. Without it, migrating a name to a stronger suite
+    buys nothing: whoever broke suite 1 still holds a key that verifies under it.
+  - Key and signature lengths come from the suite table, never a constant.
+
+- **Size limits are per suite**, per 3.2, and the check runs **twice**. `suite` is a field inside
+  the record, so no per-suite limit can be consulted until the bytes are decoded — and decoding
+  unbounded input is the denial-of-service the outer bound prevents. The outer bound is therefore
+  the maximum over *active* suites, and the suite's own limit is applied after parsing. Bounding
+  the outer check by the largest *reserved* suite would hand an attacker four times the parsing
+  work per record for suites no key can sign with.
+
+- **Two documents asserted the field existed.** `CRYPTO-AGILITY.md`'s own "See also" described
+  `REGISTRY.md` as "the record format that carries `suite`", and `LONGEVITY.md` recorded as a
+  verdict that it "is present from record zero". Both corrected; the longevity entry keeps the
+  false claim visible and says what it was, because a review asserting a property of a document
+  it had not checked is the failure mode that review can least afford.
+
+- **Two more disagreements surfaced while wiring it up.** The suite table gave suite 1's hash as
+  SHA-256, against `REGISTRY.md`'s BLAKE2b-256, the conformance vectors and every implementation
+  — the specification that defines record bytes wins, so the table was the error. And 4.3's code
+  block showed a different prefix literal with no `0x00` separator, which would have produced
+  signatures `REGISTRY.md`'s verifier rejects; the requirement was always the *structure*, and
+  the literal belongs to the document that defines the bytes.
+
+- **`keys.ts` baked a 32-byte key into the Hyperbee keyspace**, found by the new static rule
+  rather than by the audit. Renamed to `OWNER_KEY_FIELD_BYTES` and documented: it is a property
+  of the keyspace layout rather than of the signature scheme, a suite-3 key does not fit, and the
+  fix at migration is a re-specified `o` keyspace and an index rebuild — affordable exactly
+  because `REGISTRY.md` makes the index derived state with no authority. Deferred, in writing,
+  rather than overlooked.
+
+  **Three vectors, and two rules that cannot have one.** `suite/unknown`,
+  `suite/reserved-is-not-active` and `suite/zero` are on the wire. A downgrade vector cannot
+  exist yet: a vector states its predecessor as bytes, and 4.2 makes any record naming an
+  inactive suite unparseable, so the suite-3 predecessor is not a record a conforming peer can
+  hold. It is unit-tested against a constructed predecessor instead, and the absence is written
+  into the vector file — an absent vector nobody wrote down reads exactly like a covered rule.
+
+  **Two of the first eight mutations survived, and the tests were wrong again.** Hard-coding
+  32/64 back, and deleting the per-suite size check, both left every test passing — because with
+  one active suite the per-suite limit *equals* the global one and the suite's lengths *equal*
+  Ed25519's. Behavioural tests cannot reach either. `check-source-hygiene.py` gains a `REQUIRED`
+  mechanism for call sites nothing else can hold, plus a rule forbidding `PUBLIC_KEY_LENGTH` and
+  `SIGNATURE_LENGTH` outside their suite module — which is the "static check" CRYPTO-AGILITY.md
+  conformance item 1 asks for by name. Re-mutated: both refused, along with reverting `keys.ts`.
+
 ### Fixed — `RELEASE` was an operation the charter closed the set against
 
 - **Article 29.4 does not list record types, it closes the list.** "There SHALL be no

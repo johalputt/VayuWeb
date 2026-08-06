@@ -29,6 +29,7 @@ const pow = (): CborMap =>
 function rec(name: string, over: Record<string, CborValue> = {}): RegistryRecord {
   const m = new Map<string | Uint8Array, CborValue>([
     ['version', 1],
+    ['suite', 1],
     ['op', 'REGISTER'],
     ['name', name],
     ['tld', 'vayu'],
