@@ -187,7 +187,7 @@ RESOLUTION.md, VWIP-0001 and PUBLISHING.md, which `scripts/check-counts.py` now 
 
 <!-- canonical:permissions-policy -->
 ```text
-Permissions-Policy: accelerometer=(), ambient-light-sensor=(), attribution-reporting=(), autoplay=(), battery=(), bluetooth=(), browsing-topics=(), camera=(), compute-pressure=(), display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), identity-credentials-get=(), idle-detection=(), join-ad-interest-group=(), language-detector=(), local-fonts=(), magnetometer=(), microphone=(), midi=(), otp-credentials=(), payment=(), picture-in-picture=(), private-state-token-issuance=(), private-state-token-redemption=(), publickey-credentials-create=(), publickey-credentials-get=(), run-ad-auction=(), screen-wake-lock=(), serial=(), shared-storage=(), shared-storage-select-url=(), speaker-selection=(), storage-access=(), summarizer=(), translator=(), usb=(), web-share=(), window-management=(), xr-spatial-tracking=()
+Permissions-Policy: accelerometer=(), ambient-light-sensor=(), attribution-reporting=(), autoplay=(), battery=(), bluetooth=(), browsing-topics=(), camera=(), clipboard-read=(), clipboard-write=(), compute-pressure=(), display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), identity-credentials-get=(), idle-detection=(), join-ad-interest-group=(), language-detector=(), local-fonts=(), magnetometer=(), microphone=(), midi=(), otp-credentials=(), payment=(), picture-in-picture=(), private-state-token-issuance=(), private-state-token-redemption=(), publickey-credentials-create=(), publickey-credentials-get=(), run-ad-auction=(), screen-wake-lock=(), serial=(), shared-storage=(), shared-storage-select-url=(), speaker-selection=(), storage-access=(), summarizer=(), translator=(), usb=(), web-share=(), window-management=(), xr-spatial-tracking=()
 ```
 
 Every feature carries the **empty allowlist**, denying it to the document and every nested
@@ -207,8 +207,15 @@ Four groups deserve note:
 
 This list MUST be treated as a floor and reviewed against each browser release. A feature not
 named here SHOULD be denied, and an omission is a defect to report. Note also that **no
-Permissions-Policy token exists** for notifications, push, clipboard, canvas, WebGL, Web Audio or
-the Network Information API — those are covered, where they can be, in section 5.
+Permissions-Policy token exists** for notifications, push, canvas, WebGL, Web Audio or the
+Network Information API — those are covered, where they can be, in section 5.
+
+`clipboard-read` and `clipboard-write` were in that sentence, and both are real tokens in the
+W3C permissions-policy feature registry. So the document reported an omission as an impossibility
+— which is the one way a floor rule can fail silently, because "a feature not named here SHOULD
+be denied" only produces an action if someone believes a token exists to deny it with. Both are
+now in the header, and a clipboard read is a page reading whatever the reader last copied, which
+on a machine where somebody is handling keys is not a small thing.
 
 <!-- canonical:referrer-policy -->
 ```text

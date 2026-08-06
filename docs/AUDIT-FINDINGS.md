@@ -109,9 +109,12 @@ these turned out to be the largest remaining gap in the record format.
 | `names-tld-retire-24mo-vs-const-35.10` | **Stale.** The 24-month sunset was withdrawn, with the reason recorded |
 | `names-tld-sunset-vs-registry-register-renew` | **Stale** with it |
 
-**Five remain untriaged**: `registry-epochs-checkpoint-conjunction`,
-`resolution-step8-release-revoke-lifecycle`, `resolution-step1-vs-local-surface-host-normalisation`,
-`privacy-md-secret-storage-contradiction` and `content-security-md-s3-clipboard-permissions-policy`.
+| `privacy-md-secret-storage-contradiction` | **Fixed.** The keystore fallback is normative, reported, and limited to the control-API token |
+| `content-security-md-s3-clipboard-permissions-policy` | **Fixed.** `clipboard-read` and `clipboard-write` exist and are now denied — and the proxy was emitting no `Permissions-Policy` at all |
+
+**Three remain untriaged**: `registry-epochs-checkpoint-conjunction`,
+`resolution-step8-release-revoke-lifecycle` and
+`resolution-step1-vs-local-surface-host-normalisation`.
 
 **Every HIGH, MEDIUM and LOW finding now carries an outcome.** The count of untriaged MEDIUM
 findings is worth stating rather than implying: zero MEDIUM, and none at LOW either. **Fifteen

@@ -10,6 +10,47 @@ it.
 
 ## [Unreleased]
 
+### Fixed — the entire `Permissions-Policy` header was specified and never sent
+
+- **The proxy emitted the CSP and eight of the nine other canonical values.** `Permissions-Policy`
+  — the whole 44-token deny list, every powerful feature `CONTENT-SECURITY.md` enumerates as
+  closed — was **never sent at all**. Camera, microphone, geolocation, serial, HID, USB, the
+  Privacy Sandbox surface: each documented as denied, each permitted by the headers a reader
+  actually received. Conformance item 1 requires "the three canonical values in sections 2 and 3
+  emitted byte-identically on every response", and one of the three was absent.
+
+  **The test that should have caught it was the reason it survived.** It pinned the CSP by
+  *naming its block* — `spec.split('<!-- canonical:content-security-policy -->')` — and a test
+  that names the block it checks cannot notice a block nobody wrote a test for. The replacement
+  enumerates the `<!-- canonical:… -->` markers in the document and asserts each one is emitted
+  and byte-identical. Mutation-tested three ways: dropping the header, dropping one token from
+  its value, and adding a fourth canonical block to the specification. All three refused.
+
+  This is the second time in this audit a check has been the reason a gap persisted rather than
+  the thing that closed it — the first was the vector-coverage list, hand-written and therefore
+  blind to the six codes nobody typed. Both had the same shape: an expectation enumerated by hand
+  where it could have been derived from the source.
+
+- **`clipboard-read` and `clipboard-write` were reported as impossible.**
+  `CONTENT-SECURITY.md` said "**no Permissions-Policy token exists** for notifications, push,
+  clipboard, …". Both clipboard tokens are in the W3C permissions-policy registry. The document
+  reported an omission as an impossibility, which is the one way its own floor rule can fail
+  silently: "a feature not named here SHOULD be denied" only produces an action if someone
+  believes there is a token to deny it with. Both are now in the header — a clipboard read is a
+  page reading whatever the reader last copied, which on a machine where somebody handles keys is
+  not a small thing.
+
+- **`PRIVACY.md` contradicted itself about where a secret lives.** §7: secret material is "Never
+  written to disk except in the platform keystore", with no fallback clause. §4's inventory:
+  control-API bearer token, "On disk, mode `0600`". One document, two rules, and the table
+  described the fallback as though it were the rule.
+
+  Resolved the way the same document already resolved it for Private Mode's ephemeral profile:
+  the fallback is normative, limited to the control-API token alone, and the client MUST report
+  that the weaker guarantee applies. A private key or the content-cache key on a platform without
+  a keystore is a refusal, not a downgrade. Worth noting that this recurred *in the same file*
+  after that lesson, which is the argument for the guard rather than for the correction.
+
 ### Fixed — a record type the registry does not carry, and the log anchor nothing carries
 
 - **`ATTESTATION.md` described "an ordinary registry record type, `attest`".** Two readings, both

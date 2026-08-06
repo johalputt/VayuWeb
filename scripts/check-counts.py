@@ -257,6 +257,20 @@ AGREEMENTS = [
         ),
     },
     {
+        # PRIVACY.md section 7 said secrets are "Never written to disk except in the platform
+        # keystore" with no fallback, while section 4's inventory listed the control-API token as
+        # "On disk, mode 0600". One document, two rules, the table describing the fallback as
+        # though it were the rule -- the same shape already corrected in this file for Private
+        # Mode's ephemeral profile, recurring after that lesson.
+        "label": "the keystore fallback is stated where it applies",
+        "files": ["docs/spec/PRIVACY.md"],
+        "absent": re.compile(r"\| Control-API bearer token \| On disk, mode"),
+        "note": (
+            "Constitution Article 6 puts secrets in the platform keystore. Where none exists the "
+            "control-API token alone may fall back to a 0600 file, and the client must say so."
+        ),
+    },
+    {
         # Articles 29.5.d and 31.1 both require a log anchor in every record and no field carries
         # one. The gap is acknowledged in both documents an implementer would look in, and a
         # rule that only required it in one would let the other quietly stop saying it.

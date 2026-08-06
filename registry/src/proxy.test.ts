@@ -351,3 +351,31 @@ test('eviction is by insertion order, so an attacker cannot pin their own entrie
   assert.equal(cache.has('one.vayu', NOW), false, 'the oldest goes, whatever has been read');
   assert.equal(cache.has('four.vayu', NOW), true);
 });
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT FINDING: one of the three canonical headers was never emitted          */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: every canonical header block in CONTENT-SECURITY.md is actually emitted', () => {
+  // Conformance item 1: "The three canonical values in sections 2 and 3 are emitted
+  // byte-identically on every response." Two were. `Permissions-Policy` — the entire 44-token
+  // deny list, every powerful feature the document enumerates as closed — was never sent at all,
+  // so every one of those features was permitted by the headers this proxy actually produces.
+  //
+  // The existing test above pins the CSP by naming its block. A test that names the block it
+  // checks cannot notice a block nobody wrote a test for, which is why this one enumerates the
+  // `<!-- canonical:... -->` markers instead of listing them.
+  const spec = readFileSync(
+    new URL('../../docs/spec/CONTENT-SECURITY.md', import.meta.url),
+    'utf8',
+  );
+  const markers = [...spec.matchAll(/<!-- canonical:([a-z-]+) -->\n```text\n([\s\S]*?)\n```/g)];
+  assert.ok(markers.length >= 3, `only ${markers.length} canonical blocks found — format changed`);
+
+  const emitted = new Map(SECURITY_HEADERS.map(([n, v]) => [n, v]));
+  for (const [, name, block] of markers) {
+    const value = block!.replace(new RegExp(`^${name}:\\s*`, 'i'), '').trim();
+    assert.ok(emitted.has(name!), `${name} is canonical in the specification and never emitted`);
+    assert.equal(emitted.get(name!), value, `${name} differs from its canonical block`);
+  }
+});

@@ -56,9 +56,25 @@ export const DEFAULT_CSP =
   "form-action 'self'; base-uri 'none'; webrtc 'block'; require-trusted-types-for 'script'; " +
   "trusted-types 'none'";
 
+/**
+ * The Permissions-Policy deny list, from CONTENT-SECURITY.md section 3.
+ *
+ * Every feature carries the empty allowlist, denying it to the document and every nested
+ * context. It is a literal enumeration rather than a description because "deny every powerful
+ * feature" is not something an implementation can execute or a test can check.
+ *
+ * **This header was specified and never emitted.** The proxy sent the CSP and eight of the nine
+ * other canonical values, so every feature this list closes was in fact permitted by the headers
+ * a reader actually received. The test meant to catch it pinned the CSP *by naming its block*,
+ * and a test that names the block it checks cannot notice a block nobody wrote a test for. The
+ * replacement enumerates the canonical markers in the document instead.
+ */
+export const PERMISSIONS_POLICY =
+  'accelerometer=(), ambient-light-sensor=(), attribution-reporting=(), autoplay=(), battery=(), bluetooth=(), browsing-topics=(), camera=(), clipboard-read=(), clipboard-write=(), compute-pressure=(), display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), identity-credentials-get=(), idle-detection=(), join-ad-interest-group=(), language-detector=(), local-fonts=(), magnetometer=(), microphone=(), midi=(), otp-credentials=(), payment=(), picture-in-picture=(), private-state-token-issuance=(), private-state-token-redemption=(), publickey-credentials-create=(), publickey-credentials-get=(), run-ad-auction=(), screen-wake-lock=(), serial=(), shared-storage=(), shared-storage-select-url=(), speaker-selection=(), storage-access=(), summarizer=(), translator=(), usb=(), web-share=(), window-management=(), xr-spatial-tracking=()';
 /** Accompanying response headers, from CONTENT-SECURITY.md section 3. */
 export const SECURITY_HEADERS: ReadonlyArray<readonly [string, string]> = [
   ['content-security-policy', DEFAULT_CSP],
+  ['permissions-policy', PERMISSIONS_POLICY],
   ['referrer-policy', 'no-referrer'],
   ['x-content-type-options', 'nosniff'],
   ['x-frame-options', 'DENY'],

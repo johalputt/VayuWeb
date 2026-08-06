@@ -138,7 +138,7 @@ be written.
 | Hyperbee index | On disk, derived, rebuildable | Memory only |
 | Content cache | On disk, **encrypted at rest** with a key held in the OS keychain | Memory only |
 | Pin set | On disk. This is a deliberate, reader-chosen record of what they keep alive. | Memory only |
-| Control-API bearer token | On disk, mode `0600` | Memory only, regenerated per run |
+| Control-API bearer token | **Platform keystore.** Where the platform provides none, a file at mode `0600`, and the client MUST report that the weaker guarantee applies — see section 7 | Memory only, regenerated per run |
 | Resolver configuration | On disk, mode `0600`, contains no history | Memory only |
 | **Query log** | **Never written, in either mode** | **Never written** |
 | **Access log** | **Never written** | **Never written** |
@@ -246,7 +246,20 @@ Secret material — Ed25519 private keys, the content-cache key, the control-API
 2. Zeroised immediately after use, by a means the compiler cannot elide.
 3. Never placed in a garbage-collected string, an environment variable, a command-line argument,
    or an error message.
-4. Never written to disk except in the platform keystore, per Constitution Article 6.
+4. Never written to disk except in the platform keystore, per Constitution Article 6. **Where
+   the platform provides no keystore**, the control-API token — and only that token — MAY be
+   held in a file at mode `0600` inside the resolver's own state directory. The client MUST
+   report that the weaker guarantee applies, and MUST NOT describe such an installation as
+   keeping its secrets in the keystore. No other secret has this fallback: a private key or the
+   content-cache key on a platform without a keystore is a refusal, not a downgrade.
+
+This clause carried no fallback at all, while section 4's inventory listed the control-API token
+as "On disk, mode `0600`" in Standard Mode. One document, two rules, and the table described the
+fallback as though it were the rule. It is the same defect already corrected in this document for
+Private Mode's ephemeral profile — a normative clause that holds "where the platform provides
+one" and a summary that states the strong form unconditionally — and it is worth noticing that it
+recurred in the same file after that lesson, which is the argument for the guard rather than for
+the correction.
 
 An error message that includes a key is a disclosure. The implementation MUST carry a test that
 formats every error type with secret material present and asserts none of it appears in the output.
