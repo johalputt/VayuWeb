@@ -262,9 +262,24 @@ Article 23 forbids the figure, so the number does not exist. Article 19's limits
 are held as a list rather than as prose, so a user interface has to render them or deliberately
 drop them.
 
-**What remains.** Helia integration and the block-exchange path, and the end-to-end acceptance
-test — which needs two machines and a network, and which this repository cannot honestly claim
-from a sandbox.
+`registry/src/blockstore.ts` is the Helia integration, and it is deliberately thin: the
+blockstore is exposed as the `BlockSource` the verified traversal already takes, so every check
+in `fetch.ts` stays in front of the network rather than being replaced by a library's own
+assembly. Publishing a site into a real Helia node and fetching it back through the traversal
+works end to end.
+
+Writing it produced the phase's sharpest lesson so far, and it is about test doubles rather than
+about IPFS. The `AsyncBlocks` interface declared `Promise<Uint8Array>`, the whole suite passed
+against a fake that returned exactly that, and the first run against a real Helia node failed
+immediately — `blockstore-core` declares `*get(key, options)` as an await-or-value generator and
+Helia wraps it in an async one, so an `await` on either is a no-op. **A fake that returns what
+the interface says cannot find a wrong interface.** The double now returns the awkward shapes the
+library really returns, and three separate mutations were needed before it stopped being more
+agreeable than production.
+
+**What remains.** The block-exchange path over a real network — bitswap with a stranger who
+declines to send a block, or sends a different one — and the end-to-end acceptance test, which
+needs two machines and which this repository cannot honestly claim from a sandbox.
 
 Starting the phase surfaced two settled-spec contradictions and one gap, all recorded in the
 changelog: the resolver preferred the frozen snapshot over the living pointer, so a conforming

@@ -10,6 +10,42 @@ it.
 
 ## [Unreleased]
 
+### Added — blocks on disk, with the verified traversal still in front of the network
+
+- **`registry/src/blockstore.ts` keeps `fetch.ts` in the path, which is the whole design
+  constraint.** Helia will assemble a UnixFS tree itself, and using that would be shorter, faster
+  to write, and would move every check in RESOLUTION.md 12.1 to 12.3 into somebody else's library
+  — or out of the path entirely, with nothing in this repository saying which. So the blockstore
+  is exposed as a `BlockSource` and nothing more. To this code a buggy library and a lying peer
+  are the same thing, and a test corrupts a single leaf to prove it.
+
+- **Four shapes, and the interface was wrong about all of them.** `AsyncBlocks` declared
+  `Promise<Uint8Array>` because that is what a blockstore obviously returns. `blockstore-core`
+  declares `*get(key, options)` — a synchronous await-or-value generator — and Helia's
+  `BlockStorage` wrapper returns an **async** generator over it. An `await` on either is a no-op
+  that hands back the generator. The whole suite passed against a fake returning what the
+  interface claimed, and the first run against a real Helia node failed inside `sha256` with
+  "data argument must be of type string or an instance of Buffer".
+
+  **A fake that returns what the interface says cannot find a wrong interface.** The double now
+  returns an async generator from `get` and is a generator *function* for `put`, matching the
+  library rather than the assumption; all four shapes are pinned by name.
+
+- **The async branch must be checked before the synchronous one**, and that was a second failure
+  after the first was fixed: an `AsyncGenerator` also has `next`, but its `next()` answers a
+  promise, so reading `.value` synchronously yields `undefined` and the adapter reports "not
+  bytes" for a store that is working perfectly.
+
+- **A per-block deadline, because a promise with no deadline is a request a peer holds open.**
+  RESOLUTION.md step 11's 120-second total budget is unreachable without one — a peer sending a
+  byte a minute never quite fails. The test races the refusal against a longer timer rather than
+  measuring elapsed time, because a bare assertion would *hang* if the deadline were removed, and
+  a hang reports as a CI timeout instead of as a missing defence.
+
+- **The prefetch budget counts distinct blocks; the traversal's counts every visit.** They answer
+  different questions — one bounds the network, the other bounds the work a repeated link can
+  cause — and conflating them would let one of the two attacks through.
+
 ### Added — the reference transport binding, and a driver that could only ever answer
 
 - **`registry/src/swarm.ts` carries the messages `replicate.ts` produces.** Discovery on
