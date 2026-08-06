@@ -25,11 +25,19 @@ on:
 permissions:
   contents: read
 
-# A superseded run on the same ref is wasted work; cancel it. Never cancel on main, where a
-# run's result is a record rather than a preview.
+# A superseded run on the same ref is wasted work; cancel it. A run on `main` is never
+# superseded, because its result is a record rather than a preview -- and the discriminator is in
+# the GROUP rather than in `cancel-in-progress`.
+#
+# That is not a style choice. `cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}` is what
+# this file said, and it did not work: run 31068869289 on `main` was cancelled one second after
+# the next push started, having recorded no jobs at all. An expression in that field yields the
+# STRING "false", which is non-empty and therefore truthy, so the guard was inert on every
+# workflow here. Putting `github.sha` in the group for main gives each commit a group of its own,
+# so nothing can supersede it, and leaves branch runs sharing a group per ref as intended.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || 'shared' }}
+  cancel-in-progress: true
 
 jobs:
   # ---------------------------------------------------------------------------

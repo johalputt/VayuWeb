@@ -10,6 +10,29 @@ it.
 
 ## [Unreleased]
 
+### Fixed — CI cancelled a run on `main`, which its own comment says never happens
+
+- **`cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}` is inert.** GitHub evaluates an
+  expression in that field to a **string**, and every non-empty string is truthy — so
+  `"false"` cancels. Four workflows carried it, each above a comment reading "Never cancel on
+  main, where a run's result is a record rather than a preview".
+
+  It was not caught by reading, because the line says what it means to do. It was caught by
+  looking at what happened: CI run 31068869289, on `main`, cancelled **one second** after the next
+  push started, having recorded no jobs at all. Six main runs this session, one of them silently
+  discarded, and the commit it was verifying went unverified until a later commit re-covered it.
+
+  The working form puts the discriminator in the group rather than the flag —
+  `github.sha` for main gives each commit a group of its own, so nothing can supersede it, while
+  branch runs keep sharing a group per ref. `check-workflows.py` now refuses any expression in
+  `cancel-in-progress`, since the whole class fails the same way. Mutation-tested by restoring the
+  old expression and by writing a different one; both refused.
+
+  Two things about this are worth stating rather than fixing quietly. It is the same defect the
+  audit kept finding one layer out — a control that is declared, reads correctly, and does not do
+  what its comment says — and it was found by checking the artifact rather than the configuration,
+  which is the only method that has worked on this class all week.
+
 ### Fixed — cross-references and counts that were right when written and never moved
 
 - **`RESOLUTION.md` was the third document to undercount the residual channels**, and it was

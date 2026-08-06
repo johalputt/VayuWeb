@@ -31,6 +31,9 @@ SECRET = re.compile(r"\$\{\{\s*secrets\.([A-Za-z0-9_]+)\s*\}\}")
 PR_TARGET = re.compile(r"^\s*pull_request_target:", re.M)
 
 
+CANCEL_EXPR = re.compile(r"^\s*cancel-in-progress:\s*(.*\$\{\{.*)$", re.M)
+
+
 def workflow_files():
     if not os.path.isdir(WORKFLOWS):
         return
@@ -50,6 +53,23 @@ def main():
             text = handle.read()
         checked += 1
         jobs += len(JOB.findall(text.split("jobs:", 1)[-1]))
+
+        # 0. `cancel-in-progress` must be a literal, never an expression.
+        #
+        #    GitHub evaluates `${{ ... }}` there to a STRING, and every non-empty string is
+        #    truthy — so `cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}` is `true`
+        #    on main as well, and four workflows here carried exactly that while their comments
+        #    said main runs are never superseded. It was not caught by reading, because the line
+        #    says what it means to do. It was caught by a run on `main` being cancelled one
+        #    second after the next push started, with no jobs recorded.
+        #
+        #    The working form puts the discriminator in the group: `github.sha` for main gives
+        #    each commit a group of its own, so nothing can supersede it.
+        for match in CANCEL_EXPR.finditer(text):
+            violations.append(
+                f"{rel}: `cancel-in-progress: {match.group(1).strip()}` is an expression. It "
+                f"evaluates to a non-empty string, which is truthy, so the condition never "
+                f"refuses — put the discriminator in `group:` instead")
 
         # 1. Every workflow states its permissions. Without the key, a workflow inherits the
         #    repository default, which on many repositories is write to everything.
@@ -105,8 +125,9 @@ def main():
         for v in violations:
             print(f"  {v}", file=sys.stderr)
         return 1
-    print("OK — workflows declare their permissions, pin third-party actions, and use no "
-          "credential beyond the automatic token.")
+    print("OK — workflows declare their permissions, pin third-party actions, use no "
+          "credential beyond the automatic token, and cancel by group rather than by an "
+          "expression that is always true.")
     return 0
 
 
