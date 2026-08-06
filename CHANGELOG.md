@@ -10,6 +10,33 @@ it.
 
 ## [Unreleased]
 
+### Added — the client's secret handling, in Rust, where the rule cannot be relaxed
+
+- **`client/` is a Rust crate and `client/src/secrets.rs` is its point.** PRIVACY.md 7.4 says a
+  private key on a platform without a keystore is *"a refusal, not a downgrade"*. As prose that is
+  a rule somebody implements correctly and relaxes six months later because the build fails on a
+  machine with no keyring. As a type it does not compile: `Sensitivity::KeystoreOnly` has no path
+  to the file fallback, and the test that proves it makes the fallback closure `panic!` so a
+  regression says why rather than merely failing.
+
+- **A keystore that refuses is not a keystore that is absent.** Collapsing the two would turn
+  every transient keyring failure into a private key on disk — the forbidden downgrade arriving
+  through an error path rather than through a decision. `available()` and `set()` are separate
+  questions and both are tested.
+
+- **The disclosure is attached to the value.** "The client MUST report that the weaker guarantee
+  applies" implemented as "the caller should probably mention it" is how a requirement becomes a
+  comment, so `Placement::FileFallback` carries the sentence a user is owed.
+
+- **A `Secret` never prints itself**, in `Debug` or `Display`, which satisfies 7.3's "never placed
+  in […] an error message" without asking every future caller to remember; and `Secret::take`
+  zeroises the caller's buffer, because a constructor that leaves the original lying around has
+  moved the problem rather than solved it.
+
+- **Gated in CI with no GUI libraries installed**, deliberately: a security rule that can only be
+  checked by launching a window is a security rule nobody checks. `cargo test --locked`,
+  `cargo fmt --check` and `cargo clippy -D warnings`.
+
 ### Added — blocks on disk, with the verified traversal still in front of the network
 
 - **`registry/src/blockstore.ts` keeps `fetch.ts` in the path, which is the whole design

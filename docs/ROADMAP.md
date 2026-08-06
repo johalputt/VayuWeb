@@ -302,6 +302,32 @@ Tauri 2.x application; identity generation with the secret key placed in the ope
 keychain and never written to a config file or the log; register, renew, transfer and release;
 publish; browse; pin management; opt-in succession key designation.
 
+**Started, at the end that matters most.** `client/` is a Rust crate, because
+[ARCHITECTURE.md](ARCHITECTURE.md)'s "Implementation Language" makes Rust the expected choice
+here — Tauri already is one, and the only question was how much lives below that boundary. The
+answer taken is: everything that touches a secret.
+
+`client/src/secrets.rs` implements [PRIVACY.md](spec/PRIVACY.md) section 7, and specifically the
+clause with the sharp edge — *"a private key or the content-cache key on a platform without a
+keystore is a refusal, not a downgrade"*. Written as prose that is a rule somebody implements
+correctly on Monday and relaxes on Friday because the build fails on a machine with no keyring.
+Written as a type it does not compile: `Sensitivity::KeystoreOnly` has no path to a file, a
+keystore that *refuses* is distinguished from one that is *absent* so a transient failure can
+never become a licence to write a key to disk, and the file fallback returns a `Placement` whose
+disclosure text is attached to the value rather than left to each call site — because "MUST
+report", implemented as "the caller should probably mention it", is how a requirement becomes a
+comment.
+
+**What Rust buys here that a garbage-collected language cannot** is two of the four requirements
+outright: `Drop` runs at a known point, so zeroisation is not a hope, and requirement 3's "never
+placed in a garbage-collected string" is satisfied by construction. The crate builds and tests
+with no display and no system GUI libraries, which is deliberate — a security rule that can only
+be checked by launching a window is a security rule nobody checks in CI.
+
+**The window itself is not built**, and the acceptance test below cannot be run by anybody here
+regardless: it asks for a person who has never used a command line, and no amount of automation
+supplies one.
+
 **Depends on:** Phase 4.
 
 **Done when:** someone who has never used a command line completes the full flow — install,
