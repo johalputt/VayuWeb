@@ -7,6 +7,7 @@ import {
   buildVectors,
   buildConvergenceVectors,
   buildReplicationVectors,
+  buildBlockExchangeVectors,
   buildResolutionVectors,
   buildEquivocationVectors,
   buildPowVectors,
@@ -19,7 +20,7 @@ import { resolveConflict, type Candidate } from './converge.ts';
 import { resolveName } from './resolve.ts';
 import { decodeMessage, verifyEquivocation, ReplicationError } from './replicate.ts';
 import { recordHashFromBytes } from './domain.ts';
-import { compareBytes, decode, type CborMap } from './cbor.ts';
+import { compareBytes, decode, encode, type CborMap, type CborValue } from './cbor.ts';
 import {
   verify,
   predecessorFrom,
@@ -29,6 +30,7 @@ import {
 } from './verify.ts';
 import { parseRecordBytes } from './record.ts';
 import { baseBits, requiredBits, rateWindow, powSalt, tagSatisfies, RATE_FLOOR } from './pow.ts';
+import { BlockExchangeError, decodeBlockMessage, encodeBlockMessage } from './blockx.ts';
 
 const ARTIFACT = fileURLToPath(new URL('../../conformance/vectors.json', import.meta.url));
 
@@ -344,7 +346,80 @@ test('the rate term never depends on how accurate a language’s log2 is', () =>
   assert.deepEqual(disagreements.slice(0, 5), []);
 });
 
-test('the committed artifact carries all six suites', () => {
+test('every block-exchange vector decodes, or is refused with the code VWIP-0005 names', () => {
+  const failures: string[] = [];
+  for (const vector of buildBlockExchangeVectors()) {
+    // A vector published as a recipe is built here, exactly as a second implementation would
+    // build it. The alternative is 2.1 MB of hex zeros in the artifact, of which every byte after
+    // the first carries no information — see BlockExchangeVector.construct.
+    const bytes =
+      vector.message !== undefined
+        ? fromHex(vector.message)
+        : encode(
+            new Map<string | Uint8Array, CborValue>([
+              ['t', 'BLOCKS'],
+              [
+                'blks',
+                Array.from(
+                  { length: vector.construct!.count },
+                  () => new Uint8Array(vector.construct!.bytes),
+                ),
+              ],
+            ]),
+          );
+
+    let actual: string;
+    try {
+      actual = `ok:${decodeBlockMessage(bytes).t}`;
+    } catch (error) {
+      actual =
+        error instanceof BlockExchangeError ? `reject:${error.code}` : `threw:${String(error)}`;
+    }
+    const want =
+      vector.expect.decode === 'ok' ? `ok:${vector.expect.type}` : `reject:${vector.expect.code}`;
+    if (actual !== want) {
+      failures.push(
+        `${vector.name}\n      rule:     ${vector.rule}` +
+          `\n      expected: ${want}\n      actual:   ${actual}`,
+      );
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+test('AUDIT: BDONE has no field that could vary with what a peer holds', () => {
+  // VWIP-0005 6.2: a peer that lacks a block and one that declines to send it emit the identical
+  // message, because a distinguishable refusal is an oracle for enumerating what a machine hosts.
+  //
+  // **The obvious test for this is a tautology and was written first.** Comparing the two
+  // published vectors byte for byte compares two identical calls to the same encoder — it passes
+  // no matter what the encoder does, and a mutation that added a `why: "absent"` field to BDONE
+  // sailed through it, because the field was added to both. The property is not that two equal
+  // things are equal. It is that the message type has NOWHERE to put the difference.
+  //
+  // So the assertion is structural: BDONE's encoding carries exactly `t` and `cids`, and any new
+  // key is a channel for the state the specification says must not be observable.
+  const encoded = encodeBlockMessage({ t: 'BDONE', cids: [new Uint8Array(36).fill(7)] });
+  const decoded = decode(encoded);
+  assert.ok(decoded instanceof Map);
+  assert.deepEqual([...decoded.keys()].sort(), ['cids', 't']);
+
+  // The published pair must still agree, because for a SECOND implementation the two vectors are
+  // built from genuinely different peer states and matching bytes is the contract. Asserted
+  // against the committed artifact, which is the file such an implementation reads.
+  const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')) as {
+    blockExchange: { name: string; message?: string }[];
+  };
+  const held = artifact.blockExchange.find((v) => v.name === 'blockx/bdone-held');
+  const absent = artifact.blockExchange.find((v) => v.name === 'blockx/bdone-absent');
+  assert.ok(held?.message, 'blockx/bdone-held must be in the artifact');
+  assert.ok(absent?.message, 'blockx/bdone-absent must be in the artifact');
+  assert.equal(held.message, absent.message);
+  assert.ok(held.message.length > 16, 'not vacuously equal because both are empty');
+  assert.equal(decodeBlockMessage(fromHex(held.message)).t, 'BDONE');
+});
+
+test('the committed artifact carries all seven suites', () => {
   // A suite that exists in code and not in the artifact is a suite no second implementation can
   // run, which makes it a test of this implementation rather than a contract between two.
   const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')) as Record<string, unknown>;
@@ -355,6 +430,7 @@ test('the committed artifact carries all six suites', () => {
     'replication',
     'equivocation',
     'pow',
+    'blockExchange',
   ]) {
     assert.ok(Array.isArray(artifact[suite]), `${suite} must be an array in the artifact`);
     assert.ok((artifact[suite] as unknown[]).length > 0, `${suite} must not be empty`);
@@ -368,6 +444,7 @@ test('the committed artifact carries all six suites', () => {
   assert.deepEqual(artifact['convergence'], buildConvergenceVectors());
   assert.deepEqual(artifact['resolution'], buildResolutionVectors());
   assert.deepEqual(artifact['replication'], buildReplicationVectors());
+  assert.deepEqual(artifact['blockExchange'], buildBlockExchangeVectors());
 });
 
 /** Build a convergence candidate from a record's hex, as a second implementation would. */

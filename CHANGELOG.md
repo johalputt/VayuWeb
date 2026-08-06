@@ -74,6 +74,56 @@ was typed; it was printing hex.
   refusal check: a clearnet name fails while a VayuWeb name renders, which no configuration that
   quietly resolved names could produce.
 
+### Added — VWIP-0005, the block-exchange protocol
+
+VayuWeb could name a site and could not fetch one from anybody else. The publish path and the
+verify path were both built and joined by nothing, so a site was readable only on the machine that
+imported it — which is a parallel web with one reader, and the reason Phase 4's acceptance test
+was not merely unpassed but unattemptable.
+
+**The proposal, not the code, is the deliverable.** Phase 4's own rule is that code written before
+the specification settles is code that will be thrown away, so this is the settling: four messages
+(`BHELLO`, `BWANT`, `BLOCKS`, `BDONE`) over the transport contract replication already uses, with
+all twelve sections VWIP-0000 makes mandatory.
+
+**It is deliberately smaller than bitswap, and the omissions are the substance.**
+
+- **No advertisement of what a peer holds.** A request discloses interest and that is
+  unavoidable — you cannot ask for a block without naming it. Answering an inventory query is
+  avoidable, and in a hostile jurisdiction "this machine holds that site" may be the only fact an
+  adversary needs.
+- **No reason on a refusal.** A peer that lacks a block and one that declines to send it emit the
+  identical message. A distinguishable refusal is an oracle for enumerating what a machine hosts —
+  the advertisement rule defeated by a side channel.
+- **No ledger, no debt ratio, no reputation.** REPLICATION.md 1.4 already refuses a peer
+  reputation score and the reason generalises: a score is a standing, a standing can be denied, and
+  a mechanism that can deny standing is worth capturing. This admits free-riding, which is stated
+  as an accepted cost rather than hidden.
+- **No cancellation.** Telling a peer the block arrived elsewhere discloses the requester's other
+  connections.
+
+The clause most likely to be got backwards is written out: after a block fails verification, asking
+a **different peer for the same identifier** is permitted and expected. That is not the fallback
+RESOLUTION.md forbids — the identifier and the verification are unchanged and only the counterparty
+differs — and a protocol where one hostile peer can make a site permanently unfetchable would hand
+every hostile peer a veto.
+
+The capture analysis names the honest weakness rather than arguing round it: peers must find each
+other, and the realistic outcome is that one discovery network becomes the one everybody uses while
+the specification's non-normative escape hatch goes unexercised. No text in the proposal fixes
+that.
+
+**`registry/src/blockx.ts` is the wire format and nothing else** — encode, decode, and the bounds
+of section 5, because the vectors are mandatory and a vector nobody generated is a hex string
+somebody typed. An earlier draft of the proposal carried exactly such a hand-typed hex block as an
+illustration; it looked like evidence and was worth less than nothing. The `blockExchange` suite is
+generated, and a test compares the committed artifact against a fresh generation.
+
+One vector is published as a **recipe** rather than as bytes: a block one octet over the megabyte
+limit is 2.1 MB of hex zeros in the artifact, of which every byte after the first carries no
+information. The vectors file went from 159 KB to 2.25 MB before this was noticed. A runner builds
+the buffer from the stated length and tests exactly what one reading two million zeros would.
+
 ### Changed — two documents that had gone stale by being true
 
 - **`HOSTING.md` said "No publishing tool exists, no site has been published."** Both were true
@@ -113,6 +163,34 @@ Attacked: the new content path end to end, and the acceptance harness itself.
 - Found **SOUND** under attack: the negative cache bounds, the `CONNECT` refusal, the
   diagnostic-header disclosure default, and the closed content-type list — a sniffed type would
   undo the `nosniff` header from the other side.
+
+- **Two more of this session's own tests were dead checks, and both were caught by mutation
+  rather than by review.** The first built an array of getters to prove a length bound runs before
+  the loop it bounds, and never fed it to the decoder, so the counter was trivially empty and the
+  assertion passed against any implementation. Replaced with an ordering test that makes the two
+  orderings return *different codes* — 65 entries whose first element is not a byte string — plus
+  a control at 64 that must reach the element check, without which the assertion would also pass
+  against a decoder that refused everything.
+
+  The second is worse, because it came with a confident comment about how equality assertions are
+  the ones that pass for the wrong reason. It compared the two published `BDONE` vectors byte for
+  byte — two identical calls to the same encoder. A mutation adding a `why: "absent"` field to
+  `BDONE`, which is the direct defeat of the rule the test exists for, sailed straight through it,
+  because the field was added to both. The property is not that two equal things are equal; it is
+  that the message type has **nowhere to put the difference**. The assertion is now structural:
+  `BDONE`'s encoding carries exactly `t` and `cids`, and any new key is a channel for state the
+  specification says must not be observable.
+
+- **Seven mutations against the wire format**, all failing their intended test: the length bound
+  moved after the element loop; `UNKNOWN_TYPE` collapsed into `MALFORMED`; the per-entry byte
+  bound loosened; the whole-message bound moved after the parse; a reason field added to `BDONE`;
+  the encoder's own output check removed; and a limit raised in code but not in the specification.
+
+- **A test of mine asserted an unreachable case.** It claimed a negative `BHELLO.max` is rejected
+  as malformed. The CBOR profile has no negative integers in it, so there is no encoding of one for
+  a peer to send — a stronger guarantee than the one asserted, and a test describing an unreachable
+  case is a test that passes whatever the code does. Now asserted at the profile level, with the
+  decoder's own guard kept and labelled as unreachable-until-the-profile-widens.
 
 ## [0.2.1] — 2026-08-06
 

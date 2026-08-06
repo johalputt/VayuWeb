@@ -19,6 +19,7 @@ import {
   buildReplicationVectors,
   buildEquivocationVectors,
   buildPowVectors,
+  buildBlockExchangeVectors,
   VECTOR_NOW,
   VECTOR_OWNER_KEY,
   VECTOR_OTHER_KEY,
@@ -33,6 +34,7 @@ const resolution = buildResolutionVectors();
 const replication = buildReplicationVectors();
 const equivocation = buildEquivocationVectors();
 const pow = buildPowVectors();
+const blockExchange = buildBlockExchangeVectors();
 
 const artifact = {
   $comment:
@@ -67,7 +69,9 @@ const artifact = {
       'equivocation and pow pin what implementations must AGREE about after that, which is ' +
       'where a fork lives — every consensus-critical defect found in this project so far was ' +
       'invisible to record verification and visible only to the question "what would a second ' +
-      'implementation do".',
+      'implementation do". blockExchange is the wire format of VWIP-0005, which is a DRAFT: ' +
+      'these vectors are generated so that the proposal carries executed encodings rather than ' +
+      'transcribed ones, and they are not stable until it leaves Draft.',
   },
   vectors,
   convergence,
@@ -75,6 +79,7 @@ const artifact = {
   replication,
   equivocation,
   pow,
+  blockExchange,
 };
 
 mkdirSync(dirname(OUT), { recursive: true });
@@ -82,5 +87,5 @@ writeFileSync(OUT, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8');
 process.stdout.write(
   `wrote ${vectors.length} record, ${convergence.length} convergence, ${resolution.length} ` +
     `resolution, ${replication.length} replication, ${equivocation.length} equivocation and ` +
-    `${pow.length} proof-of-work vectors to ${OUT}\n`,
+    `${pow.length} proof-of-work and ${blockExchange.length} block-exchange vectors to ${OUT}\n`,
 );

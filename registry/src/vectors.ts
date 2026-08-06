@@ -48,6 +48,8 @@ import {
 import { TERM_SECONDS, RENEWAL_WINDOW_SECONDS, SETTLEMENT_SECONDS } from './verify.ts';
 import { GRACE_SECONDS } from './lifecycle.ts';
 import { RESERVED_LABELS } from './names.ts';
+import { CID_PARAMETERS, cidBytes, sha256 } from './content.ts';
+import { BLOCK_EXCHANGE_VERSION, BX_LIMITS, encodeBlockMessage } from './blockx.ts';
 
 /**
  * Fixed keys. Not secret, never to be used for anything real, and constant so that the vector
@@ -1542,4 +1544,154 @@ function withLeadingByte(first: number, second: number): Uint8Array {
   tag[0] = first;
   tag[1] = second;
   return tag;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Block exchange (VWIP-0005)                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A block-exchange message, and what a conforming decoder must do with it.
+ *
+ * Same shape as {@link ReplicationVector} deliberately: the two protocols share a transport
+ * contract and a message discipline, so a runner that can execute one suite can execute both.
+ */
+export interface BlockExchangeVector {
+  readonly name: string;
+  readonly rule: string;
+  /** The message in hex, when publishing the bytes is publishing the vector. */
+  readonly message?: string;
+  /**
+   * A recipe, when it is not.
+   *
+   * One vector's content is a block one octet over the megabyte limit — 2.1 MB of hex zeros in
+   * the artifact, of which every byte after the first carries no information at all. The
+   * information in that vector is its LENGTH, and a runner that builds the buffer from a stated
+   * length tests exactly what a runner reading two million zeros would, while leaving the
+   * artifact something a reviewer can read. A vector nobody can read is a vector nobody checks.
+   */
+  readonly construct?: {
+    readonly kind: 'blocks-of-zeros';
+    readonly count: number;
+    readonly bytes: number;
+  };
+  readonly expect:
+    | { readonly decode: 'ok'; readonly type: string }
+    | { readonly decode: 'reject'; readonly code: string };
+}
+
+/**
+ * Vectors for the block-exchange wire format.
+ *
+ * VWIP-0000 section 3 makes test vectors mandatory for anything observable on the wire, and
+ * VWIP-0005 is observable on the wire in its entirety. These are **generated**, not transcribed:
+ * an earlier draft of VWIP-0005 carried a hand-typed hex block as an illustration, which is the
+ * artefact this corpus has most reliably found to be wrong.
+ *
+ * Every vector is built from the encoder where an honest peer would build it, and from `encode`
+ * directly where the point is a message an honest peer cannot produce.
+ */
+export function buildBlockExchangeVectors(): BlockExchangeVector[] {
+  const digest = sha256(new TextEncoder().encode('atlas observatory'));
+  const cid = cidBytes({ version: 1, codec: CID_PARAMETERS.codecRaw, digest });
+  const emptyLeaf = new Uint8Array(0);
+
+  const overLimit = (key: string, entries: CborValue[], t: string): Uint8Array =>
+    encode(
+      new Map<string | Uint8Array, CborValue>([
+        ['t', t],
+        [key, entries],
+      ]),
+    );
+
+  const vectors: BlockExchangeVector[] = [
+    {
+      name: 'blockx/bhello-v1',
+      rule: 'VWIP-0005 3.3: BHELLO opens the session, carrying the version and the largest block this peer accepts',
+      message: toHex(
+        encodeBlockMessage({
+          t: 'BHELLO',
+          v: BLOCK_EXCHANGE_VERSION,
+          max: BX_LIMITS.blockBytes,
+        }),
+      ),
+      expect: { decode: 'ok', type: 'BHELLO' },
+    },
+    {
+      // Decodes fine and must cost nothing. The defect this pins is not a decode failure; it is a
+      // receiver that sizes a buffer from a number a stranger asserted.
+      name: 'blockx/bhello-absurd-max',
+      rule: 'VWIP-0005 5.1: BHELLO.max is a claim, not a measurement — a peer declaring 2^53 costs the receiver nothing beyond the message',
+      message: toHex(
+        encodeBlockMessage({ t: 'BHELLO', v: BLOCK_EXCHANGE_VERSION, max: 2 ** 53 - 1 }),
+      ),
+      expect: { decode: 'ok', type: 'BHELLO' },
+    },
+    {
+      name: 'blockx/bwant-one',
+      rule: 'VWIP-0005 3.2: BWANT names the identifiers the requester wants',
+      message: toHex(encodeBlockMessage({ t: 'BWANT', cids: [cid] })),
+      expect: { decode: 'ok', type: 'BWANT' },
+    },
+    {
+      name: 'blockx/bwant-at-the-limit',
+      rule: 'VWIP-0005 5: BWANT.cids is bounded at 64, and 64 is accepted',
+      message: toHex(
+        encodeBlockMessage({
+          t: 'BWANT',
+          cids: Array.from({ length: BX_LIMITS.wantCids }, () => cid),
+        }),
+      ),
+      expect: { decode: 'ok', type: 'BWANT' },
+    },
+    {
+      name: 'blockx/bwant-over-the-limit',
+      rule: 'VWIP-0005 5: an array over the limit is refused at decode, without iterating it',
+      message: toHex(
+        overLimit(
+          'cids',
+          Array.from({ length: BX_LIMITS.wantCids + 1 }, () => cid),
+          'BWANT',
+        ),
+      ),
+      expect: { decode: 'reject', code: 'LIMIT_EXCEEDED' },
+    },
+    {
+      // A file of zero bytes is a file, it has an identifier, and a wire format that cannot carry
+      // it makes a published placeholder unfetchable.
+      name: 'blockx/blocks-empty-leaf',
+      rule: 'VWIP-0005 3.5: BLOCKS carries block octets without their identifiers',
+      message: toHex(encodeBlockMessage({ t: 'BLOCKS', blks: [emptyLeaf] })),
+      expect: { decode: 'ok', type: 'BLOCKS' },
+    },
+    {
+      name: 'blockx/blocks-over-the-block-limit',
+      rule: 'VWIP-0005 5: a block one octet over the limit is refused before its identifier is computed',
+      construct: { kind: 'blocks-of-zeros', count: 1, bytes: BX_LIMITS.blockBytes + 1 },
+      expect: { decode: 'reject', code: 'LIMIT_EXCEEDED' },
+    },
+    {
+      name: 'blockx/unknown-type',
+      rule: 'VWIP-0005 3.2: an unknown message type is named as unknown and drops the message, not the connection',
+      message: toHex(encode(new Map<string | Uint8Array, CborValue>([['t', 'BHAVE']]))),
+      expect: { decode: 'reject', code: 'UNKNOWN_TYPE' },
+    },
+  ];
+
+  // The pair that matters most, and the only one whose assertion is an EQUALITY rather than a
+  // rejection. VWIP-0005 6.2: a peer that lacks a block and a peer that declines to send one emit
+  // the identical message. If these two encodings ever differ, the refusal has become an oracle
+  // for enumerating what a peer holds, and 6.1 is defeated by a side channel rather than by an
+  // argument. Equality assertions are the ones that pass for the wrong reason, so both are
+  // published rather than one plus a claim.
+  for (const label of ['bdone-held', 'bdone-absent']) {
+    vectors.push({
+      name: `blockx/${label}`,
+      rule: 'VWIP-0005 6.2: BDONE carries no reason — a peer that holds the block and one that does not emit byte-identical messages',
+      message: toHex(encodeBlockMessage({ t: 'BDONE', cids: [cid] })),
+      expect: { decode: 'ok', type: 'BDONE' },
+    });
+  }
+
+  return vectors;
 }

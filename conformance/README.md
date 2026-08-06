@@ -91,10 +91,20 @@ conforming peer can hold. It is unit-tested against a constructed predecessor, a
 activates a second suite must add the wire vector. A test also fails if an exempted code
 acquires a vector, so the excuse cannot outlive the reason for it.
 
-The file carries six suites: `vectors` holds 72 record-verification vectors, and `convergence`,
-`resolution`, `replication`, `equivocation` and `pow` hold their own. Those five pin what
-implementations must *agree* about rather than what one of them accepts, which is where a fork
-lives.
+The file carries seven suites: `vectors` holds 72 record-verification vectors, and `convergence`,
+`resolution`, `replication`, `equivocation`, `pow` and `blockExchange` hold their own. Those six
+pin what implementations must *agree* about rather than what one of them accepts, which is where a
+fork lives.
+
+**`blockExchange` is the one suite that is not stable**, and it is marked so in the artifact's own
+notes. VWIP-0005 is a Draft; its encodings are generated rather than transcribed precisely so the
+proposal carries executed bytes, but a Draft may still change them. Do not build against it
+expecting the hex to hold.
+
+One of its vectors carries a `construct` recipe instead of a `message` — a block one octet over
+the megabyte limit, which written out is 2.1 MB of hex zeros where every byte after the first
+carries no information. A runner builds the buffer from the stated length and tests exactly what
+one reading two million zeros would. A vector nobody can read is a vector nobody checks.
 
 **`equivocation` is a pair of record encodings and one boolean**, per `REPLICATION.md` 6.2: two
 records, no state, no clock, no prior view. A vector needing any of those would be describing

@@ -39,7 +39,7 @@ earlier one, but it cannot *finish* early.
 | Threat model | Complete (draft) |
 | Whitepaper, architecture, governance guide, glossary, FAQ | Complete (draft) |
 | Independent adversarial review of the above | **Findings all dispositioned; the review itself is not finished.** The 2026-08-04 audit raised 66 surviving findings and every one now carries an outcome in [AUDIT-FINDINGS.md](AUDIT-FINDINGS.md) — fixed, escalated to an amendment, or verified stale. That is one audit, by seven agents, on one corpus. It is not the *independent* review this row asks for, and it cannot be: Article 44.6's standard is a competent implementer reading the specifications alone, and the same party that wrote them cannot supply that reader |
-| Test vectors for every wire-visible rule | **Six suites**, in [`conformance/vectors.json`](../conformance/vectors.json): record verification (a vector for every rejection code), convergence, resolution, replication, equivocation and proof-of-work derivation. The last five pin what implementations must *agree* about rather than what one accepts — which is where a fork lives, and where every consensus-critical defect found here so far has been |
+| Test vectors for every wire-visible rule | **Seven suites**, in [`conformance/vectors.json`](../conformance/vectors.json): record verification (a vector for every rejection code), convergence, resolution, replication, equivocation, proof-of-work derivation and block exchange. All but the first pin what implementations must *agree* about rather than what one accepts — which is where a fork lives, and where every consensus-critical defect found here so far has been. `blockExchange` is the one that is not yet stable: VWIP-0005 is a Draft, and its vectors move with it |
 
 **Done when:** a competent implementer can read the specifications alone — without access to any
 source code and without asking a question — and produce a client that would interoperate. That
@@ -311,9 +311,24 @@ the interface says cannot find a wrong interface.** The double now returns the a
 library really returns, and three separate mutations were needed before it stopped being more
 agreeable than production.
 
-**What remains.** The block-exchange path over a real network — bitswap with a stranger who
-declines to send a block, or sends a different one — and the end-to-end acceptance test, which
-needs two machines and which this repository cannot honestly claim from a sandbox.
+**The block-exchange protocol is now specified rather than assumed.**
+[VWIP-0005](spec/VWIP-0005.md) defines it: four messages over the transport contract replication
+already uses, with the bounds that make a hostile peer's maximum effect a stated amount of wasted
+bandwidth. It is deliberately smaller than the protocols in general use, and the omissions are the
+design — no advertisement of what a peer holds, no reputation score, no distinguishable "I don't
+have it", no cancellation. Each of those is a feature elsewhere and each either discloses a
+reader's interests or creates a standing that can be denied.
+
+Writing it was the phase's own rule applied to itself: code written before the specification
+settles is code that will be thrown away. What exists in code is the **wire format only** —
+`registry/src/blockx.ts`, because VWIP-0000 makes test vectors mandatory for anything observable
+on the wire and a vector nobody generated is a hex string somebody typed. The `blockExchange`
+suite is generated from it. The session, the connection state and the transport binding wait for
+the proposal to leave Draft.
+
+**What remains.** The session and the transport binding; a real exchange with a stranger who
+declines to send a block or sends a different one; and the end-to-end acceptance test, which needs
+two machines and which this repository cannot honestly claim from a sandbox.
 
 Starting the phase surfaced two settled-spec contradictions and one gap, all recorded in the
 changelog: the resolver preferred the frozen snapshot over the living pointer, so a conforming
