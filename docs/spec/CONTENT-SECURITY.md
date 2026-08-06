@@ -2,8 +2,14 @@
 
 The normative browser-security profile the VayuWeb resolver enforces on every page it serves: the
 Content-Security-Policy, the accompanying response headers, the request headers stripped on the
-way out, the response headers stripped on the way in, and — just as important — the channels no
-header can close and what closes them instead.
+way out, the response headers stripped on the way in, and — just as important — the **eight**
+channels no header can close, with what closes each one, what merely narrows it, and what is not
+claimed at all.
+
+That last clause used to read "and what closes them instead", which is not true of section 5 and
+was never meant to be: 5.7 says "Not closable, and not claimed" and 5.8 says "Complete and
+irreducible" in the document's own words. A summary line that promises more than the section
+below it delivers is the exact failure section 5 opens by naming.
 
 This document is the **single source of truth** for those values. Where any other document quotes
 them, `scripts/check-headers.py` verifies the quotation is byte-identical and CI fails on
@@ -269,6 +275,13 @@ verified hash through the control API so the reader can confirm what was fetched
 ## 5. What no header can close
 
 A security document that lists only its wins is a marketing document.
+
+Eight channels, and they are not all of a kind. **5.2** and **5.3** are closed by a control this
+project ships. **5.1**, **5.4**, **5.5** and **5.6** are narrowed by a control that works in the
+client's own webview and cannot be enforced in a third-party browser, where the honest answer is
+a plain warning. **5.7** and **5.8** are neither closed nor narrowed, and saying so is the point:
+`VWIP-0001` once summarised this section as "the four channels CSP cannot close and what closes
+them instead", which understated the count by half and overstated the remedy for six of them.
 
 **5.1 WebRTC.** `webrtc 'block'` is Chromium-only. Where unsupported, a page that can run script
 can open a peer connection and learn the reader's real IP through ICE gathering. WebRTC uses raw

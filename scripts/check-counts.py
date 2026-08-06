@@ -104,6 +104,25 @@ def count_accompanying_headers():
     return len(names), None
 
 
+def count_residual_channels():
+    """Numbered subsections of CONTENT-SECURITY.md section 5.
+
+    Derived because VWIP-0001 summarised this section as "the four channels CSP cannot close"
+    when there are eight, and because the number is the substance of the claim: a security
+    document that undercounts what it cannot close is making the opposite of a disclosure.
+    """
+    text = read("docs/spec/CONTENT-SECURITY.md")
+    if text is None:
+        return None, "docs/spec/CONTENT-SECURITY.md is missing"
+    section = re.search(r"## 5\. What no header can close\n(.*?)(?=\n## )", text, re.S)
+    if section is None:
+        return None, "could not locate section 5 of docs/spec/CONTENT-SECURITY.md"
+    subs = re.findall(r"^\*\*5\.(\d+) ", section.group(1), re.M)
+    if not subs:
+        return None, "section 5 yielded no numbered channels -- the format changed"
+    return len(set(subs)), None
+
+
 def count_record_vectors():
     """Record-verification vectors in the committed artifact.
 
@@ -192,6 +211,20 @@ AGREEMENTS = [
         ),
     },
     {
+        # A count rule only fires when a claim it can PARSE disagrees. Delete the number and the
+        # claim goes unchecked -- which is how the overstatement below survived the first
+        # mutation of the residual-channel count untouched. This forbids the overstatement itself.
+        "label": "the residual channels are not all closed",
+        "files": ["docs/spec/CONTENT-SECURITY.md", "docs/spec/VWIP-0001.md"],
+        "absent": re.compile(r"what closes them instead"),
+        "note": (
+            "Section 5.7 says 'Not closable, and not claimed' and 5.8 says 'Complete and "
+            "irreducible'; four more are narrowed by a control that cannot be enforced in a "
+            "third-party browser. A summary promising a remedy for all eight is the failure "
+            "section 5 opens by naming."
+        ),
+    },
+    {
         # No positive counterpart: this is a rule that must not be stated, anywhere. A count rule
         # catches a wrong NUMBER of two-letter extensions; only this catches a sentence that
         # rejects all sixty of them while the Annex three sections away ratifies them.
@@ -242,6 +275,16 @@ RULES = [
         "patterns": [
             re.compile(r"\b(\w+) accompanying response headers\b", re.I),
             re.compile(r"\b(\w+) response headers are added\b", re.I),
+        ],
+    },
+    {
+        "label": "residual channels no header can close",
+        "derive": count_residual_channels,
+        "source": "docs/spec/CONTENT-SECURITY.md section 5",
+        "patterns": [
+            re.compile(r"the \*\*([\w]+)\*\*\s+channels no\s+header can close", re.I),
+            re.compile(r"naming the ([\w]+)\s+channels CSP cannot close", re.I),
+            re.compile(r"\b([\w]+) channels, and they are not all of a kind\b", re.I),
         ],
     },
     {

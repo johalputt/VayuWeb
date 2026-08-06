@@ -10,6 +10,30 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a security document that undercounted what it cannot close
+
+- **`VWIP-0001` summarised the residual channels as "the four channels CSP cannot close and
+  specifying what closes them instead".** `CONTENT-SECURITY.md` section 5 lists **eight**, and the
+  remedy clause is false for six of them. 5.7 says "Not closable, and not claimed"; 5.8 says
+  "Complete and irreducible"; and 5.1, 5.4, 5.5 and 5.6 are narrowed by a control that works in
+  the client's own webview and cannot be enforced in a third-party browser, where the honest
+  answer is a plain warning.
+
+  `CONTENT-SECURITY.md`'s own opening carried the same clause three lines above a section that
+  opens *"A security document that lists only its wins is a marketing document."* Undercounting
+  what a security profile cannot close is the opposite of a disclosure, and it is the failure that
+  section names.
+
+  Both corrected: the count is stated, and each channel is sorted into closed by a shipped
+  control, narrowed where the client owns the browser, or neither.
+
+- **Two guards, because the first alone left a hole and a mutation found it.** `check-counts.py`
+  derives the number from the numbered subsections, so a ninth channel or a stale summary fails.
+  But a count rule only fires against a claim it can *parse* — delete the number and nothing is
+  checked at all, which is exactly what reverting the intro to the old wording did: it passed the
+  count check untouched. A paired statement now forbids the old clause outright. Mutation-tested
+  four ways; all four refused.
+
 ### Fixed — the test that guaranteed vector coverage was the reason coverage was incomplete
 
 - **`conformance/README.md` claimed "at least one vector for every rejection code the verifier can
