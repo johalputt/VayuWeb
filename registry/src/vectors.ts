@@ -27,7 +27,7 @@
  * against them needs to know.
  */
 
-import { encode, compareBytes, type CborMap, type CborValue } from './cbor.ts';
+import { encode, decode, compareBytes, type CborMap, type CborValue } from './cbor.ts';
 import { LIMITS, PROTOCOL_VERSION, encodeMessage } from './replicate.ts';
 import { signingInput, recordHashFromBytes } from './domain.ts';
 import { sign, publicKeyFrom } from './signature.ts';
@@ -164,6 +164,13 @@ const successor = (
     coSecret,
   );
 
+/** A copy of `map` with one key removed, for the missing-field vector. */
+const stripField = (bytes: Uint8Array, key: string): CborMap => {
+  const map = decode(bytes) as CborMap;
+  map.delete(key);
+  return map;
+};
+
 const FRESH: VectorState = {
   predecessor: null,
   revoked: false,
@@ -272,6 +279,71 @@ export function buildVectors(): Vector[] {
       now: VECTOR_NOW,
       state: FRESH,
       expect: rejectWith('NON_CANONICAL'),
+    },
+
+    /* -- schema shape -------------------------------------------------------- */
+    //
+    // Six codes a verifier genuinely returns and no vector measured, because the coverage test
+    // compared the artifact against a hand-typed list rather than against the codes themselves.
+    // They are the cheapest possible vectors and the most likely to be got wrong by a second
+    // implementation, which tends to conflate "malformed" into one verdict.
+    {
+      name: 'schema/not-a-map',
+      rule: 'REGISTRY.md: a record is a CBOR map',
+      record: '83010203',
+      now: VECTOR_NOW,
+      state: FRESH,
+      expect: rejectWith('NOT_A_MAP'),
+    },
+    {
+      name: 'schema/missing-field',
+      rule: 'REGISTRY.md: every field is REQUIRED unless marked otherwise',
+      record: toHex(encode(stripField(registration(), 'tld'))),
+      now: VECTOR_NOW,
+      state: FRESH,
+      expect: rejectWith('MISSING_FIELD'),
+    },
+    {
+      name: 'schema/bad-field-type',
+      rule: 'REGISTRY.md: seq is a CBOR uint',
+      record: toHex(registration({ seq: 'zero' })),
+      now: VECTOR_NOW,
+      state: FRESH,
+      expect: rejectWith('BAD_FIELD_TYPE'),
+    },
+    {
+      name: 'schema/too-many-records',
+      rule: 'REGISTRY.md: the records array holds at most 32 entries',
+      record: toHex(
+        registration({
+          records: Array.from({ length: 33 }, (_, i) => entry('txt', `v=${i}`)),
+        }),
+      ),
+      now: VECTOR_NOW,
+      state: FRESH,
+      expect: rejectWith('TOO_MANY_RECORDS'),
+    },
+    {
+      name: 'schema/missing-pow',
+      rule: 'REGISTRY.md: powProof is REQUIRED for REGISTER and RENEW',
+      record: toHex(registration({ powProof: null })),
+      now: VECTOR_NOW,
+      state: FRESH,
+      expect: rejectWith('MISSING_POW'),
+    },
+    {
+      name: 'schema/too-large',
+      rule: "REGISTRY.md: a record is at most its suite's limit; 4096 bytes under suite 1",
+      // Built to exceed the cap by padding txt entries, so the bytes are otherwise well-formed
+      // and the size is the only thing wrong with them.
+      record: toHex(
+        registration({
+          records: Array.from({ length: 20 }, () => entry('txt', 'x'.repeat(250))),
+        }),
+      ),
+      now: VECTOR_NOW,
+      state: FRESH,
+      expect: rejectWith('TOO_LARGE'),
     },
 
     /* -- cryptographic suites (CRYPTO-AGILITY.md) ---------------------------- */

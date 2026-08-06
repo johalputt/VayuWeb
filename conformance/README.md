@@ -73,13 +73,31 @@ If the bytes move, every implementation built against them needs to know.
 
 ### Coverage and its limits
 
-The set covers framing, the record schema, registration, chain integrity, authority and the
-name lifecycle, including at least one vector for every rejection code the verifier can return
-— a test fails if a code is added without one.
+The set covers framing, the record schema, registration, chain integrity, authority, the name
+lifecycle and cryptographic suites, including at least one vector for every rejection code the
+verifier can return — a test fails if a code is added without one.
 
-It does **not** yet cover replication, convergence and its tie-break, equivocation detection, or
-resolution. Those belong to later phases and have no vectors here. Absence from this file is not
-evidence that an area is settled.
+That sentence was false for a period, and how it was false is worth stating. The test enforcing
+it compared the artifact against a **hand-written** list of codes, so it passed by asking only
+about the twenty-two somebody had remembered to type; six genuinely returnable codes were absent
+from the list and from the artifact together, and a hand-written expectation cannot detect the
+thing it forgot. The list is now derived from the rejection codes themselves, which required
+making them a runtime value rather than an erased TypeScript union.
+
+**Exemptions are named, and there is one.** `SUITE_DOWNGRADE` has no wire vector because a
+vector states its predecessor as bytes and `CRYPTO-AGILITY.md` 4.2 makes a record naming an
+inactive suite unparseable — so the suite-3 predecessor a downgrade needs is not a record any
+conforming peer can hold. It is unit-tested against a constructed predecessor, and the VWIP that
+activates a second suite must add the wire vector. A test also fails if an exempted code
+acquires a vector, so the excuse cannot outlive the reason for it.
+
+The file carries four suites: `vectors` holds 72 record-verification vectors, and `convergence`,
+`resolution` and `replication` hold their own. Those three pin what implementations must *agree*
+about rather than what one of them accepts, which is where a fork lives.
+
+It does **not** yet cover **equivocation detection** — `verifyEquivocation` is implemented and
+unit-tested, and has no vector, so a second implementation is not measured on it. Absence from
+this file is not evidence that an area is settled.
 
 ## `key-literal-allowlist.txt`
 

@@ -16,7 +16,13 @@ import { resolveName } from './resolve.ts';
 import { decodeMessage, ReplicationError } from './replicate.ts';
 import { recordHashFromBytes } from './domain.ts';
 import { compareBytes } from './cbor.ts';
-import { verify, predecessorFrom, type RegistryView, type Verdict } from './verify.ts';
+import {
+  verify,
+  predecessorFrom,
+  VERIFY_REJECTIONS,
+  type RegistryView,
+  type Verdict,
+} from './verify.ts';
 import { parseRecordBytes } from './record.ts';
 
 const ARTIFACT = fileURLToPath(new URL('../../conformance/vectors.json', import.meta.url));
@@ -104,38 +110,43 @@ test('the committed vector artifact matches what this implementation generates',
 
 test('the vector set covers every rejection code the verifier can return', () => {
   // A vector set that silently stops covering a rule is worse than a smaller one that says so.
-  // This fails when a new rejection code is added without a vector to pin it.
+  //
+  // This list used to be typed out by hand, and it passed because it only asked about the 22
+  // codes somebody remembered — six were absent from both the list and the artifact
+  // (`NOT_A_MAP`, `MISSING_FIELD`, `BAD_FIELD_TYPE`, `TOO_MANY_RECORDS`, `MISSING_POW`,
+  // `TOO_LARGE`), all six genuinely returnable, while `conformance/README.md` claimed "at least
+  // one vector for every rejection code the verifier can return — a test fails if a code is
+  // added without one". The test that was supposed to make that true was the reason it was
+  // false: a hand-written expectation cannot detect the thing it forgot.
+  //
+  // It is now derived from the codes themselves, so adding one without a vector fails here.
   const covered = new Set(
     buildVectors().map((v) => (v.expect.outcome === 'reject' ? v.expect.code : v.expect.outcome)),
   );
 
-  const mustCover = [
-    'NON_CANONICAL',
-    'UNSUPPORTED_VERSION',
-    'UNKNOWN_OP',
-    'BAD_LABEL',
-    'UNKNOWN_TLD',
-    'BAD_KEY',
-    'BAD_TERM',
-    'BAD_CHAIN',
-    'BAD_SEQ',
-    'BAD_RECORD_ENTRY',
-    'BAD_POW_SHAPE',
-    'UNEXPECTED_POW',
-    'BAD_COSIG',
-    'NAME_TAKEN',
-    'BACKDATED',
-    'BAD_SIG',
-    'BAD_POW',
-    'NO_PREDECESSOR',
-    'TOO_SOON',
-    'REVOKED',
-    'BAD_OWNER',
-    'EXPIRED',
-  ];
+  // Exemptions are named, with a reason, and there is exactly one. A code that cannot be reached
+  // on the wire today is not a coverage gap; a code with no reason written down is.
+  const exempt = new Map<string, string>([
+    [
+      'SUITE_DOWNGRADE',
+      'a vector states its predecessor as bytes, and CRYPTO-AGILITY.md 4.2 makes a record naming ' +
+        'an inactive suite unparseable — so the suite-3 predecessor a downgrade needs is not a ' +
+        'record any conforming peer can hold. Unit-tested against a constructed predecessor; the ' +
+        'VWIP that activates a second suite must add the wire vector.',
+    ],
+  ]);
 
-  const missing = mustCover.filter((code) => !covered.has(code));
+  const missing = VERIFY_REJECTIONS.filter((code) => !covered.has(code) && !exempt.has(code));
   assert.deepEqual(missing, [], `rejection codes with no vector: ${missing.join(', ')}`);
+
+  // An exemption for a code that is now covered, or that no longer exists, is a stale excuse.
+  for (const [code, why] of exempt) {
+    assert.ok(
+      (VERIFY_REJECTIONS as readonly string[]).includes(code),
+      `${code} is exempted but is no longer a rejection code`,
+    );
+    assert.equal(covered.has(code), false, `${code} has a vector now — drop the exemption: ${why}`);
+  }
 });
 
 test('the vector set covers accept and defer, not only rejection', () => {

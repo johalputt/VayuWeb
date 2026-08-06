@@ -10,6 +10,39 @@ it.
 
 ## [Unreleased]
 
+### Fixed — the test that guaranteed vector coverage was the reason coverage was incomplete
+
+- **`conformance/README.md` claimed "at least one vector for every rejection code the verifier can
+  return — a test fails if a code is added without one".** The test enforcing it compared the
+  artifact against a **hand-written** list of codes, so it passed by asking only about the
+  twenty-two somebody had remembered to type. Six genuinely returnable codes were missing from
+  the list and from the artifact together: `NOT_A_MAP`, `MISSING_FIELD`, `BAD_FIELD_TYPE`,
+  `TOO_MANY_RECORDS`, `MISSING_POW` and `TOO_LARGE`.
+
+  A hand-written expectation cannot detect the thing it forgot. That is the whole defect, and it
+  is the same shape as the audit's other findings one layer down: the check compared an artifact
+  to a restatement instead of to its source.
+
+  The list is now derived from the rejection codes, which meant making them a runtime value —
+  `RECORD_REJECTIONS` and `VERIFY_ONLY_REJECTIONS` as `const` arrays with the types derived from
+  them, the pattern `OPERATIONS` already used — because a TypeScript union is erased and cannot
+  be enumerated. Six vectors added; the artifact holds 72.
+
+- **Exemptions are named and expire.** `SUITE_DOWNGRADE` has no wire vector and cannot: a vector
+  states its predecessor as bytes, and `CRYPTO-AGILITY.md` 4.2 makes a record naming an inactive
+  suite unparseable. It is unit-tested against a constructed predecessor. A second assertion
+  fails if an exempted code *acquires* a vector, so the excuse cannot outlive its reason.
+
+- **Two claims in that README were also wrong.** It said the file does not cover replication,
+  convergence or resolution; all three have had their own suites for some time. And it did not
+  mention **equivocation detection**, which is implemented, unit-tested, and has no vector — so a
+  second implementation is not measured on it. Now stated as the one uncovered area.
+
+  Mutation-tested four ways: adding a rejection code with no vector, deleting one of the six new
+  vectors, exempting a code that has one, and staling the README's count. All four refused — the
+  last by `check-counts.py`, which now derives that number from the artifact, because a count
+  written beside a generated file is a count that drifts the next time the file is generated.
+
 ### Fixed — a URI parser that could not address a founding extension
 
 - **`URI-SCHEME.md`'s `tld` production was `2*12( %x61-7A )` — letters only.** `NAMES.md` is the

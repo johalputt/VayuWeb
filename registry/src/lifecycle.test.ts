@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   lifecycleOf,
@@ -174,4 +175,41 @@ test('the total unavailable window after expiry is 60 days', () => {
   const life = lifecycleOf(r);
   assert.equal(life.quarantineUntil - life.liveUntil, GRACE_SECONDS + QUARANTINE_SECONDS);
   assert.equal(life.quarantineUntil - life.liveUntil, 5_184_000);
+});
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT FINDING: "free" was one formula, wrong for two of six operations       */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: the free instant is per-operation, and REGISTRY.md now says which', () => {
+  // `fully_released(prev)` is the sole arbiter of "free" in REGISTRY.md's pseudocode and appeared
+  // exactly once in the document — in the pseudocode, with no definition. The prose an
+  // implementer lands on stated a single formula, `notAfter` + 30 days grace + 30 days
+  // quarantine, which is wrong by 30 days for RELINQUISH and for REVOKE.
+  //
+  // The failure is not loud. A name relinquished on day zero is claimable on day 30 by this
+  // module, NAMES.md's state diagram and REGISTRY.md's own RELINQUISH paragraph, and on day 60 by
+  // the sentence defining the term. Two conforming peers disagree for a month about whether a
+  // REGISTER is NAME_TAKEN — silently, on a first-come rule, with the name going to whoever
+  // asked the more permissive peer.
+  const at = NOW + 1000;
+  const ordinary = make('UPDATE', { notBefore: NOW, notAfter: at });
+  const relinquished = make('RELINQUISH', { notBefore: at, notAfter: at });
+  const revoked = make('REVOKE', { notBefore: NOW, notAfter: at });
+
+  assert.equal(lifecycleOf(ordinary).quarantineUntil, at + GRACE_SECONDS + QUARANTINE_SECONDS);
+  assert.equal(lifecycleOf(relinquished).quarantineUntil, at + QUARANTINE_SECONDS);
+  assert.equal(lifecycleOf(revoked).quarantineUntil, at + QUARANTINE_SECONDS);
+
+  // And the table in the specification says the same, so the document an implementer reads and
+  // the module a verifier runs cannot drift apart again.
+  const spec = readFileSync(new URL('../../docs/spec/REGISTRY.md', import.meta.url), 'utf8');
+  assert.match(
+    spec,
+    /\| `REGISTER`, `UPDATE`, `RENEW`, `TRANSFER` \| `notAfter \+ 2592000 \+ 2592000` \|/,
+  );
+  assert.match(spec, /\| `RELINQUISH` \| `notAfter \+ 2592000` \|/);
+  assert.match(spec, /\| `REVOKE` \| `notAfter \+ 2592000` \|/);
+  assert.equal(GRACE_SECONDS, 2_592_000);
+  assert.equal(QUARANTINE_SECONDS, 2_592_000);
 });

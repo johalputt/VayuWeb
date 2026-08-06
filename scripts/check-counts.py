@@ -21,6 +21,7 @@ check people learn to override is worse than no check.
 
 Exits non-zero listing every disagreement.
 """
+import json
 import os
 import re
 import sys
@@ -101,6 +102,26 @@ def count_accompanying_headers():
     if not names:
         return None, "section 3 yielded no headers -- the format changed"
     return len(names), None
+
+
+def count_record_vectors():
+    """Record-verification vectors in the committed artifact.
+
+    Derived because a number written into prose beside a generated file is a number that drifts
+    the next time the file is regenerated, and this README's coverage claim had already been
+    false once for a different reason.
+    """
+    text = read("conformance/vectors.json")
+    if text is None:
+        return None, "conformance/vectors.json is missing"
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        return None, f"conformance/vectors.json is not valid JSON: {exc}"
+    vectors = data.get("vectors")
+    if not isinstance(vectors, list) or not vectors:
+        return None, "conformance/vectors.json has no `vectors` array"
+    return len(vectors), None
 
 
 def count_two_letter_tlds():
@@ -221,6 +242,14 @@ RULES = [
         "patterns": [
             re.compile(r"\b(\w+) accompanying response headers\b", re.I),
             re.compile(r"\b(\w+) response headers are added\b", re.I),
+        ],
+    },
+    {
+        "label": "record-verification vectors",
+        "derive": count_record_vectors,
+        "source": "conformance/vectors.json",
+        "patterns": [
+            re.compile(r"`vectors` holds ([\w,]+) record-verification vectors", re.I),
         ],
     },
     {

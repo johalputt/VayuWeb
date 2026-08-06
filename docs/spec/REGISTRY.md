@@ -207,7 +207,24 @@ update-flooding is expensive and no real editor is inconvenienced.
 ### REGISTER
 
 Preconditions: `seq == 0`; `prevHash` all-zero; `powProof` present; `name.tld` free, meaning
-never registered or past its `notAfter` plus 30 days of grace plus 30 days of quarantine.
+never registered or `fully_released` below.
+
+**`fully_released(prev)`** is the sole arbiter of "free" in the pseudocode, and it depends on the
+predecessor's operation. An earlier revision of this line stated one formula — `notAfter` plus 30
+days of grace plus 30 days of quarantine — and it is wrong for two of the six operations, by 30
+days each:
+
+| `prev.op` | Free at | Why |
+| --- | --- | --- |
+| `REGISTER`, `UPDATE`, `RENEW`, `TRANSFER` | `notAfter + 2592000 + 2592000` | The ordinary path: grace, then quarantine |
+| `RELINQUISH` | `notAfter + 2592000` | `notAfter == notBefore`, so the term ends at the act. Grace is skipped, because the holder has said they are done; quarantine is not, because its purpose is front-running rather than protecting the holder |
+| `REVOKE` | `notAfter + 2592000` | The name is frozen for the remainder of its term and then quarantined. Grace would be a window in which a compromised key could renew |
+
+Applying the single formula to a `RELINQUISH` yields release + 60 days where this document's own
+`RELINQUISH` paragraph, `NAMES.md`'s state diagram and `registry/src/lifecycle.ts` all say
+release + 30. The three agreed with each other and disagreed with the one sentence an implementer
+is sent to, and `fully_released` appeared exactly once in this document — in the pseudocode, with
+no definition anywhere — so there was nowhere else to look.
 
 Validation, in order:
 

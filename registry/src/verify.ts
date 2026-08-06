@@ -18,10 +18,10 @@
 import { encode, decode } from './cbor.ts';
 import {
   MAX_RECORD_BYTES,
+  RECORD_REJECTIONS,
   parseRecord,
   RecordError,
   type Operation,
-  type RecordRejection,
   type RegistryRecord,
 } from './record.ts';
 import { recordHashFromBytes, signingInput, isZeroHash, bytesEqual } from './domain.ts';
@@ -66,19 +66,25 @@ export const MAX_BACKDATE_SECONDS = 86_400;
  */
 export const SETTLEMENT_SECONDS = 1_209_600;
 
-export type VerifyRejection =
-  | RecordRejection
-  | 'NAME_TAKEN'
-  | 'BACKDATED'
-  | 'BAD_SIG'
-  | 'BAD_POW'
-  | 'NO_PREDECESSOR'
-  | 'TOO_SOON'
-  | 'REVOKED'
-  | 'BAD_OWNER'
-  | 'SUITE_DOWNGRADE'
-  | 'UNSETTLED'
-  | 'EXPIRED';
+/** Rejections this module adds to {@link RECORD_REJECTIONS}. Runtime value, same reason. */
+export const VERIFY_ONLY_REJECTIONS = [
+  'NAME_TAKEN',
+  'BACKDATED',
+  'BAD_SIG',
+  'BAD_POW',
+  'NO_PREDECESSOR',
+  'TOO_SOON',
+  'REVOKED',
+  'BAD_OWNER',
+  'SUITE_DOWNGRADE',
+  'UNSETTLED',
+  'EXPIRED',
+] as const;
+
+/** Every rejection a verifier can return, from either stage. */
+export const VERIFY_REJECTIONS = [...RECORD_REJECTIONS, ...VERIFY_ONLY_REJECTIONS] as const;
+
+export type VerifyRejection = (typeof VERIFY_REJECTIONS)[number];
 
 /**
  * A record whose term starts beyond the skew tolerance is neither accepted nor rejected: the

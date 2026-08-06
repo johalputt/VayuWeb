@@ -76,27 +76,39 @@ export const KNOWN_ENTRY_TYPES = ['peer', 'ipns', 'cid', 'txt', 'alias'] as cons
 export type KnownEntryType = (typeof KNOWN_ENTRY_TYPES)[number];
 
 /** Rejection codes. These are the wire-visible reasons in REGISTRY.md's verify() pseudocode. */
-export type RecordRejection =
-  | 'NON_CANONICAL'
-  | 'TOO_LARGE'
-  | 'NOT_A_MAP'
-  | 'MISSING_FIELD'
-  | 'BAD_FIELD_TYPE'
-  | 'UNSUPPORTED_VERSION'
-  | 'UNKNOWN_SUITE'
-  | 'UNKNOWN_OP'
-  | 'BAD_LABEL'
-  | 'UNKNOWN_TLD'
-  | 'BAD_KEY'
-  | 'BAD_SEQ'
-  | 'BAD_TERM'
-  | 'TOO_MANY_RECORDS'
-  | 'BAD_RECORD_ENTRY'
-  | 'BAD_POW_SHAPE'
-  | 'UNEXPECTED_POW'
-  | 'MISSING_POW'
-  | 'BAD_CHAIN'
-  | 'BAD_COSIG';
+/**
+ * Every rejection this module can produce, as a runtime value.
+ *
+ * A `const` array with the type derived from it, rather than a bare union, because a union is
+ * erased at runtime and the conformance suite needs to enumerate these. Its coverage test used
+ * to compare vectors against a hand-written list, so it passed by asking only about the codes
+ * somebody remembered to type — six were missing, and `conformance/README.md` claimed "at least
+ * one vector for every rejection code the verifier can return" the whole time.
+ */
+export const RECORD_REJECTIONS = [
+  'NON_CANONICAL',
+  'TOO_LARGE',
+  'NOT_A_MAP',
+  'MISSING_FIELD',
+  'BAD_FIELD_TYPE',
+  'UNSUPPORTED_VERSION',
+  'UNKNOWN_SUITE',
+  'UNKNOWN_OP',
+  'BAD_LABEL',
+  'UNKNOWN_TLD',
+  'BAD_KEY',
+  'BAD_SEQ',
+  'BAD_TERM',
+  'TOO_MANY_RECORDS',
+  'BAD_RECORD_ENTRY',
+  'BAD_POW_SHAPE',
+  'UNEXPECTED_POW',
+  'MISSING_POW',
+  'BAD_CHAIN',
+  'BAD_COSIG',
+] as const;
+
+export type RecordRejection = (typeof RECORD_REJECTIONS)[number];
 
 export class RecordError extends Error {
   readonly code: RecordRejection;
