@@ -8,6 +8,68 @@ Versions follow the scheme set by [VWIP-0003](docs/spec/VWIP-0003.md), which kee
 software. Before 1.0.0 the public interface is explicitly unstable and a minor release may break
 it.
 
+## [0.2.1] — 2026-08-06
+
+**The release 0.2.0 was supposed to be.** `v0.2.0`'s tag exists on the remote and produced no
+release: the workflow pushed the tag, then GitHub answered HTTP 422 because the notes were the
+entire changelog section — about 200 KB against a 125,000-character ceiling. A tagged commit with
+no release is the worst of the three possible outcomes, because from the tag list it looks
+finished.
+
+That commit also does not pass its own CI, which is the reason this is a new version rather than
+a release page retrofitted onto the old tag. Four workflows were failing on it and all four were
+this session's doing: 601 npm dependencies against a supply-chain ceiling of 40, a Prettier job
+never run locally, a `Cargo.lock` not regenerated after the version bump, and the notes length
+above. Shipping a release page for a commit known to fail its gates would be the decision nobody
+would defend out loud.
+
+`v0.2.0` is left in place rather than deleted. It is real history, it is what the tag says, and
+rewriting it would be a lie of a different shape.
+
+### Fixed — four CI failures, all of this session's making
+
+- **601 dependencies against a ceiling of 40.** Installing Helia and Hyperswarm took `registry/`
+  from 5 resolved packages to 601, and `security.yml`'s supply-chain gate refused it — a gate
+  whose own comment says it should "fire on a change of kind rather than on ordinary maintenance".
+  It fired exactly as designed, and it was right on the merits rather than merely procedurally:
+  neither library was ever imported, because `blockstore.ts` takes the store as an interface and
+  `swarm.ts` takes the swarm injected, both deliberately so that neither module decides what a
+  VayuWeb node must run. They were installed only to verify against the real thing. Removed;
+  `registry/` is back to 5 packages. A protocol whose Article 4 forbids making any operator
+  load-bearing should not quietly make six hundred package maintainers load-bearing instead — a
+  point `ARCHITECTURE.md` had made about the Node ecosystem earlier the same day.
+
+- **Prettier is a CI job and had never been run here.** Nine files.
+
+- **`cargo test --locked` failed** because `Cargo.toml` was bumped to 0.2.0 and `Cargo.lock` was
+  not, so the lockfile could not be used unchanged. Checking whether npm had the same problem
+  found that it did and had simply not complained: `package-lock.json` carried 0.2.0 against a
+  package.json saying 0.2.1, and `npm ci` accepted it. Cargo refuses the mismatch and npm ships
+  it, which makes the npm one the more dangerous of the two — a stale lockfile that nothing
+  reports is a stale lockfile that reaches a user.
+
+- **Release notes are truncated at 100,000 characters** with a link to the file, and both the tag
+  and the release steps are now idempotent, so a re-run after a partial failure converges rather
+  than dying on the tag it just created.
+
+**The claim that needed correcting.** "All gates green" was said after running the ten
+`scripts/check-*.py` checkers. The repository has five workflows; that was part of one. The
+difference was invisible from inside the sandbox because nothing here runs them, and checking
+took a single API call that had not been made.
+
+**And one documentation correction.** The Helia adapter *was* verified against a real node — that
+run is what discovered every declared shape in its interface was wrong — and it is **not
+reproducible from a clean checkout** now the library is gone. The shapes it taught survive as
+tests, which is the part that matters, and `blockstore.ts` says so in its own header.
+
+### Adversarial review
+
+Carried forward from 0.2.0 below, which this release does not add code to: the two
+denial-of-service findings, what was attacked and found sound, and what the pass did not cover.
+The changes in this version are a dependency removal, a formatter run, a lockfile regeneration
+and a workflow fix — none of which adds attack surface, and the first of which removes 596
+packages' worth of it.
+
 ## [0.2.0] — 2026-08-06
 
 **Protocol version 1**, unchanged, and VWIP-0003 2.5 asks for that to be said plainly along with

@@ -1,6 +1,6 @@
 [package]
 name = "vayuweb-client"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "MIT"
 description = "VayuWeb desktop client: identity handling and the control-API client"

@@ -1,6 +1,6 @@
 {
   "name": "@vayuweb/registry",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "VayuWeb name registry: signed append-only log, deterministic CBOR, Ed25519, Argon2id proof-of-work",
   "license": "MIT",
