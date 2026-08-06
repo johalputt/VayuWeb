@@ -10,6 +10,61 @@ it.
 
 ## [Unreleased]
 
+### Adversarial review
+
+Run against everything under this heading and everything it touched, before the version was
+bumped rather than after — `docs/ROADMAP.md` and `CHANGELOG.md`'s own rule that the audit gates
+the release. The question asked was not "does this do what it says" but "what would I do to this
+if I wanted it to fail". Two defects were found, both in code written the same day, and both were
+denial of service rather than a wrong answer — which is itself the lesson, because every test
+written that day asked what the code *returns*.
+
+**The connection cap leaked a slot on every refusal.** `serve.ts` incremented its counter and
+returned before registering the handler that gives the slot back, so an attacker who could cause
+as many refusals as the cap allows killed the browsing proxy permanently: no crash, no log entry,
+just a resolver answering 503 to its own user forever. Reproducing it through real sockets did not
+work — the client's `connect` event fires before the server's `connection` handler for later
+sockets, so concurrent dials never reliably put three connections in flight. That failure is why
+`ConnectionCounter` now exists as a separate class: accounting is policy, policy belongs where it
+can be exercised as data, and a defect only reproducible by racing the operating system is a
+defect with no regression test. Four mutations fail, including the original defect restored
+exactly, and a double-close that would otherwise mint capacity.
+
+**The deframer did quadratic work for linear input.** A peer dripping a 64 KiB frame one byte at
+a time cost the receiver about 2.15 GB of memory copying and 890 ms of CPU, for 64 KiB of its own
+bandwidth — roughly 33,000:1, and with the connection cap at 64 peers a sustained drip pins every
+core. `REPLICATION.md` 2.4 promises that a hostile peer's effect stays "within the limits of
+section 5"; work quadratic in a bounded quantity is outside them, because a bound stops being a
+bound when the cost of reaching it is not linear.
+
+**The first fix was seven times slower than the defect, and the metric said it was fine.**
+Replacing the per-push buffer rebuild with a chunk list moved the cost into `Array.shift`, which
+is linear in the array's length, so sixty-five thousand one-byte chunks were quadratic all over
+again — 6,692 ms against the original 891 ms. `copiedBytes`, the counter written specifically to
+bound this defect, reported no change, because the cost had moved out of the resource it
+measures. **A bound on one resource is silent about every other one, and a fix validated only by
+the metric it was written against is a fix nobody has measured.** The class now carries a second
+counter, the work is 2.00 units per byte at every frame size tested, and both quadratic
+implementations — the original and the bad fix — fail as mutations.
+
+**Attacked and found sound**, recorded because a clean result is only evidence if it says what
+was tried. Response splitting through the proxy: three shapes of CRLF in the `Host` header and one
+in the request target, all refused with 400 before serialisation, because the head parser splits
+on CRLF and the host grammar admits neither. Frame-length inflation: a declared length is checked
+before anything is buffered against it, so a four-byte prefix naming a gigabyte costs nothing.
+Slow-loris on the browsing proxy: bounded by the head size limit and the head timeout, both
+tested. Transport authentication used as evidence about a record: `swarm.ts` never reads the
+remote public key and a test greps the source to keep it that way. Private keys reaching disk on a
+keyring-less machine: refused by construction, and the test makes the fallback closure `panic!`
+so a regression says why.
+
+**What this pass did not cover, stated rather than implied.** It attacked the code added under
+this heading. It did not re-attack the specification corpus — that was the 2026-08-04 audit, whose
+findings are dispositioned in `docs/AUDIT-FINDINGS.md` — and it is not the independent review
+Article 44.6 asks for, which the same party that wrote the code cannot supply. Bitswap against a
+hostile peer on a real network, and the browser integration, are unattacked because they are
+unbuilt.
+
 ### Added — the client's secret handling, in Rust, where the rule cannot be relaxed
 
 - **`client/` is a Rust crate and `client/src/secrets.rs` is its point.** PRIVACY.md 7.4 says a
