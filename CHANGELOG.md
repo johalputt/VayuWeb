@@ -10,6 +10,46 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a subordinate document added a third relaxation to a security profile it does not own
+
+- **`PUBLISHING.md` section 2.1 let the resolver append per-site `'sha256-…'` expressions to
+  `style-src` and `script-src`.** `CONTENT-SECURITY.md` is the single source of truth for the
+  browser-security profile and its section 2.3 enumerates the relaxations: two, with
+  `None. Move to a stylesheet in the same CID.` against inline style and script. `RESOLUTION.md`
+  and `VWIP-0001` both say two, and VWIP-0001's rights-impact analysis states in terms that
+  "sites using inline styles, inline scripts, `data:` images or WASM must change to be rendered".
+  One document said three, and it is not the one that owns the profile.
+
+  It came with two sharper conflicts. `PUBLISHING.md` said "the reader-facing security indicator
+  MUST NOT change", against 2.3's unconditional "visible to the reader" and conformance item 6 —
+  so the relaxation was not merely extra, it was undisclosed. And the section immediately after
+  it was titled "The two remaining relaxations", so the document had already outgrown its own
+  framing.
+
+  Withdrawn from `PUBLISHING.md`, along with the manifest `inline` field, publish step 3,
+  `doctor --fix`'s declare-instead-of-move behaviour and two conformance items that tested it.
+  **The argument is kept in full**, because a rejected design that leaves no trace gets
+  reproposed every eighteen months by someone who cannot find out why it was rejected — and it
+  was a good argument: the tree is verified against its CID before a byte is served, so a
+  hash-pinned inline script permits exactly the bytes the holder signed and an injected one still
+  fails. What a VWIP would have to answer is written down with it.
+
+- **`CONTENT-SECURITY.md` contradicted itself, which is why this could happen.** Conformance item
+  1 required the canonical values "emitted byte-identically on every response", while 2.3 permits
+  two per-site widenings — so the authoritative document simultaneously forbade and permitted a
+  policy that differs per site. An implementer reading only item 1 concludes the relaxations
+  cannot be emitted; one reading only 2.3 concludes the policy may vary freely, which is the door
+  `PUBLISHING.md` walked through. Item 1 now says what it can mean: byte-identical absent an
+  enumerated 2.3 relaxation, and any deviation is exactly one of those and nothing else.
+
+- **The count drifted three ways and is now derived.** `PUBLISHING.md` said "the two remaining
+  relaxations" while defining a third above it; `CONTENT-SECURITY.md` said two; `RESOLUTION.md`
+  said "one of the two per-site relaxations" while pointing at a document that had grown to
+  three. `check-counts.py` derives the number from the 2.3 table's granting rows, so a document
+  stating a different one fails rather than waiting for a reader who happens to hold both files
+  open. Mutation-tested by making `RESOLUTION.md` say three, and by adding a row to the table
+  without updating the prose; both refused.
+
 ### Fixed — the agility mechanism had no field to read
 
 - **`CRYPTO-AGILITY.md` is fully specified and was entirely unimplementable.** Its section 1:

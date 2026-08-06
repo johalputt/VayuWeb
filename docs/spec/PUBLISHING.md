@@ -32,14 +32,12 @@ The normative sequence:
 1. **Check.** Run the conformance checks of section 3. Any error stops the publish. Nothing is
    uploaded, signed or announced until the tree passes.
 2. **Build the tree.** Walk the directory, producing a UnixFS DAG.
-3. **Compute inline digests.** For each inline `<style>` and `<script>` element in each HTML
-   document, compute the SHA-256 and record it in the manifest (section 2.1).
-4. **Address.** Compute the root CID.
-5. **Pin locally.** The publisher's own node holds the content before anything points at it.
+3. **Address.** Compute the root CID.
+4. **Pin locally.** The publisher's own node holds the content before anything points at it.
    Announcing a name that resolves to nothing is the most common self-inflicted failure in
    content-addressed systems, and step ordering prevents it.
-6. **Sign the pointer.** Produce the registry record under the holder's key.
-7. **Append.** Write the record to the log.
+5. **Sign the pointer.** Produce the registry record under the holder's key.
+6. **Append.** Write the record to the log.
 
 A publisher MUST NOT be required to run a server, obtain a certificate, configure DNS, or hold an
 account with anybody at any step.
@@ -62,10 +60,6 @@ were two names for one field. It now defers here; section 2.4 records what that 
   "title": "Atlas Observatory",
   "description": "Field notes",
   "generator": "vayu-cli/0.2",
-  "inline": {
-    "style":  ["sha256-K7gNU3sdo+OL0wNhqoVWhr3g6s1xYv72ol/pe/Unols="],
-    "script": []
-  },
   "csp": {
     "wasm": false,
     "trustedTypes": null
@@ -77,38 +71,52 @@ Every field is optional except `version`. `title`, `description` and `generator`
 and drive no resolver behaviour; they are here so a publisher has one place to put them rather
 than two documents disagreeing about which.
 
-### 2.1 Inline content, made safe by addressing
+### 2.1 Inline content: withdrawn, and why it is recorded rather than deleted
 
-The strict profile forbids inline `<style>` and `<script>`. For ordinary authors this is the
-single most disruptive rule, and a plain refusal would break most hand-written pages and every
-single-file document.
+An earlier revision of this section let the resolver compute `'sha256-…'` source expressions for
+inline `<style>` and `<script>` elements declared in the manifest and append them to `style-src`
+and `script-src` for that site. It is withdrawn. The argument for it was good and is preserved
+below, because a rejected design that leaves no trace gets reproposed every eighteen months by
+someone who cannot find out why it was rejected.
 
-Content addressing makes a narrow, safe exception possible. Because the entire tree is verified
-against its CID before anything is served, **the resolver already knows the exact bytes of every
-inline element**, and an attacker cannot alter one without changing the CID and invalidating the
-signed pointer.
+**Why it was withdrawn.** [CONTENT-SECURITY.md](CONTENT-SECURITY.md) is the single source of
+truth for the browser-security profile, and its section 2.3 enumerates the relaxations: two, for
+WebAssembly and Trusted Types, with `None. Move to a stylesheet in the same CID.` against inline
+style and script. [RESOLUTION.md](RESOLUTION.md) and [VWIP-0001](VWIP-0001.md) both say two as
+well — VWIP-0001's rights-impact analysis states in terms that "sites using inline styles, inline
+scripts, `data:` images or WASM must change to be rendered". This document was the only one that
+said three, and it is not the document that owns the profile. Adding a relaxation to a security
+profile from a subordinate specification is the defect, independent of whether the relaxation is
+a good idea.
 
-The resolver therefore MAY compute `'sha256-…'` source expressions for the inline elements
-declared in the manifest and append them to `style-src` and `script-src` for that site only.
+Two secondary conflicts came with it. The old text said "the reader-facing security indicator
+MUST NOT change", against CONTENT-SECURITY.md 2.3's unconditional requirement that every
+relaxation be "visible to the reader" and its conformance item 6. And this document's own next
+section was titled "The two remaining relaxations", so the framing here had already been
+outgrown by the section above it.
 
-Constraints, all normative:
+**The argument, kept intact for whoever proposes it properly.** The whole tree is verified
+against its CID before a byte is served, so the resolver already knows the exact bytes of every
+inline element, and an attacker cannot alter one without changing the CID and invalidating the
+signed pointer. A hash-pinned inline script therefore permits exactly the bytes the holder signed
+and nothing else — an injected script would not match a declared digest and would still be
+refused. That is a materially different kind of widening from `'wasm-unsafe-eval'`, and the cost
+of refusing it is real: it is the rule that breaks most hand-written pages and every single-file
+document.
 
-- Digests MUST be computed by the resolver from the **verified** content, never taken on trust
-  from the manifest. The manifest declares intent; it does not confer permission.
-- A digest that does not match an element present in the verified tree MUST be discarded.
-- This applies to inline elements only. It never widens the source list for remote or `data:`
-  resources.
-- The reader-facing security indicator MUST NOT change. Nothing has been weakened: the bytes were
-  already verified.
+**What it would take.** A VWIP amending CONTENT-SECURITY.md section 2.3 to enumerate a third
+relaxation, which must answer three things this section did not. Whether the emitted policy may
+vary per page at all, since a per-page hash list makes the header a function of the content and
+conformance item 1 is written against that. What the reader is shown, since 2.3 admits no
+undisclosed relaxation. And whether the count is then three everywhere — CONTENT-SECURITY.md
+2.3, RESOLUTION.md, VWIP-0001 and this document each state it, and they drifted apart last time.
 
-This is the one place where content addressing buys back usability without buying risk, and it is
-worth taking.
-
-### 2.2 The two remaining relaxations
+### 2.2 The two relaxations
 
 `csp.wasm: true` and `csp.trustedTypes: "<policy-name>"` are declared in the manifest, scoped to
-the single site, and surfaced to the reader. Both are genuine widenings, unlike section 2.1, and
-are treated as such — see [CONTENT-SECURITY.md](CONTENT-SECURITY.md) section 2.3.
+the single site, and surfaced to the reader. They are genuine widenings and are treated as such —
+see [CONTENT-SECURITY.md](CONTENT-SECURITY.md) section 2.3, which defines them and is
+authoritative for both. This document declares them; it does not grant them.
 
 ### 2.3 Deep links
 
@@ -135,8 +143,7 @@ Neither was quite right, and splitting the difference would have been worse than
   about them is trusting the owner exactly as much as trusting the content is — the same key
   signed both.
 - **It is not evidence about the tree.** A resolver MUST NOT take a digest, a file's existence, or
-  any content property from it. Section 2.1 states this in the sharpest form for digests, and the
-  rule generalises: **the manifest declares intent; it does not confer permission.**
+  any content property from it: **the manifest declares intent; it does not confer permission.**
 
 The `csp` relaxations of section 2.2 sit on the permission side of that line, not the routing
 side, and are therefore constrained twice over. They are declared here, but they take effect only
@@ -150,9 +157,9 @@ The publish-time checker. It runs automatically as step 1 of `vayu publish` and 
 ```text
 $ vayu doctor ./my-site
 
-  ✗  index.html:42   inline <style> not declared in manifest
-     VayuWeb blocks inline styles unless they are declared, because an
-     undeclared one is indistinguishable from an injected one.
+  ✗  index.html:42   inline <style>
+     VayuWeb blocks inline styles: an attribute selector plus a url() reads
+     your page one character at a time, and a blocked one cannot.
      Fix: run `vayu doctor --fix`, or move the styles to a .css file.
 
   ✗  about.html:8    <img src="https://cdn.example.com/logo.png">
@@ -174,11 +181,12 @@ fix. A message that states a rule without a remedy is a defect in the checker.
 3.1.2 Diagnostics MUST be written for someone who has never heard of a Content-Security-Policy.
 "Inline styles are blocked" is acceptable; "style-src does not include 'unsafe-inline'" is not.
 
-3.1.3 `--fix` MUST resolve mechanically fixable findings: extracting inline blocks to files, or
-declaring their digests in the manifest. It MUST NOT alter document semantics, and MUST show a
-diff before writing.
+3.1.3 `--fix` MUST resolve mechanically fixable findings by extracting inline blocks to files in
+the same tree. It MUST NOT alter document semantics, and MUST show a diff before writing. It has
+no option that declares an inline block instead of moving it, because no such declaration is
+honoured — see section 2.1.
 
-3.1.4 The checker MUST detect at minimum: undeclared inline `<style>` and `<script>`; any
+3.1.4 The checker MUST detect at minimum: inline `<style>` and `<script>`; any
 non-same-origin subresource; `data:` images; `<base>`; `<iframe>`; forms with a non-same-origin
 action; the speculative-loading `<link rel>` values; `<meta name="referrer">` and
 `<meta http-equiv="refresh">`; WebAssembly without the manifest declaration; service-worker
@@ -217,9 +225,10 @@ does have to do:
 
 1. `vayu publish` on a tree that fails `vayu doctor` does not write a record.
 2. Every `vayu doctor` diagnostic carries a file, a line, a reason and a fix.
-3. Inline digests are computed from verified content; a manifest digest with no matching element
-   is discarded.
-4. The declared inline exception never widens the source list for remote or `data:` resources.
+3. A tree containing an inline `<style>` or `<script>` fails `vayu doctor`, and no manifest
+   field makes it pass. The withdrawn exception of section 2.1 has no residue in the checker.
+4. The manifest changes routing and never permission: a `csp` field the reader was not shown, or
+   any content claim taken from the manifest rather than from the verified tree, fails.
 5. The checker runs with no network access.
 6. The checker's rule set and the resolver's enforcement derive from one shared definition, and a
    test asserts a site passing the checker is served without a policy violation.

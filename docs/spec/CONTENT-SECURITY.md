@@ -169,6 +169,14 @@ Every relaxation is **per-site, never global**, and **visible to the reader**. A
 reader cannot see is a widening that will be abused. No configuration file, control-API setting or
 command-line flag may apply either relaxation globally, and that refusal is not tunable.
 
+**The list is closed here and nowhere else.** A relaxation not in this table does not exist,
+whichever document proposes it. `PUBLISHING.md` section 2.1 previously defined a third — per-site
+`'sha256-…'` expressions for manifest-declared inline elements — and additionally said the reader
+indicator "MUST NOT change", against the sentence above. It is withdrawn there; the argument for
+it is kept, because it was a good argument, and adding it here needs a VWIP rather than a
+subordinate document's paragraph. Anything that adds to this table must also update the count in
+RESOLUTION.md, VWIP-0001 and PUBLISHING.md, which `scripts/check-counts.py` now holds together.
+
 ## 3. Accompanying response headers
 
 <!-- canonical:permissions-policy -->
@@ -317,7 +325,15 @@ used as an exfiltration oracle. Volume and timing still correlate, and that is n
 
 Each is an executable test asserting on **observed behaviour**, not configuration:
 
-1. The three canonical values in sections 2 and 3 are emitted byte-identically on every response.
+1. The three canonical values in sections 2 and 3 are emitted byte-identically on every response,
+   **absent an enumerated 2.3 relaxation**, and any response that differs from them differs by
+   exactly one of those relaxations and by nothing else. The qualifier is not a loophole, it is
+   the repair of one: stated unqualified, this test contradicted 2.3, which permits two per-site
+   widenings and therefore two policies that are not byte-identical to the canonical one. An
+   implementer reading only this line would have concluded the relaxations could not be emitted
+   at all; one reading only 2.3 would have concluded the policy may vary freely. The test is what
+   distinguishes a policy that varies by an enumerated, disclosed relaxation from one that varies
+   because something appended to it.
 2. A site-supplied CSP is discarded, never merged.
 3. **Zero-egress, in the client webview.** Load a page containing one of every construct in
    section 4.3 under a socket monitor scoped to the whole network namespace, not to the browser

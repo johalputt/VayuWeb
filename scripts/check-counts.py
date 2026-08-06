@@ -103,6 +103,32 @@ def count_accompanying_headers():
     return len(names), None
 
 
+def count_csp_relaxations():
+    """Rows of the 2.3 table that grant something, rather than saying `None`.
+
+    This number drifted three ways at once: CONTENT-SECURITY.md said two, PUBLISHING.md said "the
+    two remaining relaxations" while its own preceding section defined a third, and RESOLUTION.md
+    said "one of the two per-site relaxations" while pointing at a document that had grown to
+    three. The count is derived from the table that closes the list, so a document that says a
+    different number now fails rather than being noticed by a reader who happened to hold both
+    files open.
+    """
+    text = read("docs/spec/CONTENT-SECURITY.md")
+    if text is None:
+        return None, "docs/spec/CONTENT-SECURITY.md is missing"
+    section = re.search(r"### 2\.3 [^\n]*\n(.*?)(?=\n## )", text, re.S)
+    if section is None:
+        return None, "could not locate section 2.3 of docs/spec/CONTENT-SECURITY.md"
+    rows = re.findall(r"^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*$", section.group(1), re.M)
+    grants = [r for r in rows
+              if r[0] not in ("Breaks", "---")
+              and not r[1].startswith("---")
+              and not r[1].startswith("None")]
+    if not grants:
+        return None, "section 2.3 yielded no relaxation rows -- the table format changed"
+    return len(grants), None
+
+
 # Each rule: a label, a function deriving the true number, and the claim patterns that
 # must agree with it. A pattern's one capture group is the asserted quantity.
 RULES = [
@@ -125,6 +151,15 @@ RULES = [
         "patterns": [
             re.compile(r"\b(\w+) accompanying response headers\b", re.I),
             re.compile(r"\b(\w+) response headers are added\b", re.I),
+        ],
+    },
+    {
+        "label": "per-site CSP relaxations",
+        "derive": count_csp_relaxations,
+        "source": "docs/spec/CONTENT-SECURITY.md section 2.3",
+        "patterns": [
+            re.compile(r"\b(\w+) relaxations\b", re.I),
+            re.compile(r"\bone of the (\w+) per-site relaxations\b", re.I),
         ],
     },
 ]
