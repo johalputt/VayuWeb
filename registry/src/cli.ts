@@ -15,6 +15,9 @@
  */
 
 import { readFileSync, writeFileSync, chmodSync, existsSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 
 import { encode, type CborMap, type CborValue } from './cbor.ts';
 import { signingInput } from './domain.ts';
@@ -27,6 +30,9 @@ import { TERM_SECONDS, SETTLEMENT_SECONDS } from './verify.ts';
 import { stateAt } from './lifecycle.ts';
 import { buildVectors, fromHex } from './vectors.ts';
 import { verify, predecessorFrom, type RegistryView } from './verify.ts';
+import { serveControl, serveProxy } from './serve.ts';
+import { treeOf } from './merkle.ts';
+import { TOKEN_BYTES } from './control.ts';
 
 const toHex = (bytes: Uint8Array): string =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
@@ -467,6 +473,106 @@ function cmdVectors(): number {
   return failed === 0 ? 0 : 1;
 }
 
+/**
+ * Run the resolver: the browsing proxy on loopback, the control API on a Unix socket.
+ *
+ * Long-running, so it is the one command that returns a promise. Everything policy-shaped lives
+ * in `proxy.ts`, `control.ts` and `serve.ts`; this function's whole job is wiring and the two
+ * things a running process owns that a pure function cannot -- a generated token and a signal
+ * handler that puts the socket away.
+ */
+/** The merkle root over the log's current entries, recomputed rather than remembered. */
+function merkleRootOf(store: Store, length: number): Uint8Array {
+  const entries: Uint8Array[] = [];
+  for (let i = 0; i < length; i += 1) {
+    const entry = store.entryAt(i);
+    if (entry === null) break;
+    entries.push(entry.bytes);
+  }
+  return treeOf(entries).root();
+}
+
+/**
+ * The version the control API discloses, past the token check and nowhere else.
+ *
+ * A literal rather than a read of `package.json`: the file is not present in every way this is
+ * run, and a version string that sometimes reads `unknown` is a worse answer than one that is
+ * simply kept in step with the release commit.
+ */
+const RESOLVER_VERSION = '0.1.0';
+
+async function cmdServe(args: Args): Promise<number> {
+  const store = Store.open(required(args, 'log'), Math.floor(Date.now() / 1000));
+  const started = Math.floor(Date.now() / 1000);
+
+  // Generated per run, never read from a file or an environment variable. A token in a config
+  // file is a token in a backup, in a screenshot and in a support ticket; one that lives only in
+  // this process's memory and this run's stdout cannot outlive the process that needs it.
+  const token = randomBytes(TOKEN_BYTES).toString('base64url');
+
+  const socketPath =
+    args.flags.get('socket') ??
+    join(process.env['XDG_RUNTIME_DIR'] ?? join(homedir(), '.vayuweb'), 'control.sock');
+
+  let diagnostics = false;
+  const control = await serveControl({
+    path: socketPath,
+    token,
+    ports: {
+      status: () => ({
+        mode: 'clearnet',
+        uptime: Math.floor(Date.now() / 1000) - started,
+        listeners: [proxy.address, socketPath],
+      }),
+      version: () => RESOLVER_VERSION,
+      logHead: () => {
+        // Measured by walking, not asked of a field. `entryAt` is the store's only length-shaped
+        // API, and a counter cached here would be a second source of truth for a number the
+        // control API exists to report honestly.
+        let length = 0;
+        while (store.entryAt(length) !== null) length += 1;
+        return { length, root: toHex(merkleRootOf(store, length)) };
+      },
+      config: () => ({ log: required(args, 'log'), socket: socketPath, token }),
+      diagnostics: () => diagnostics,
+      setDiagnostics: (on: boolean) => {
+        diagnostics = on;
+      },
+    },
+  });
+
+  const proxy = await serveProxy({
+    port: number(args, 'port', 7654),
+    // The process boundary is where the real clock is allowed to exist; every module below this
+    // takes it as a parameter.
+    now: () => Math.floor(Date.now() / 1000),
+    options: { get diagnostics() { return diagnostics; } },
+    ports: {
+      lookup: (label, tld) => store.lookup(label, tld)?.current.record ?? null,
+      hasVerifiedHead: () => true,
+    },
+  });
+
+  out(`browsing proxy   http://${proxy.address}`);
+  out(`control API      ${control.address}  (mode 0600)`);
+  out('');
+  out('control token (this run only, not written to disk):');
+  out(`  ${token}`);
+  out('');
+  out('Point a browser at the proxy. Ctrl-C to stop.');
+
+  await new Promise<void>((resolve) => {
+    const stop = (): void => {
+      // The socket is removed on close. A resolver that leaves one behind makes the next start
+      // fail on a path that looks like a running instance and is not.
+      void Promise.all([proxy.close(), control.close()]).then(() => resolve());
+    };
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+  });
+  return 0;
+}
+
 const USAGE = `vayuweb-registry — local name registry (Phase 1: no network)
 
   keygen     --key <file> [--seed <hex>] [--force]
@@ -482,6 +588,7 @@ const USAGE = `vayuweb-registry — local name registry (Phase 1: no network)
   difficulty --log <file> --name <label.tld>
   verify     --log <file> --record <file containing hex>
   vectors
+  serve      --log <file> [--port <n>] [--socket <path>]
 
 Exit codes: 0 accepted, 1 rejected or error, 2 deferred (clock skew), 3 not live.
 
@@ -490,9 +597,12 @@ ratified, enumerated in docs/spec/NAMESPACE-CATALOGUE.md — the Namespace Annex
 listed here: the list would bury every other line of this help, and a help text carrying the
 namespace is one more copy that can drift from it.
 
-This tool does not touch the network. Keys are files; back them up yourself.`;
+\`serve\` binds a browsing proxy on 127.0.0.1 and a control API on a Unix domain socket with mode
+0600. The control token is generated per run and printed once; it is never written to disk, so a
+token in a backup or a screenshot is not a thing that can happen. No other command touches a
+socket. Keys are files; back them up yourself.`;
 
-export function main(argv: readonly string[]): number {
+export function main(argv: readonly string[]): number | Promise<number> {
   const [command, ...rest] = argv;
   if (command === undefined || command === '--help' || command === 'help') {
     out(USAGE);
@@ -526,6 +636,8 @@ export function main(argv: readonly string[]): number {
         return cmdVerify(args);
       case 'vectors':
         return cmdVectors();
+      case 'serve':
+        return cmdServe(args);
       default:
         err(`unknown command: ${command}`);
         err('');
