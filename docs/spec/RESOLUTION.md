@@ -124,6 +124,36 @@ for `http://example.vayu/` arriving at the proxy.
     detected mid-stream the connection is aborted. This check is the whole of
     VayuWeb's transport authenticity story — there is no certificate authority to
     consult.
+
+    12.1 **The check is recursive, because a CID addresses a tree and not a
+    resource.** A site root is a dag-pb directory whose links are CIDs, and a
+    file larger than one chunk is a node whose links are CIDs. A resolver MUST
+    verify **every** block it receives against the CID that referred it — the
+    root against the CID in the record, and each child against the CID in its
+    parent's link — and MUST NOT act on any part of a block before that block
+    verifies. This clause is stated because step 12 says "the bytes" and "the
+    requested CID" in the singular, which is exactly right for one block and
+    silent about the other n − 1. Constitution Article 44.6 makes that a defect
+    in the document rather than an omission a careful reader is expected to
+    repair on the implementer's behalf.
+
+    12.2 **Traversal is bounded, and the bound is on the traversal rather than
+    on the output.** A dag-pb node may link to the same child more than once, so
+    a DAG of n blocks can describe a logical resource exponential in n: thirty
+    blocks, each linking twice to the next, describe over a billion leaves. The
+    256 MiB resource cap under "The browsing proxy" catches that eventually, but
+    only after the work has been done, which is the wrong end of the problem. A
+    resolver MUST also bound the number of blocks it will fetch and the depth it
+    will descend for one request, and MUST return 1413 `RESPONSE_TOO_LARGE` on
+    exceeding either.
+
+    12.3 **UnixFS metadata inside a block is content, not authority.**
+    `filesize` and `blocksizes` are publisher-chosen fields covered by the
+    node's own hash, so a lie is self-consistent rather than detectable by
+    hashing: a node may declare a `filesize` of 256 MiB and link to one byte,
+    and it will verify perfectly. A resolver MUST NOT allocate on a declared
+    size, and MUST refuse a file node whose declared sizes disagree with the
+    bytes that arrive.
 13. **Path mapping.** Treat the CID as a directory root and map the request
     path onto it, resolving `/` and directory paths to the manifest's `index`
     when one is declared and to `index.html` otherwise. On no match, consult
@@ -496,8 +526,10 @@ Availability is only as good as the set of peers pinning a site. A name can
 resolve correctly and still return 1504 indefinitely; the protocol offers no
 remedy beyond volunteers.
 
-Status: Draft — not yet implemented. This describes the intended behaviour of a
-resolver that has not been written; every number is open to revision through
+Status: Draft, partially implemented. Steps 1 to 10 and 13, the record-selection order, alias
+following with its hop budget and the numbered error catalogue are in
+`registry/src/resolve.ts`, with a resolution vector suite pinning the outcomes. Content
+fetching and the browser integration are not written. Every number is open to revision through
 the VWIP process.
 
 See also: [REGISTRY.md](REGISTRY.md), [NAMES.md](NAMES.md),
