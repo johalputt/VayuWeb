@@ -259,20 +259,65 @@ function serveConnection(
   });
 }
 
+/**
+ * The connection accounting, separated from the socket so it can be attacked as data.
+ *
+ * **This existed inline and leaked a slot on every refusal.** The refusal path incremented the
+ * counter and returned before registering the handler that gives the slot back, so an attacker
+ * who could cause as many refusals as the cap allows killed the listener permanently — no crash,
+ * no log entry, just a resolver that answers 503 to its own user forever. Found by the
+ * adversarial pass over this file rather than by reading it.
+ *
+ * Reproducing it through real sockets turned out to be timing-dependent: the client's `connect`
+ * event fires before the server's `connection` handler for later sockets, so three concurrent
+ * dials never reliably put three connections in flight. That is the argument for this class
+ * existing at all. Accounting is policy, policy belongs where it can be exercised as data, and a
+ * defect only reproducible by racing the operating system is a defect with no regression test.
+ */
+export class ConnectionCounter {
+  private open = 0;
+  private readonly cap: number;
+
+  constructor(cap: number = SERVE_LIMITS.connections) {
+    this.cap = cap;
+  }
+
+  /** How many slots are currently held. */
+  get inUse(): number {
+    return this.open;
+  }
+
+  /**
+   * Take a slot, or refuse.
+   *
+   * A refusal takes no slot at all — the counter is incremented only on success. The alternative,
+   * increment-then-check-then-return, is what leaked: correct on the accepting path and silently
+   * permanent on the other.
+   */
+  admit(): boolean {
+    if (this.open >= this.cap) return false;
+    this.open += 1;
+    return true;
+  }
+
+  /** Give a slot back. Never goes below zero, so a double close cannot mint capacity. */
+  release(): void {
+    if (this.open > 0) this.open -= 1;
+  }
+}
+
 /** Cap concurrent connections, closing the excess rather than queueing it. */
-function withConnectionCap(server: Server): Server {
-  let open = 0;
+function withConnectionCap(server: Server, cap: number = SERVE_LIMITS.connections): Server {
+  const counter = new ConnectionCounter(cap);
   server.on('connection', (socket: Socket) => {
-    open += 1;
-    if (open > SERVE_LIMITS.connections) {
+    if (!counter.admit()) {
       // Refused with a status rather than a silent close, so an operator watching the surface can
-      // tell exhaustion apart from a network fault.
+      // tell exhaustion apart from a network fault. No slot was taken, so nothing has to be given
+      // back — which is the property the inline version got wrong.
       writeHttp(socket, 503, new Map(), 'TOO_MANY_CONNECTIONS');
       return;
     }
-    socket.on('close', () => {
-      open -= 1;
-    });
+    socket.on('close', () => counter.release());
   });
   return server;
 }
@@ -289,6 +334,8 @@ export interface ProxyServerOptions {
   /** Defaults to 7654 per RESOLUTION.md. 0 asks the OS for a free port, which the tests use. */
   readonly port?: number;
   readonly options?: ProxyOptions;
+  /** Concurrent connections. Defaults to {@link SERVE_LIMITS.connections}; tests lower it. */
+  readonly maxConnections?: number;
   /**
    * Unix seconds, supplied rather than read.
    *
@@ -330,6 +377,7 @@ export function serveProxy(options: ProxyServerOptions): Promise<Listener> {
         return response;
       });
     }),
+    options.maxConnections ?? SERVE_LIMITS.connections,
   );
 
   return new Promise((resolve, reject) => {

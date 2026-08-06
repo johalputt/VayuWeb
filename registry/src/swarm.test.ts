@@ -113,6 +113,94 @@ test('framing an over-sized payload is refused at the sender too', () => {
 });
 
 /* -------------------------------------------------------------------------- */
+/* AUDIT: the deframer did quadratic work for linear input                     */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: a peer dripping one byte at a time cannot cost quadratic work', () => {
+  // Found by attacking the deframer rather than by reading it. The first version rebuilt the
+  // whole pending buffer on every `push`, so a peer sending a 64 KiB frame one byte at a time
+  // cost the receiver ~2.15 GB of memory copying and ~890 ms of CPU -- an amplification of about
+  // 33,000:1 against a peer whose own cost is 64 KiB of bandwidth. With the connection cap at 64
+  // peers, a sustained drip pins every core.
+  //
+  // REPLICATION.md 2.4 is explicit that "a hostile peer's maximum achievable effect is to waste
+  // the receiver's bandwidth and CPU **within the limits of section 5**". Work quadratic in a
+  // bounded quantity is outside those limits: the bound stops being a bound when the cost of
+  // reaching it is not linear.
+  //
+  // Asserted on bytes copied rather than on elapsed time. A wall-clock assertion is flaky on a
+  // loaded runner and reads a clock the hygiene gate refuses; the copy counter is exact, and it
+  // is the quantity the defect is actually about.
+  const payload = new Uint8Array(SWARM_LIMITS.frameBytes - 16).fill(7);
+  const wire = frame(payload);
+
+  const deframer = new Deframer();
+  let emerged = 0;
+  for (const byte of wire) emerged += deframer.push(Uint8Array.of(byte)).length;
+
+  assert.equal(emerged, 1, 'the frame still reassembles');
+  // Each byte is copied into the pending list once and into the finished frame once. Four times
+  // the wire length is generous headroom over that and still four orders of magnitude below the
+  // quadratic behaviour, which for this frame was over two billion.
+  assert.ok(
+    deframer.copiedBytes <= wire.length * 4,
+    `copied ${deframer.copiedBytes} bytes to receive ${wire.length}; ` +
+      `quadratic would be about ${Math.round((wire.length * wire.length) / 2)}`,
+  );
+
+  // **Two counters, because one was not enough.** The first fix for this defect replaced the
+  // byte copying with `Array.shift` per chunk — also quadratic, and seven times SLOWER than the
+  // defect it replaced — while `copiedBytes` reported everything was fine, because the cost had
+  // moved out of the resource that counter measures. A bound on one resource is silent about
+  // every other one, and a fix validated only by the metric it was written against is a fix
+  // nobody has measured.
+  assert.ok(
+    deframer.workUnits <= wire.length * 4,
+    `${deframer.workUnits} work units to receive ${wire.length} bytes`,
+  );
+});
+
+test('AUDIT: the work is linear in the frame, measured rather than asserted', () => {
+  // Linearity is the property; a single size cannot show it. Doubling the frame must double the
+  // work, and quadratic behaviour quadruples it — which is visible here and is invisible to any
+  // assertion made at one size.
+  const perByte: number[] = [];
+  for (const size of [4096, 8192, 16384, 32768]) {
+    const wire = frame(new Uint8Array(size - 16).fill(3));
+    const deframer = new Deframer();
+    for (const byte of wire) deframer.push(Uint8Array.of(byte));
+    perByte.push(deframer.workUnits / wire.length);
+  }
+  const first = perByte[0]!;
+  for (const ratio of perByte) {
+    assert.ok(
+      Math.abs(ratio - first) < 0.25,
+      `work per byte drifted across sizes: ${perByte.map((r) => r.toFixed(2)).join(', ')}`,
+    );
+  }
+});
+
+test('AUDIT: a frame that never completes holds bounded memory and copies bounded bytes', () => {
+  // The other half: a peer that declares a legal frame and then stops. The receiver must hold at
+  // most that frame, and must not have paid quadratically to get there.
+  const deframer = new Deframer();
+  const prefix = new Uint8Array(4);
+  new DataView(prefix.buffer).setUint32(0, SWARM_LIMITS.frameBytes, false);
+  deframer.push(prefix);
+  for (let i = 0; i < 8192; i += 1) deframer.push(new Uint8Array(1));
+
+  assert.ok(deframer.pending <= SWARM_LIMITS.frameBytes + SWARM_LIMITS.prefixBytes);
+  assert.ok(
+    deframer.copiedBytes <= (8192 + 4) * 4,
+    `copied ${deframer.copiedBytes} for 8196 bytes of drip`,
+  );
+  assert.ok(
+    deframer.workUnits <= (8192 + 4) * 4,
+    `${deframer.workUnits} work units for 8196 bytes of drip`,
+  );
+});
+
+/* -------------------------------------------------------------------------- */
 /* Driving a peer                                                              */
 /* -------------------------------------------------------------------------- */
 

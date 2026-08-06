@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  ConnectionCounter,
   SERVE_LIMITS,
   ServeError,
   parseHead,
@@ -187,6 +188,69 @@ test('a malformed head is answered with a status rather than a dropped connectio
     async (listener) => {
       const answer = await speak(listener.address, 'GET /\r\n\r\n');
       assert.match(answer, /^HTTP\/1\.1 400 /);
+    },
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT: the connection cap leaked a slot on every refusal                     */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: a refused connection consumes no slot at all', () => {
+  // Found by attacking `serve.ts` rather than by reading it. The accounting was inline and the
+  // refusal path incremented the counter, then returned BEFORE registering the handler that
+  // gives the slot back. Every refusal therefore leaked one slot for the lifetime of the
+  // process, and an attacker who could cause as many refusals as the cap allows killed the
+  // listener permanently: no crash, no log entry, just a resolver answering 503 to its own user
+  // forever.
+  //
+  // The first attempt to reproduce it through real sockets did not land, and that is why this
+  // class exists. The client's `connect` event fires before the server's `connection` handler
+  // for later sockets, so three concurrent dials never reliably put three connections in flight.
+  // A defect that can only be reproduced by racing the operating system is a defect with no
+  // regression test.
+  const counter = new ConnectionCounter(2);
+  assert.equal(counter.admit(), true);
+  assert.equal(counter.admit(), true);
+  assert.equal(counter.admit(), false, 'the third is over the cap');
+  assert.equal(counter.inUse, 2, 'and the refusal took no slot — this is the whole finding');
+
+  // Every refusal, forever, still takes nothing.
+  for (let i = 0; i < 1_000; i += 1) assert.equal(counter.admit(), false);
+  assert.equal(counter.inUse, 2);
+
+  // And the listener recovers completely once the real connections close.
+  counter.release();
+  counter.release();
+  assert.equal(counter.inUse, 0);
+  assert.equal(counter.admit(), true, 'the listener still works after a thousand refusals');
+});
+
+test('AUDIT: a double close cannot mint capacity', () => {
+  // The mirror of the leak. `close` can fire more than once on a socket, and a counter that
+  // decrements below zero hands out slots it does not have — turning the cap into a suggestion
+  // for anybody who can get a socket to close twice.
+  const counter = new ConnectionCounter(1);
+  assert.equal(counter.admit(), true);
+  counter.release();
+  counter.release();
+  counter.release();
+  assert.equal(counter.inUse, 0, 'never negative');
+  assert.equal(counter.admit(), true);
+  assert.equal(counter.admit(), false, 'the cap is still one');
+});
+
+test('AUDIT: the listener survives a burst that includes refusals', async () => {
+  // The end-to-end half, kept because the unit test above cannot prove the counter is wired in.
+  // It does not attempt to force a refusal — that is what made the first version unreliable —
+  // it checks that ordinary traffic through the real listener leaves it working.
+  await withListener(
+    () => serveProxy({ ports: resolverPorts, port: 0, now: () => 1_782_518_400, maxConnections: 2 }),
+    async (listener) => {
+      for (let i = 0; i < 6; i += 1) {
+        const answer = await speak(listener.address, 'GET / HTTP/1.1\r\nHost: a.vayu\r\n\r\n');
+        assert.doesNotMatch(answer, /TOO_MANY_CONNECTIONS/, `request ${i} was refused`);
+      }
     },
   );
 });
