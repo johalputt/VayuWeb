@@ -186,11 +186,16 @@ thousand names a recurring annual cost rather than a one-off.
 
 Preconditions: a live `prev`; `ownerKey` is the incoming key and differs from `prev.ownerKey`;
 `coSig` present and verifying against `ownerKey` over the same signing input;
-`notAfter == prev.notAfter`; `powProof` null.
+`notAfter == prev.notAfter`; at least `1,209,600` seconds of term remaining
+(`notAfter - notBefore >= 1209600`); `powProof` null.
 
-Validation order: common preconditions, chain rules, outgoing signature, countersignature,
-`notAfter` equality. Effect: ownership moves and the term is unchanged. Transfer to a key whose
-secret is unknown is impossible, because the countersignature cannot be produced.
+Validation order: common preconditions, chain rules, settlement, outgoing signature,
+countersignature, `notAfter` equality. Transfer to a key whose secret is unknown is impossible,
+because the countersignature cannot be produced.
+
+Effect: the term is unchanged, and **ownership moves `1,209,600` seconds (fourteen days) after
+this record's `notBefore`, not on acceptance.** See "Settlement" below — a TRANSFER is the one
+operation whose effect and its acceptance are separated in time.
 
 ### RELEASE
 
@@ -355,7 +360,15 @@ verify(rec, bytes, state):
       if now >= prev.notAfter + 2592000:      reject EXPIRED
   else:
       if now >= prev.notAfter:                reject EXPIRED
-  if not ed25519_strict(prev.ownerKey, input, rec.sig): reject BAD_SIG
+  // Article 33.4's settlement delay. A TRANSFER is accepted at once and takes EFFECT fourteen
+  // days later, so while it is settling the controlling key is still the transferor's and only
+  // a further TRANSFER is accepted. See "Settlement" below.
+  if prev.op == TRANSFER and rec.notBefore < prev.notBefore + 1209600:
+      if rec.op != TRANSFER:                  reject UNSETTLED
+      controller = prev.signer                // the transferor, not prev.ownerKey
+  else:
+      controller = prev.ownerKey
+  if not ed25519_strict(controller, input, rec.sig):       reject BAD_SIG
   if rec.op != TRANSFER and rec.ownerKey != prev.ownerKey: reject BAD_OWNER
   if rec.op != RENEW and rec.powProof != null:             reject UNEXPECTED_POW
 
@@ -367,6 +380,7 @@ verify(rec, bytes, state):
               and pow_ok(rec, difficulty(rec.name, rec.tld, state))
     TRANSFER: require rec.ownerKey != prev.ownerKey
               and rec.notAfter == prev.notAfter
+              and rec.notAfter - rec.notBefore >= 1209600   // else reject UNSETTLED
               and ed25519_strict(rec.ownerKey, input, rec.coSig)
     RELEASE:  require rec.records == [] and rec.notAfter == rec.notBefore
     REVOKE:   require rec.records == [] and rec.notAfter == prev.notAfter
@@ -375,6 +389,62 @@ verify(rec, bytes, state):
 
 `state.current` reflects the verifier's own linearised log only. Verification makes no network
 call: a verifier that asks another peer for a verdict has replaced verification with trust.
+
+### Settlement: a transfer is accepted at once and takes effect in fourteen days
+
+Constitution Article 33.4: *"A TRANSFER record SHALL take effect only after a mandatory
+settlement delay of fourteen days, during which any recovery path configured by the transferor
+under Article 34 MAY revoke it by signed record."* An earlier revision of this document moved
+ownership on acceptance, which is a lower instrument contradicting the charter on a rule the
+wire can see — void under Article 3.7.
+
+The rules, and why each is where it is:
+
+- **`prev.signer` is state a verifier must keep.** For five of the six operations the key that
+  signed a record is the key it names, so nothing is lost by looking at `ownerKey`. A TRANSFER's
+  `ownerKey` is the *recipient*, and the transferor's key appears nowhere in the record. A
+  verifier that keeps only the record cannot answer "who may sign next" during settlement, so an
+  index entry carries the signer alongside the record. A conformance vector whose predecessor is
+  a pending transfer states it as `state.transferorKey`, or the vector is not reproducible.
+
+- **Only a TRANSFER is accepted while one is settling.** Not tidiness: the chain rules force a
+  non-TRANSFER successor to carry `ownerKey == prev.ownerKey`, which for a pending transfer is
+  the *recipient's* key. One accepted `UPDATE` would therefore leave a predecessor whose `op` is
+  no longer TRANSFER and whose `ownerKey` is the recipient's — completing the handover early,
+  silently, and by an operation that has nothing to do with ownership.
+
+- **Cancellation is a TRANSFER back, and needs no new record type.** Article 29.4's set is
+  closed and contains no "cancel". The transferor, still the controlling key, signs a TRANSFER
+  naming their own key and countersigns it themselves. It satisfies the differing-key rule
+  because the key it names differs from the pending recipient's, and it restarts a settlement
+  window of its own — during which the transferor is again the controller, so the cancellation
+  is not itself cancellable by anyone else.
+
+- **A transfer must fit inside the term it transfers.** Signed with ten days left, it settles
+  four days after the name has expired: the recipient receives a name they never controlled and
+  could not renew, because `RENEW` is refused during settlement like everything else, and the
+  name is frozen for the whole window. Hence the `notAfter - notBefore >= 1209600` precondition.
+
+- **The delay is measured from the record, never from the verifier's clock.** Article 29.6
+  requires a record to be verifiable offline from the record and the chain alone. Under a
+  clock-driven test a cancellation signed on day three verifies on the peer that received it and
+  fails on a peer replaying the log a month later, when `now` has passed the settlement instant
+  and authority has moved — two honest peers, different owners, permanently.
+
+**The trade-off, as Article 33.5 requires wherever the delay is documented.** Fourteen days makes
+theft-by-transfer recoverable by someone who notices within a fortnight, and makes bulk flipping
+slow. It also means no transfer is instant, that a legitimate urgent transfer is delayed with it,
+and that a party who notices on day fifteen has no remedy at all.
+
+**And the honest limit, which Article 21 requires stating rather than implying.** 33.4 vests the
+power to revoke in "any recovery path configured by the transferor under Article 34". No such
+recovery path has a wire form in this specification: Article 34.2's DELEGATE and 34.3's
+pre-declared succession material are absent from the operation set, which is tracked separately.
+So today the only key that can cancel inside the window is the transferor's own — and against a
+thief who holds that key, it is the thief's too. For that attacker the delay buys time to notice
+and nothing else. It is a real protection against a mistaken or coerced transfer, and against a
+recipient who plans to move the name onward before anyone reacts. It is not yet a protection
+against key compromise, and this document does not claim to be one.
 
 ### Expiry is a precondition, not a consequence
 
@@ -423,6 +493,44 @@ not of one operation.
 A postdated record is **deferred, never rejected**. The verifier's own clock may be behind, and
 a rejection there would make two honest peers permanently disagree about a valid record —
 precisely the divergence the deterministic rules exist to prevent.
+
+### The unresolved part: how long a name is held, and for how long after
+
+**Every duration above is contested, and this document cannot settle any of them.** The three
+quantities travel together, so they are stated together:
+
+| Quantity | Article 11 | Article 32 | This document |
+| --- | --- | --- | --- |
+| Term | `126,230,400` s (11.6) | five years (32.2) | `31,536,000` s |
+| Renewal window opens | at registration — "any moment while the name is held" (11.6) | twelve months before expiry (32.3) | `5,184,000` s before expiry |
+| Reserved to the incumbent after expiry | `7,776,000` s (11.8) | one hundred and eighty days (32.3) | `2,592,000` s of grace, then `2,592,000` s of quarantine |
+
+Article 11.14 names Article 32 as **Article 11's own machinery**, so the disagreement is not
+merely between a charter and a specification — it is inside the charter, between an entrenched
+Article and the Article that implements it. Article 3.7 cannot resolve that: it ranks the
+Constitution above this document, and both clauses are inside the Constitution.
+
+Two consequences are mechanical rather than theoretical, and both are wire-visible:
+
+- A `RENEW` signed forty-five days after expiry is **valid** under Article 11.8, which reserves
+  days 0–90 to the incumbent key, and **rejected `EXPIRED`** by the pseudocode above.
+- On day 61 the rules above make the name registrable by any key. Article 11.8 requires every
+  other key's `REGISTER` to be refused until day 90.
+
+That is exactly the failure Article 44.6 names: two independent implementers, one reading the
+charter and one reading this document, produce non-interoperating rules on a name-loss-bearing
+operation.
+
+**No value is chosen here, deliberately.** Every other duration in the design — difficulty, the
+renewal window, grace, redemption — is expressed relative to the term, so picking one figure
+picks the rest; and choosing between a clause entrenched under Article 9 and the Article that
+Article 11.14 appoints to carry it out is an amendment under Article 58, not an editorial act by
+a subordinate document. An implementer settling it by commit is precisely the capture the
+entrenchment exists to prevent.
+
+`scripts/check-charter-consistency.py` records all three, prints them on every run, and fails if
+any of them changes shape — including if someone closes one by editing a single side. The
+disagreement therefore cannot be resolved except deliberately, and cannot be forgotten.
 
 ## Index Keyspace Layout
 

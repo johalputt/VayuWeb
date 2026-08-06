@@ -9,7 +9,7 @@ import { encode, type CborMap, type CborValue } from './cbor.ts';
 import { signingInput } from './domain.ts';
 import { sign, publicKeyFrom } from './signature.ts';
 import { POW_ALGORITHM, POW_NONCE_LENGTH, solvePow, requiredBits } from './pow.ts';
-import { TERM_SECONDS } from './verify.ts';
+import { TERM_SECONDS, SETTLEMENT_SECONDS } from './verify.ts';
 
 const SECRET = new Uint8Array(32).fill(0x42);
 const OWNER = publicKeyFrom(SECRET);
@@ -18,7 +18,39 @@ const NOW = 1_782_518_400;
 /** 16 characters, so the base difficulty is 4 bits and a test solves in ~16 evaluations. */
 const LABEL = 'atlasobservatory';
 
+const RECIPIENT_SECRET = new Uint8Array(32).fill(0x77);
+const RECIPIENT = publicKeyFrom(RECIPIENT_SECRET);
+
 const scratch = (): string => join(mkdtempSync(join(tmpdir(), 'vayuweb-')), 'log');
+
+/**
+ * Build and sign a successor record. No proof of work: none of the operations that use this
+ * carry one, so nothing here costs an Argon2id search.
+ */
+function successorBytes(
+  over: Record<string, CborValue>,
+  secret: Uint8Array,
+  coSecret?: Uint8Array,
+): Uint8Array {
+  const map = new Map<string | Uint8Array, CborValue>([
+    ['version', 1],
+    ['op', 'UPDATE'],
+    ['name', LABEL],
+    ['tld', 'vayu'],
+    ['ownerKey', OWNER],
+    ['seq', 1],
+    ['notBefore', NOW + 600],
+    ['notAfter', NOW + TERM_SECONDS],
+    ['records', [entry('txt', 'v=vayuweb1')]],
+    ['powProof', null],
+    ['prevHash', new Uint8Array(32)],
+    ...Object.entries(over),
+  ]);
+  const input = signingInput(map);
+  map.set('sig', sign(secret, input));
+  if (coSecret !== undefined) map.set('coSig', sign(coSecret, input));
+  return encode(map);
+}
 
 const entry = (type: string, value: CborValue): CborMap =>
   new Map<string | Uint8Array, CborValue>([
@@ -305,4 +337,80 @@ test('list reports the lifecycle state at the instant asked about', () => {
   assert.equal(store.list(NOW)[0]?.state, 'LIVE');
   assert.equal(store.list(NOW + TERM_SECONDS + 1)[0]?.state, 'GRACE');
   assert.equal(store.list(NOW + TERM_SECONDS + 5_184_000 + 1)[0]?.state, 'FREE');
+});
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT FINDING: the index has to agree with the verifier about who controls  */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: a settled transfer replays, and the index knows who controls it meanwhile', () => {
+  // The store computes the controlling key a second time — once in the verifier to check a
+  // signature, once here to index the accepted record — and a TRANSFER is the only operation
+  // where that answer is not simply `ownerKey`. If the two ever disagree, the log accepts a
+  // record it will refuse to replay, and `Store.open` throws on a file it wrote itself.
+  //
+  // Replay is the sharp end: `Store.open` re-verifies at each record's own `notBefore`, so this
+  // exercises the whole chain — pending transfer, refusal during settlement, acceptance after —
+  // against a verifier that has no memory of having accepted any of it.
+  const path = scratch();
+  const store = Store.open(path, NOW);
+  const reg = registration();
+  assert.equal(store.append(reg, NOW).outcome, 'accept');
+
+  const prev = store.lookup(LABEL, 'vayu')!;
+  const handoverAt = NOW + 600;
+  const handover = successorBytes(
+    {
+      op: 'TRANSFER',
+      ownerKey: RECIPIENT,
+      seq: 1,
+      notBefore: handoverAt,
+      notAfter: prev.current.record.notAfter,
+      records: [],
+      prevHash: prev.current.hash,
+    },
+    SECRET,
+    RECIPIENT_SECRET,
+  );
+  assert.equal(store.append(handover, handoverAt).outcome, 'accept');
+
+  // Indexed as pending: ownerKey names the recipient, signerKey still names the transferor.
+  const pending = store.lookup(LABEL, 'vayu')!;
+  assert.deepEqual(pending.current.record.ownerKey, RECIPIENT);
+  assert.deepEqual(pending.current.signerKey, OWNER);
+
+  // The recipient acting inside the window is refused by the store, not merely by the verifier.
+  const tooEarly = successorBytes(
+    {
+      seq: 2,
+      ownerKey: RECIPIENT,
+      notBefore: handoverAt + 600,
+      notAfter: prev.current.record.notAfter,
+      records: [entry('txt', 'v=early')],
+      prevHash: store.lookup(LABEL, 'vayu')!.current.hash,
+    },
+    RECIPIENT_SECRET,
+  );
+  const early = store.append(tooEarly, handoverAt + 600);
+  assert.equal(early.outcome === 'reject' ? early.code : early.outcome, 'UNSETTLED');
+
+  // And accepted once the fourteen days have run.
+  const settledAt = handoverAt + SETTLEMENT_SECONDS;
+  const afterSettlement = successorBytes(
+    {
+      seq: 2,
+      ownerKey: RECIPIENT,
+      notBefore: settledAt,
+      notAfter: prev.current.record.notAfter,
+      records: [entry('txt', 'v=settled')],
+      prevHash: store.lookup(LABEL, 'vayu')!.current.hash,
+    },
+    RECIPIENT_SECRET,
+  );
+  assert.equal(store.append(afterSettlement, settledAt).outcome, 'accept');
+
+  // The whole log, re-verified from bytes by a store with no history.
+  const reopened = Store.open(path, settledAt);
+  assert.equal(reopened.length, 3);
+  assert.deepEqual(reopened.lookup(LABEL, 'vayu')?.current.record.ownerKey, RECIPIENT);
 });

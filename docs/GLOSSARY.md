@@ -192,8 +192,13 @@ tightened: VayuWeb additionally requires that every objection and its answer be 
 **seq** — The monotonic sequence number per name, giving replay protection and a total order for
 that name's own history.
 
-**Settlement delay** — The waiting period imposed on a transfer (Article 33), which gives a victim
-of key theft or coercion a window to notice and publish.
+**Settlement delay** — The fourteen days (`1,209,600` seconds) between a `TRANSFER` record being
+accepted and taking effect (Article 33.4). Throughout it the outgoing key still controls the
+name and may cancel by transferring it back; the incoming key may do nothing at all, including
+move the name onward. A real protection against a mistaken or coerced transfer, and a partial
+one against theft: Article 33.4 vests the power to revoke in the transferor's Article 34 recovery
+path, and no such path has a wire form yet, so against an attacker who holds the ownership key
+the delay buys time to notice rather than a way to undo.
 
 **Sunset** — A mandatory expiry attached to a transitional mechanism or a retiring extension. TLD
 retirement carries a minimum 24-month sunset with mandatory aliases.

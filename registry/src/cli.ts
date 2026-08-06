@@ -23,7 +23,7 @@ import { parseRecordBytes } from './record.ts';
 import { RATIFIED_TLDS, assertValidName } from './names.ts';
 import { POW_ALGORITHM, POW_NONCE_LENGTH, solvePow, requiredBits } from './pow.ts';
 import { Store } from './store.ts';
-import { TERM_SECONDS } from './verify.ts';
+import { TERM_SECONDS, SETTLEMENT_SECONDS } from './verify.ts';
 import { stateAt } from './lifecycle.ts';
 import { buildVectors, fromHex } from './vectors.ts';
 import { verify, predecessorFrom, type RegistryView } from './verify.ts';
@@ -308,6 +308,11 @@ function finish(
   if (verdict.outcome === 'accept') {
     const r = verdict.record;
     out(`accepted  ${r.op}  ${r.name}.${r.tld}  seq ${r.seq}  ${bytes.length} bytes`);
+    if (r.op === 'TRANSFER') {
+      // Accepted is not the same as done, and this is the one operation where they differ.
+      out(`transfer settles at ${r.notBefore + SETTLEMENT_SECONDS} (14 days); until then the`);
+      out('outgoing key still controls the name and may cancel by transferring it back');
+    }
     out(`log now holds ${store.length} record(s)`);
     return 0;
   }
@@ -333,9 +338,18 @@ function cmdResolve(args: Args): number {
 
   const r = held.current.record;
   const state = held.revoked ? 'REVOKED' : stateAt(r, now);
+  // During Article 33.4's settlement delay `ownerKey` names where the name is GOING; the
+  // controlling key is still the transferor's. Printing ownerKey as "owner" for those fourteen
+  // days would report a handover that has not happened yet.
+  const settlesAt = r.op === 'TRANSFER' ? r.notBefore + SETTLEMENT_SECONDS : null;
+  const settling = settlesAt !== null && now < settlesAt;
   out(`${label}.${tld}`);
-  out(`  state      ${state}`);
-  out(`  owner      ${toHex(r.ownerKey)}`);
+  out(`  state      ${state}${settling ? '  (transfer settling)' : ''}`);
+  out(`  owner      ${toHex(settling ? held.current.signerKey : r.ownerKey)}`);
+  if (settling) {
+    out(`  transfer   to ${toHex(r.ownerKey)}, taking effect at ${settlesAt}`);
+    out('             until then the outgoing key still controls the name and may cancel');
+  }
   out(`  seq        ${r.seq}`);
   out(`  term       ${r.notBefore} .. ${r.notAfter}`);
   out(`  log index  ${held.logIndex}`);
@@ -407,7 +421,12 @@ function cmdVectors(): number {
         ? null
         : (() => {
             const bytes = fromHex(vector.state.predecessor);
-            return predecessorFrom(parseRecordBytes(bytes), bytes);
+            const transferor = vector.state.transferorKey;
+            return predecessorFrom(
+              parseRecordBytes(bytes),
+              bytes,
+              transferor === undefined ? undefined : fromHex(transferor),
+            );
           })();
     const view: RegistryView = {
       current: () => predecessor,

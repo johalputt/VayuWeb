@@ -41,6 +41,31 @@ export const MAX_CLOCK_SKEW_SECONDS = 300;
 /** A record whose term begins more than a day in the past is refused outright. */
 export const MAX_BACKDATE_SECONDS = 86_400;
 
+/**
+ * A TRANSFER takes effect fourteen days after its own `notBefore`, not on acceptance.
+ *
+ * Constitution Article 33.4: "A TRANSFER record SHALL take effect only after a mandatory
+ * settlement delay of fourteen days, during which any recovery path configured by the transferor
+ * under Article 34 MAY revoke it by signed record." Article 33.5 requires the trade-off to be
+ * stated wherever the delay is documented, so: fourteen days makes an unwanted transfer
+ * recoverable by someone who notices within a fortnight and makes bulk flipping slow; it also
+ * means no transfer is instant, that a legitimate urgent transfer is delayed with it, and that a
+ * person who notices on day fifteen has no remedy at all.
+ *
+ * What it does NOT deliver, since 33.5's own justification says "theft-by-transfer": 33.4 vests
+ * the power to revoke in the transferor's Article 34 recovery path, and no such path has a wire
+ * form here — DELEGATE and pre-declared succession material are absent from the operation set.
+ * The only key that can cancel is the transferor's, which against a thief holding that key is
+ * the thief's too. Against key compromise this buys time to notice, not a way to undo.
+ *
+ * The delay is measured from the record's own `notBefore` rather than from the verifier's clock.
+ * Article 29.6 requires a record to be verifiable offline from the record and the chain alone,
+ * and a clock-driven test fails that: a cancellation signed on day three would verify on the
+ * peer that received it and fail on a peer replaying the log a month later, leaving two honest
+ * peers holding different owners for one name.
+ */
+export const SETTLEMENT_SECONDS = 1_209_600;
+
 export type VerifyRejection =
   | RecordRejection
   | 'NAME_TAKEN'
@@ -51,6 +76,7 @@ export type VerifyRejection =
   | 'TOO_SOON'
   | 'REVOKED'
   | 'BAD_OWNER'
+  | 'UNSETTLED'
   | 'EXPIRED';
 
 /**
@@ -112,6 +138,29 @@ export interface Predecessor {
   readonly record: RegistryRecord;
   /** `record_hash` over the bytes as they were accepted, not a re-encoding of a parsed copy. */
   readonly hash: Uint8Array;
+  /**
+   * The key this record was signed by — the authority it was accepted under.
+   *
+   * Equal to `record.ownerKey` for every operation except TRANSFER, where it is the
+   * *transferor's* key. That distinction is the whole of the settlement delay: `ownerKey` names
+   * where the name is going, `signerKey` names who still controls it until it gets there, and
+   * nothing else in the record carries the second fact.
+   */
+  readonly signerKey: Uint8Array;
+}
+
+/**
+ * The key a successor record must be signed by, given its predecessor and its own `notBefore`.
+ *
+ * Exported because the store needs the same answer when it indexes an accepted record, and two
+ * implementations of one rule is how the index and the verifier come to disagree.
+ */
+export function controllingKey(previous: Predecessor, at: number): Uint8Array {
+  const prev = previous.record;
+  if (prev.op === 'TRANSFER' && at < prev.notBefore + SETTLEMENT_SECONDS) {
+    return previous.signerKey;
+  }
+  return prev.ownerKey;
 }
 
 /**
@@ -267,10 +316,25 @@ export function verify(
   if (!acceptsSuccessor(prev, now, record.op)) {
     return reject('EXPIRED', `${record.name}.${record.tld} is not live enough for ${record.op}`);
   }
-  // Authority comes from the PREDECESSOR's key. On a TRANSFER the incoming key signs the
-  // countersignature, never the record itself.
-  if (!verifyStrict(prev.ownerKey, input, record.sig)) {
-    return reject('BAD_SIG', 'signature does not verify under the predecessor ownerKey');
+  // While a TRANSFER is settling, the name is in flux: the transferor still controls it and the
+  // recipient does not yet. Only a further TRANSFER is accepted in that window — the transferor
+  // cancelling by naming their own key again, or redirecting to a third. Everything else is
+  // refused, and not merely for tidiness: the chain rules force a non-TRANSFER successor to
+  // carry `ownerKey == prev.ownerKey`, which for a pending transfer is the RECIPIENT's key. One
+  // accepted UPDATE would therefore leave a predecessor whose op is no longer TRANSFER and whose
+  // ownerKey is the recipient's, completing the handover early and silently.
+  const settlesAt = prev.op === 'TRANSFER' ? prev.notBefore + SETTLEMENT_SECONDS : null;
+  if (settlesAt !== null && record.notBefore < settlesAt && record.op !== 'TRANSFER') {
+    return reject(
+      'UNSETTLED',
+      `a transfer of ${record.name}.${record.tld} settles at ${settlesAt}; only TRANSFER is accepted until then`,
+    );
+  }
+  // Authority comes from the PREDECESSOR's key — except during settlement, when it is still the
+  // transferor's. On a TRANSFER the incoming key signs the countersignature, never the record.
+  const authority = controllingKey(previous, record.notBefore);
+  if (!verifyStrict(authority, input, record.sig)) {
+    return reject('BAD_SIG', 'signature does not verify under the controlling key');
   }
   if (record.op !== 'TRANSFER' && !bytesEqual(record.ownerKey, prev.ownerKey)) {
     return reject('BAD_OWNER', `${record.op} must not change ownerKey`);
@@ -322,6 +386,17 @@ function verifyOperation(
       if (record.notAfter !== prev.notAfter) {
         return reject('BAD_TERM', 'TRANSFER must not change notAfter');
       }
+      // A transfer must be able to settle inside the term it transfers. Signed with ten days
+      // left, it settles four days after the name has expired: the recipient receives a name
+      // they never controlled and could not renew, because RENEW is refused during settlement
+      // like everything else. The name is frozen for the whole of that window — the transferor
+      // no longer wants it, the recipient may not act on it yet — and then lapses.
+      if (record.notAfter - record.notBefore < SETTLEMENT_SECONDS) {
+        return reject(
+          'UNSETTLED',
+          `a transfer needs ${SETTLEMENT_SECONDS}s of term left to settle in; ${record.notAfter - record.notBefore}s remain`,
+        );
+      }
       // The countersignature is what makes transfer-to-a-key-nobody-holds impossible. Without
       // it the outgoing owner could send a name into a black hole indistinguishable from a burn.
       if (record.coSig === null || !verifyStrict(record.ownerKey, input, record.coSig)) {
@@ -369,6 +444,21 @@ function verifyOperation(
  * The hash is taken over those bytes rather than over a re-encoding of the parsed record, so a
  * caller cannot accidentally chain onto a hash of something it merely believes is equivalent.
  */
-export function predecessorFrom(record: RegistryRecord, bytes: Uint8Array): Predecessor {
-  return { record, hash: recordHashFromBytes(bytes) };
+export function predecessorFrom(
+  record: RegistryRecord,
+  bytes: Uint8Array,
+  signerKey?: Uint8Array,
+): Predecessor {
+  // Deliberately a throw rather than a default. For five of the six operations the signer IS the
+  // ownerKey, so a default is right there; on a TRANSFER the ownerKey is the RECIPIENT, so
+  // defaulting would hand the name over the instant the record was indexed — the exact defect
+  // the settlement delay exists to remove, reintroduced silently by whichever caller forgot the
+  // argument rather than by any change to the rule.
+  if (record.op === 'TRANSFER' && signerKey === undefined) {
+    throw new Error(
+      'predecessorFrom: a TRANSFER needs its transferor key. ownerKey names the recipient, and ' +
+        'until the record settles the transferor is still the controlling key.',
+    );
+  }
+  return { record, hash: recordHashFromBytes(bytes), signerKey: signerKey ?? record.ownerKey };
 }

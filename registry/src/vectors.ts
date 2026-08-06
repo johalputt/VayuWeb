@@ -32,7 +32,7 @@ import { LIMITS, PROTOCOL_VERSION, encodeMessage } from './replicate.ts';
 import { signingInput, recordHashFromBytes } from './domain.ts';
 import { sign, publicKeyFrom } from './signature.ts';
 import { POW_ALGORITHM, POW_NONCE_LENGTH } from './pow.ts';
-import { TERM_SECONDS, RENEWAL_WINDOW_SECONDS } from './verify.ts';
+import { TERM_SECONDS, RENEWAL_WINDOW_SECONDS, SETTLEMENT_SECONDS } from './verify.ts';
 import { GRACE_SECONDS } from './lifecycle.ts';
 import { RESERVED_LABELS } from './names.ts';
 
@@ -51,6 +51,15 @@ export const VECTOR_NOW = 1_782_518_400;
 export interface VectorState {
   /** Hex of the predecessor record's bytes, or null when the name has no history. */
   readonly predecessor: string | null;
+  /**
+   * Hex of the key that signed the predecessor. Present only when that record is a TRANSFER.
+   *
+   * A TRANSFER's `ownerKey` names the recipient, and Article 33.4 leaves the transferor in
+   * control until the record settles — so "who may sign next" is not recoverable from the
+   * predecessor's bytes alone. Without this field a vector whose predecessor is a pending
+   * transfer would not be self-contained, and a second implementation could not reproduce it.
+   */
+  readonly transferorKey?: string;
   readonly revoked: boolean;
   readonly fullyReleased: boolean;
   /** What the injected proof-of-work verifier returns. See the note above. */
@@ -161,6 +170,57 @@ const FRESH: VectorState = {
 };
 
 const HELD: VectorState = { ...FRESH, predecessor: toHex(PREV_BYTES) };
+
+/**
+ * A TRANSFER of `atlas.vayu` to the other key, accepted but not yet settled.
+ *
+ * `SETTLING` is the state a peer holds for the fourteen days of Article 33.4's settlement delay:
+ * `ownerKey` names the recipient, `transferorKey` names who still controls the name.
+ */
+const HANDOVER_BYTES = successor(
+  {
+    op: 'TRANSFER',
+    ownerKey: VECTOR_OTHER_KEY,
+    notAfter: VECTOR_NOW + TERM_SECONDS,
+    records: [],
+  },
+  VECTOR_OWNER_SECRET,
+  VECTOR_OTHER_SECRET,
+);
+const HANDOVER_HASH = recordHashFromBytes(HANDOVER_BYTES);
+const HANDOVER_AT = VECTOR_NOW + 600;
+const SETTLED_AT = HANDOVER_AT + SETTLEMENT_SECONDS;
+
+const SETTLING: VectorState = {
+  ...FRESH,
+  predecessor: toHex(HANDOVER_BYTES),
+  transferorKey: toHex(VECTOR_OWNER_KEY),
+};
+
+/** A record chaining onto the pending transfer. */
+const afterHandover = (
+  over: Record<string, CborValue>,
+  secret: Uint8Array,
+  coSecret?: Uint8Array,
+): Uint8Array =>
+  build(
+    {
+      version: 1,
+      op: 'UPDATE',
+      name: 'atlas',
+      tld: 'vayu',
+      ownerKey: VECTOR_OTHER_KEY,
+      seq: 2,
+      notBefore: HANDOVER_AT + 600,
+      notAfter: VECTOR_NOW + TERM_SECONDS,
+      records: [entry('txt', 'v=vayuweb1')],
+      powProof: null,
+      prevHash: HANDOVER_HASH,
+      ...over,
+    },
+    secret,
+    coSecret,
+  );
 
 const accept = { outcome: 'accept' } as const;
 const rejectWith = (code: string) => ({ outcome: 'reject', code }) as const;
@@ -557,6 +617,94 @@ export function buildVectors(): Vector[] {
       state: HELD,
       expect: accept,
     },
+
+    /* -- settlement (Article 33.4) ------------------------------------------ */
+    //
+    // A TRANSFER is accepted at once and takes effect fourteen days later. Without these
+    // vectors an implementation that hands the name over on acceptance passes the whole suite,
+    // which is exactly how this one shipped: `authority/valid-transfer` above measures that the
+    // record is accepted and says nothing about when it takes effect.
+    {
+      name: 'settlement/recipient-cannot-act-before-settlement',
+      rule: 'Art 33.4: a TRANSFER takes effect only after fourteen days',
+      record: toHex(afterHandover({}, VECTOR_OTHER_SECRET)),
+      now: HANDOVER_AT + 600,
+      state: SETTLING,
+      expect: rejectWith('UNSETTLED'),
+    },
+    {
+      name: 'settlement/transferor-may-cancel',
+      rule: 'Art 33.4: the transfer MAY be revoked by signed record inside the delay',
+      record: toHex(
+        afterHandover(
+          { op: 'TRANSFER', ownerKey: VECTOR_OWNER_KEY, records: [] },
+          VECTOR_OWNER_SECRET,
+          VECTOR_OWNER_SECRET,
+        ),
+      ),
+      now: HANDOVER_AT + 600,
+      state: SETTLING,
+      expect: accept,
+    },
+    {
+      name: 'settlement/recipient-cannot-redirect',
+      rule: 'Art 33.4: authority stays with the transferor until settlement',
+      record: toHex(
+        afterHandover(
+          { op: 'TRANSFER', ownerKey: VECTOR_OWNER_KEY, records: [] },
+          VECTOR_OTHER_SECRET,
+          VECTOR_OWNER_SECRET,
+        ),
+      ),
+      now: HANDOVER_AT + 600,
+      state: SETTLING,
+      expect: rejectWith('BAD_SIG'),
+    },
+    {
+      name: 'settlement/one-second-early',
+      rule: 'Art 33.4: the delay is 1209600 seconds from the TRANSFER notBefore',
+      record: toHex(afterHandover({ notBefore: SETTLED_AT - 1 }, VECTOR_OTHER_SECRET)),
+      now: SETTLED_AT - 1,
+      state: SETTLING,
+      expect: rejectWith('UNSETTLED'),
+    },
+    {
+      name: 'settlement/at-the-instant',
+      rule: 'Art 33.4: authority moves to the recipient at the settlement instant',
+      record: toHex(afterHandover({ notBefore: SETTLED_AT }, VECTOR_OTHER_SECRET)),
+      now: SETTLED_AT,
+      state: SETTLING,
+      expect: accept,
+    },
+    {
+      name: 'settlement/transferor-loses-control-at-the-instant',
+      rule: 'Art 33.4: the delay ends for both parties at the same instant',
+      record: toHex(afterHandover({ notBefore: SETTLED_AT }, VECTOR_OWNER_SECRET)),
+      now: SETTLED_AT,
+      state: SETTLING,
+      expect: rejectWith('BAD_SIG'),
+    },
+    {
+      name: 'settlement/term-too-short-to-settle',
+      rule: 'Art 33.4: a transfer that cannot settle inside its term is refused',
+      record: toHex(
+        successor(
+          {
+            op: 'TRANSFER',
+            ownerKey: VECTOR_OTHER_KEY,
+            notBefore: VECTOR_NOW + TERM_SECONDS - 10 * 86_400,
+            notAfter: VECTOR_NOW + TERM_SECONDS,
+            records: [],
+          },
+          VECTOR_OWNER_SECRET,
+          VECTOR_OTHER_SECRET,
+        ),
+      ),
+      now: VECTOR_NOW + TERM_SECONDS - 10 * 86_400,
+      state: HELD,
+      expect: rejectWith('UNSETTLED'),
+    },
+
     {
       name: 'authority/revoked-name-accepts-nothing',
       rule: 'REGISTRY.md REVOKE: no later record for the name is ever accepted',

@@ -41,6 +41,17 @@ enforce the grammar its own design rests on. Every one was invisible to reading 
 implementing, which is the argument for treating the vector set as part of the specification
 rather than as test scaffolding.
 
+The adversarial review has since found a second class, which reading alone *does* catch — but
+only for a reader holding two documents open at once: the specifications contradicting the
+charter, and the charter contradicting itself. `TRANSFER` moved ownership on acceptance where
+Article 33.4 mandates a fourteen-day settlement delay, and `NAMES.md` and `REGISTRY.md`
+specified two different transfer state machines, one of them using record types outside Article
+29.4's closed set. Both are fixed. Three quantities are not, and cannot be by an implementer: the
+registration term, the renewal window and the post-expiry interval each have three disagreeing
+sources, two of which are Articles of the Constitution.
+`scripts/check-charter-consistency.py` prints them on every run and refuses a one-sided edit,
+because settling them is an amendment rather than a commit.
+
 ## Phase 1 — Registry core
 
 **Goal:** the signed, append-only name registry, working on one machine.

@@ -48,12 +48,17 @@ maintainer** has the widest blast radius of anything in this table.
 
 **T1 — Owner key theft.**
 *Vector:* endpoint compromise, malware, a backup copied from a synced folder, coercion.
-*Impact:* total and immediate loss of the name; the attacker can sign a transfer.
+*Impact:* loss of the name; the attacker can sign a transfer, though Article 33.4 stops it
+taking effect for fourteen days.
 *Mitigation:* the secret key lives in the OS keychain and never in a config file or the
 replicated log (see [ARCHITECTURE.md](ARCHITECTURE.md)); key rotation and revocation under
 Constitution Article 34; the transfer settlement delay of Article 33 gives a window to notice.
-*Residual risk:* **High.** A compromised endpoint is game over, and settlement delay only helps a
-victim who is watching. VayuWeb does not defend a machine the attacker already owns.
+*Residual risk:* **High.** A compromised endpoint is game over, and against this attacker the
+settlement delay is weaker than it sounds: 33.4 vests the power to revoke a pending transfer in
+the transferor's Article 34 recovery path, which has no wire form yet, so the only key that can
+cancel is the one the attacker also holds. A victim who notices in time is in a signing race
+with the thief, not in possession of a remedy. VayuWeb does not defend a machine the attacker
+already owns.
 
 **T2 — Key loss.**
 *Vector:* dead disk, forgotten passphrase, death of the holder.

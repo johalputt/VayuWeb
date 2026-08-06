@@ -10,6 +10,123 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a transfer took effect the instant it was signed, and the charter forbids that
+
+- **Article 33.4 mandates a fourteen-day settlement delay. Nothing implemented one.** "A TRANSFER
+  record SHALL take effect only after a mandatory settlement delay of fourteen days, during which
+  any recovery path configured by the transferor under Article 34 MAY revoke it by signed
+  record." `REGISTRY.md` said "Effect: ownership moves and the term is unchanged" and the code
+  agreed: the moment the record was accepted, the incoming key was the ownership key. A lower
+  instrument contradicting the charter on a wire-visible rule is void under Article 3.7, and
+  three other documents — `THREAT-MODEL.md`, `GLOSSARY.md`, `FAQ.md` — already presented the
+  delay to readers as an existing protection, which made it a false claim as well as a gap.
+
+  A TRANSFER is now accepted at once and takes effect `1,209,600` seconds after its own
+  `notBefore`. Throughout that window the transferor still controls the name and the recipient
+  can do nothing with it.
+
+- **Only a further TRANSFER is accepted while one is settling**, and this is the part that is
+  not tidiness. The chain rules force a non-TRANSFER successor to carry
+  `ownerKey == prev.ownerKey`, which for a pending transfer is the *recipient's* key. One
+  accepted `UPDATE` would leave a predecessor whose `op` is no longer TRANSFER and whose
+  `ownerKey` is the recipient's — completing the handover early, silently, by an operation with
+  nothing to do with ownership. Found by attacking the first version of the fix.
+
+- **Cancellation needed no new record type.** Article 29.4's set is closed and contains no
+  "cancel". The transferor signs a TRANSFER naming their own key and countersigns it themselves;
+  it satisfies the differing-key rule because the key it names differs from the pending
+  recipient's.
+
+- **The delay is measured from the record, never from the verifier's clock.** Article 29.6
+  requires a record to be verifiable offline from the record and the chain alone. Under a
+  clock-driven test one record gets different verdicts on two peers whose clocks differ, and the
+  same record flips verdict as a clock crosses the settlement instant — a log accepted on Tuesday
+  fails to replay on Wednesday.
+
+- **A transfer must fit inside the term it transfers.** Signed with ten days left it settles four
+  days after the name has expired, and the name is frozen for the whole window because `RENEW` is
+  refused during settlement like everything else.
+
+  Seven vectors, `settlement/*`, pin all of it, including both sides of the boundary instant.
+  Without them an implementation that hands the name over on acceptance passes the whole suite —
+  `authority/valid-transfer` measures that the record is accepted and says nothing about when it
+  takes effect, which is exactly how this shipped.
+
+  **Two of the first eight mutations survived, and both times the test was wrong rather than the
+  fix.** Making settlement clock-driven passed, because the test compared the same bytes at two
+  distant instants and `BACKDATED` is checked long before authority is — it never reached the
+  code it was aiming at. Deleting the guard on `predecessorFrom` passed, because nothing asserted
+  the guard existed. Rewritten: the clock test now places the settlement instant inside the
+  narrow gap the clock rules allow between `now` and `notBefore`, in both directions. Re-mutated,
+  both fail. A ninth mutation covers the store's own copy of the rule — the index computes the
+  controlling key a second time, and a disagreement there means a log that will not replay.
+
+### Fixed — two normative documents specified two different transfers
+
+- **`NAMES.md` specified a two-record `offer`/`accept` handover; `REGISTRY.md` specified one
+  `TRANSFER` with a countersignature.** Both documents declare themselves normative, and
+  `NAMES.md` says in terms "Transfer is a two-signature handover. It is never a single
+  operation." They are not two encodings of one flow — they are different state machines.
+  `NAMES.md` assigned the `seq` increment to `accept`, added a 14-day offer expiry and an
+  offer-hash back-reference, and required a record naming a recipient key, while `REGISTRY.md`'s
+  schema has no field for either and its chain rules force `ownerKey == prev.ownerKey` for every
+  operation but TRANSFER. A second implementer building from `NAMES.md` would emit `offer` and
+  get `UNKNOWN_OP` — the reference code already pins that even a case variant is refused.
+
+  **The charter decides it, and against `NAMES.md` on three separate grounds.** Article 29.4's
+  record set is closed and names none of `offer`, `accept` or `revoke`. Article 33.2 forbids the
+  protocol to provide an "offer channel" by name and adds "No such faculty is within the closed
+  record set of Article 29.4". Article 34.1 gives transfer effect by signature from the incumbent
+  ownership key. `NAMES.md` §Transfer is rewritten to the single-record form.
+
+- **The `revoke` collision was the sharp end.** `NAMES.md` already used lowercase names for
+  registry operations elsewhere — "appending a signed release" for `RELEASE` — so a reader had
+  direct precedent for mapping its `revoke` onto `REVOKE`, which freezes a name for the rest of
+  its term plus quarantine, with no recovery key and no appeal. Someone trying to call a transfer
+  off could have destroyed the name instead.
+
+### Escalated — the renewal window and the post-expiry interval, tracked rather than decided
+
+- **The term was already recorded as unresolved; the two durations that hang off it were only
+  described.** The earlier escalation named the grace disagreement in prose and stopped there, so
+  `check-charter-consistency.py` was guarding one of three quantities while the other two could
+  still be closed by a one-line edit. Prose in a changelog is not a guard. Both are now tracked
+  the same way the term is.
+
+  **Renewal window.** Article 11.6 imposes none — a `RENEW` is valid "at any moment while the
+  name is held". Article 32.3 opens it twelve months before expiry. `REGISTRY.md` opens it sixty
+  days before, and the code enforces that. A factor of twenty-four between the outer two, and the
+  disagreement bites in both directions: an implementation following the charter accepts a record
+  the specification refuses, and one following the specification refuses a record Article 11.6
+  expressly permits.
+
+  **Post-expiry interval reserved to the incumbent.** Article 11.8 reserves ninety days and
+  requires every other key's `REGISTER` to be refused throughout. Article 32.3 makes it one
+  hundred and eighty. `REGISTRY.md` gives thirty days of grace and then thirty of quarantine — so
+  the incumbent loses the name on day 31 and a stranger may take it on day 61, both inside the
+  interval Article 11.8 reserves to the holder alone. The worked case is a day-45 `RENEW`: valid
+  under the charter, rejected `EXPIRED` by the specification.
+
+  **Not fixed, deliberately, and for a sharper reason than last time.** Article 11.14 names
+  Article 32 as **Article 11's own machinery**, so this is not a subordinate document overriding
+  a superior one — it is an entrenched Article and its implementing Article stating different
+  numbers, which Article 3.7 cannot rank because both sit inside the Constitution. Any fix
+  reconciles three regimes, not two, and the thirty-day figure is `GRACE_SECONDS` in the code and
+  is restated across five more documents, so aligning it is a coordinated change downstream of an
+  amendment rather than instead of one.
+
+  The check gains a way to read a duration stated as a *condition* rather than a number — Article
+  11.6's window is the whole of tenure — with the phrase spelled out in a table so that editing
+  the clause breaks the match instead of silently changing the value. Mutation-tested five ways:
+  aligning the specification's grace up to Article 11.8, aligning Article 32.3's grace down to it,
+  aligning the specification's window out to Article 32.3, narrowing Article 32.3's window to the
+  specification, and deleting Article 11.6's any-moment clause. All five refused; an unmutated
+  corpus passes.
+
+  `REGISTRY.md` now carries the three-way table where an implementer reads the lifecycle rules,
+  rather than leaving the contradiction discoverable only by reading two Articles side by side —
+  which is how it survived this long.
+
 ### Fixed — two documents specified a query log the charter forbids outright
 
 - **`RESOLUTION.md` and `ARCHITECTURE.md` both described an opt-in query log.** RESOLUTION.md:

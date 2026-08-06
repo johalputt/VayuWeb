@@ -31,7 +31,12 @@ function run(vector: Vector): Verdict {
       ? null
       : (() => {
           const bytes = fromHex(vector.state.predecessor);
-          return predecessorFrom(parseRecordBytes(bytes), bytes);
+          const transferor = vector.state.transferorKey;
+          return predecessorFrom(
+            parseRecordBytes(bytes),
+            bytes,
+            transferor === undefined ? undefined : fromHex(transferor),
+          );
         })();
 
   const view: RegistryView = {

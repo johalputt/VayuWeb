@@ -31,6 +31,16 @@ REGISTRY = "docs/spec/REGISTRY.md"
 
 DAY = 86_400
 YEAR = 31_536_000
+MONTH = YEAR // 12  # the charter says "twelve months" where it means a year; 12 * MONTH == YEAR
+
+# Article 11.6 states its renewal window as a *condition* rather than a duration — a RENEW may be
+# signed "at any moment while the name is held" — so the window is the whole of tenure. Reading it
+# as a number is the only way to compare it with the two clauses that do state numbers, and the
+# phrase is spelled out here rather than inferred so that a change to the clause breaks the match
+# instead of silently changing the value.
+PHRASE_SECONDS = {
+    "at any moment while the name is held": 126_230_400,
+}
 
 # A quantity, and every place that states it. Each source yields a value in SECONDS.
 #
@@ -58,6 +68,61 @@ QUANTITIES = [
             "specification states a third value. Resolving this is a constitutional amendment "
             "under Article 9, not an editorial fix: every other duration in the design — "
             "difficulty, renewal window, grace, redemption — is expressed relative to the term."
+        ),
+    },
+    {
+        "name": "renewal window",
+        "sources": [
+            (CHARTER, r"(?s)11\.6 Tenure runs.*?A RENEW MAY be signed\s+"
+                      r"(at\s+any\s+moment\s+while\s+the\s+name\s+is\s+held)",
+             "phrase", "Article 11.6"),
+            (CHARTER, r"32\.3 The renewal window SHALL open (\w+) months before expiry",
+             "months", "Article 32.3"),
+            (REGISTRY, r"notBefore >= prev\.notAfter - (\d+)`", "seconds", "REGISTRY.md"),
+        ],
+        "known_conflict": {
+            "Article 11.6": 126_230_400,
+            "Article 32.3": 12 * MONTH,
+            "REGISTRY.md": 5_184_000,
+        },
+        "note": (
+            "How early a holder may renew is the difference between a name kept and a name lost, "
+            "and the three instruments differ by a factor of twenty-four. Article 11.6 imposes no "
+            "window at all — a RENEW is valid at any moment while the name is held — while "
+            "Article 32.3, which Article 11.14 names as Article 11's own machinery, opens the "
+            "window twelve months before expiry, and the specification opens it sixty days "
+            "before. The disagreement is not academic in either direction: an implementation "
+            "following the charter accepts a record the specification refuses, and one following "
+            "the specification refuses a record Article 11.6 expressly permits. Article 44.6 "
+            "names precisely this — two implementers producing non-interoperating rules on a "
+            "wire-visible, name-loss-bearing operation."
+        ),
+    },
+    {
+        "name": "post-expiry interval reserved to the incumbent",
+        "sources": [
+            (CHARTER, r"11\.8 Redemption\. For ([\d,]+) seconds", "seconds", "Article 11.8"),
+            (CHARTER, r"a grace period of ([a-z ]+) days thereafter", "days", "Article 32.3"),
+            (REGISTRY, r"if now >= prev\.notAfter \+ (\d+):\s+reject EXPIRED",
+             "seconds", "REGISTRY.md"),
+        ],
+        "known_conflict": {
+            "Article 11.8": 7_776_000,
+            "Article 32.3": 180 * DAY,
+            "REGISTRY.md": 2_592_000,
+        },
+        "note": (
+            "Article 11.8 reserves the ninety days after tenure ends to the incumbent key alone "
+            "and requires every other key's REGISTER to be refused throughout. Article 32.3 makes "
+            "the same interval one hundred and eighty days. The specification makes it thirty, "
+            "after which a further thirty days of quarantine pass before the name is claimable — "
+            "so under REGISTRY.md the incumbent loses the name on day 31 and a stranger may take "
+            "it on day 61, both inside the interval Article 11.8 reserves. A day-45 RENEW is the "
+            "worked case: valid under the charter, rejected EXPIRED by the specification. The "
+            "thirty-day figure is not a stray line — it is `GRACE_SECONDS` in "
+            "registry/src/lifecycle.ts and is restated in NAMES.md, FAQ.md, GLOSSARY.md, "
+            "PROOF-OF-WORK.md and CRYPTO-AGILITY.md — so aligning it is a coordinated change to "
+            "the code and the corpus, downstream of an amendment rather than instead of one."
         ),
     },
 ]
@@ -93,7 +158,10 @@ TERMS = [
 WORD_NUMBERS = {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "twelve": 12, "ninety": 90, "one hundred and eighty": 180,
 }
+
+UNIT_SECONDS = {"seconds": 1, "days": DAY, "months": MONTH, "years": YEAR}
 
 
 def read(rel):
@@ -105,11 +173,18 @@ def read(rel):
 
 
 def to_seconds(raw, unit):
-    raw = raw.replace(",", "")
-    value = WORD_NUMBERS.get(raw.lower()) if not raw.isdigit() else int(raw)
+    raw = raw.replace(",", "").strip()
+    if unit == "phrase":
+        # A clause that states a duration as a condition rather than a number. The phrase must be
+        # one this check knows; an unrecognised one is a failure, never a guess.
+        return PHRASE_SECONDS.get(" ".join(raw.split()).lower())
+    multiplier = UNIT_SECONDS.get(unit)
+    if multiplier is None:
+        return None
+    value = int(raw) if raw.isdigit() else WORD_NUMBERS.get(raw.lower())
     if value is None:
         return None
-    return value * YEAR if unit == "years" else value
+    return value * multiplier
 
 
 def check_terms(failures):

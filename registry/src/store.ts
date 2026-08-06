@@ -50,6 +50,7 @@ import {
   verify,
   MAX_BACKDATE_SECONDS,
   predecessorFrom,
+  controllingKey,
   type Predecessor,
   type RegistryView,
   type Verdict,
@@ -442,8 +443,16 @@ export class Store implements RegistryView {
     const key = nameKey(record.name, record.tld);
     const held = this.names.get(key);
     const wasRevoked = held?.revoked ?? false;
+    // Who signed this record, which for a TRANSFER is not the key it names. The verifier has
+    // just answered the same question to check the signature; asking it the same way here rather
+    // than reimplementing it is what keeps the index and the verifier from drifting apart on the
+    // one operation where `ownerKey` and "who controls the name" are different keys.
+    const signerKey =
+      record.op === 'TRANSFER' && held !== undefined
+        ? controllingKey(held.current, record.notBefore)
+        : record.ownerKey;
     this.names.set(key, {
-      current: predecessorFrom(record, bytes),
+      current: predecessorFrom(record, bytes, signerKey),
       logIndex: index,
       // Revocation is sticky. A REGISTER accepted after quarantine clears it, because that is a
       // new registration of a name back in the open pool rather than a continuation.

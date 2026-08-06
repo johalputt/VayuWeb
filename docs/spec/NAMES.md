@@ -125,7 +125,7 @@ State definitions:
 - FREE — no unexpired record exists for the name. Any key MAY register it by
   appending a signed registration carrying a valid proof-of-work.
 - REGISTERED — a valid record exists and `now < notAfter - 60 days`. Records MAY
-  be updated and the name MAY be offered for transfer. Renewal is refused, since
+  be updated and the name MAY be transferred. Renewal is refused, since
   early renewal would let a well-funded holder buy a decade of term at today's
   difficulty.
 - RENEWABLE — `notAfter - 60 days <= now < notAfter`. Renewal is accepted from
@@ -155,32 +155,62 @@ it rather than eliminating it.
 
 ## Transfer
 
-Transfer is a two-signature handover. It is never a single operation.
+Transfer is a two-signature handover carried in **one** `TRANSFER` record. The
+outgoing owner signs it; the incoming owner countersigns the identical signing
+input in `coSig`. Both signatures are required, and neither is a separate
+operation. The wire rules are in [REGISTRY.md](./REGISTRY.md); this section
+states what a holder needs to know.
 
-1. The current owner appends an `offer` operation naming the recipient's Ed25519
-   public key. The offer carries its own expiry: exactly 14 days from the
-   offer's `notBefore`.
-2. The recipient appends an `accept` operation, signed by the offered key,
-   referencing the offer by its hash. On acceptance, `ownerKey` becomes the
-   recipient's key, `seq` increments, and `notAfter` is unchanged. A transfer
-   is not a renewal and requires no proof-of-work; the anti-squatting cost is
-   attached to acquiring term, not to moving an existing term between keys.
+1. The outgoing owner builds a `TRANSFER` naming the recipient's Ed25519 public
+   key as `ownerKey`, with `notAfter` unchanged, and signs it.
+2. The recipient countersigns the same bytes. Without that countersignature the
+   record is refused, so a name cannot be pushed onto a key nobody holds — which
+   would be indistinguishable from destroying it.
+3. **The transfer takes effect fourteen days after its `notBefore`, not on
+   acceptance.** Constitution Article 33.4 makes that settlement delay mandatory.
 
-If the recipient never countersigns, the offer expires 14 days after it was
-made and the name is unaffected — same owner, same records, same expiry. Nothing
-is lost and nothing is stranded. Fourteen days is long enough for a recipient
-whose key lives on a hardware token in another country, and short enough that a
-forgotten offer is not a standing liability against the name.
+A transfer is not a renewal and requires no proof-of-work: the anti-squatting
+cost is attached to acquiring term, not to moving an existing term between keys.
+
+### The settlement window
+
+Throughout the fourteen days, the **outgoing** key still controls the name.
+
+- Only a further `TRANSFER` is accepted for that name in the window. An
+  `UPDATE`, `RENEW`, `RELEASE` or `REVOKE` is refused `UNSETTLED`.
+- The outgoing owner cancels by appending a `TRANSFER` back to their own key,
+  signed and countersigned by themselves. No separate cancel operation exists,
+  because Article 29.4's record set is closed and contains none.
+- The recipient can do nothing with the name until the window ends — including
+  transferring it onward, which is the move that would otherwise put a stolen
+  name two keys away before anyone reacted.
+- A `TRANSFER` needs at least fourteen days of term left to settle in, or it is
+  refused. Otherwise the name would freeze for the rest of its term and lapse.
+
+**The trade-off, stated as Article 33.5 requires.** Fourteen days makes
+theft-by-transfer recoverable by someone who notices within a fortnight, and
+makes bulk flipping slow. It also means no transfer is instant, that a
+legitimate urgent transfer is delayed with it, and that a party who notices on
+day fifteen has no remedy at all. And the limit worth being plain about: the
+only key that can cancel is the outgoing owner's, which against a thief holding
+that key is the thief's key too. The delay buys such a holder time to notice; it
+is not yet recovery, because Article 34's pre-declared recovery material has no
+wire form here.
 
 Further rules:
 
-- At most one offer MAY be open for a name at a time. A second offer from the
-  owner supersedes and voids the first.
-- The owner MAY append a `revoke` operation at any time before acceptance.
-- An `accept` MUST be rejected if the name is in GRACE. A recipient should not
+- An earlier revision of this document specified a two-record `offer`/`accept`
+  flow with a 14-day offer expiry and a `revoke` cancel. It was withdrawn:
+  Article 29.4's record set is closed and names none of those three, Article
+  33.2 forbids the protocol to provide an "offer channel" by name, and the
+  lowercase `revoke` collided with `REVOKE` — an operation that freezes a name
+  for the rest of its term with no appeal, which a reader following the
+  precedent this document set elsewhere (`release` for `RELEASE`) could
+  reasonably have reached for while trying to call a transfer off.
+- A `TRANSFER` MUST be rejected if the name is in GRACE. A recipient should not
   inherit a name with days left on it; the owner renews first, then transfers.
 - Records carry across unchanged; a recipient who wants different ones appends
-  an update after acceptance.
+  an update after the transfer has settled.
 - Transfer moves the name only. It does not move pinned content, and it does not
   move the IPNS key that publishes it. A recipient who does not also receive
   that material out of band gets a working name pointing at content only the
