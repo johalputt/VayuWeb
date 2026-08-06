@@ -400,13 +400,20 @@ There is no `'unsafe-inline'`, for styles or anything else, and no CSP
 reporting endpoint, because a report endpoint is an outbound channel that fires
 precisely when something unexpected happens.
 
-Four channels are not closable by CSP at all — WebRTC, top-level navigation,
-timing side channels, and a compromised endpoint. CONTENT-SECURITY.md section 4
-names each and specifies what closes it instead; the resolver MUST implement
-those controls, and the client MUST warn where it cannot.
+**Eight** channels are not closable by CSP at all, and they are not all of a
+kind. [CONTENT-SECURITY.md](CONTENT-SECURITY.md) section 5 names each: two are
+closed by a control this project ships, four are narrowed by a control that works
+only in the client's own webview, and two — same-origin timing and a compromised
+endpoint — are neither closed nor narrowed. The resolver MUST implement the
+controls that exist, and the client MUST warn plainly where it cannot.
+
+An earlier revision of this paragraph said four channels, pointed at section 4,
+and promised "what closes it instead" for all of them. It was wrong three ways at
+once, and it was the third document to carry the same undercount.
 
 A site MAY request one of the two per-site relaxations defined in
-CONTENT-SECURITY.md section 1.3 (WebAssembly, or a named Trusted Types policy).
+[CONTENT-SECURITY.md](CONTENT-SECURITY.md) section 2.3 (WebAssembly, or a named
+Trusted Types policy).
 Each is scoped to that site alone and MUST be surfaced to the reader. No flag,
 control-API setting or configuration file widens the policy to clearnet, or
 applies a relaxation globally; those refusals are not tunable.

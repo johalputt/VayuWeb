@@ -104,6 +104,30 @@ def count_accompanying_headers():
     return len(names), None
 
 
+def count_conformance_tests():
+    """Numbered items in CONTENT-SECURITY.md section 6 plus PRIVACY.md section 10.
+
+    Derived because VWIP-0001 stated a total of twelve against an actual seventeen. A proposal
+    that undercounts its own acceptance criteria is claiming a smaller bar than it set.
+    """
+    total = 0
+    for rel, heading in (
+        ("docs/spec/CONTENT-SECURITY.md", r"## 6\. Conformance"),
+        ("docs/spec/PRIVACY.md", r"## 10\. Conformance"),
+    ):
+        text = read(rel)
+        if text is None:
+            return None, f"{rel} is missing"
+        section = re.search(heading + r"\n(.*?)(?=\n## |\Z)", text, re.S)
+        if section is None:
+            return None, f"could not locate the conformance section of {rel}"
+        items = re.findall(r"^(\d+)\. ", section.group(1), re.M)
+        if not items:
+            return None, f"{rel}'s conformance section yielded no numbered items"
+        total += len(items)
+    return total, None
+
+
 def count_residual_channels():
     """Numbered subsections of CONTENT-SECURITY.md section 5.
 
@@ -215,8 +239,14 @@ AGREEMENTS = [
         # claim goes unchecked -- which is how the overstatement below survived the first
         # mutation of the residual-channel count untouched. This forbids the overstatement itself.
         "label": "the residual channels are not all closed",
-        "files": ["docs/spec/CONTENT-SECURITY.md", "docs/spec/VWIP-0001.md"],
-        "absent": re.compile(r"what closes them instead"),
+        "files": [
+            "docs/spec/CONTENT-SECURITY.md",
+            "docs/spec/VWIP-0001.md",
+            "docs/spec/RESOLUTION.md",
+        ],
+        # Both spellings: RESOLUTION.md carried the singular, so a rule matching only the plural
+        # left the third copy of the same overstatement standing.
+        "absent": re.compile(r"what closes (?:them|it) instead"),
         "note": (
             "Section 5.7 says 'Not closable, and not claimed' and 5.8 says 'Complete and "
             "irreducible'; four more are narrowed by a control that cannot be enforced in a "
@@ -278,12 +308,21 @@ RULES = [
         ],
     },
     {
+        "label": "executable conformance tests",
+        "derive": count_conformance_tests,
+        "source": "CONTENT-SECURITY.md section 6 plus PRIVACY.md section 10",
+        "patterns": [
+            re.compile(r"\*\*([\w]+)\*\* executable tests", re.I),
+        ],
+    },
+    {
         "label": "residual channels no header can close",
         "derive": count_residual_channels,
         "source": "docs/spec/CONTENT-SECURITY.md section 5",
         "patterns": [
             re.compile(r"the \*\*([\w]+)\*\*\s+channels no\s+header can close", re.I),
             re.compile(r"naming the ([\w]+)\s+channels CSP cannot close", re.I),
+            re.compile(r"\*\*([\w]+)\*\* channels are not closable by CSP", re.I),
             re.compile(r"\b([\w]+) channels, and they are not all of a kind\b", re.I),
         ],
     },

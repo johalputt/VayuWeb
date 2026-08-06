@@ -10,6 +10,28 @@ it.
 
 ## [Unreleased]
 
+### Fixed — cross-references and counts that were right when written and never moved
+
+- **`RESOLUTION.md` was the third document to undercount the residual channels**, and it was
+  wrong three ways in one paragraph: "Four channels are not closable by CSP at all", a pointer to
+  `CONTENT-SECURITY.md` **section 4** where the channels are in section 5, and "specifies what
+  closes it instead" for all of them. The paired-statement guard added an hour earlier matched
+  only the plural "them", so the singular spelling here survived it — the rule now takes both,
+  and `RESOLUTION.md` is in its file list.
+
+- **`VWIP-0001` claimed "Twelve executable tests"** against `CONTENT-SECURITY.md` section 6 (ten)
+  and `PRIVACY.md` section 10 (seven) — seventeen. A proposal that undercounts its own acceptance
+  criteria is claiming a smaller bar than it set. It also pointed twice at "section 1.3" for the
+  per-site relaxations, which are in section 2.3.
+
+  Both counts are now derived: `check-counts.py` sums the numbered items in the two conformance
+  sections, and takes the residual-channel count from the numbered subsections. Mutation-tested
+  by staling each claim and by adding an eleventh conformance test; all refused.
+
+  These are the low-severity end of the same defect the whole audit turned up — a number or a
+  reference that was correct at the moment it was typed, in a document that then moved underneath
+  it. The fix is never the correction; it is deriving the value so the next move is caught.
+
 ### Fixed — a security document that undercounted what it cannot close
 
 - **`VWIP-0001` summarised the residual channels as "the four channels CSP cannot close and
