@@ -10,6 +10,60 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a ballot the charter forbids, withdrawn in one document and left standing in its sibling
+
+- **`NAMESPACE.md` still ratified extensions by "a two-thirds majority over a 30-day voting
+  period".** `NAMES.md` had carried the same rule, found it contradicted Article 43.1 — consensus
+  is the absence of unaddressed substantive technical objection and is expressly *not* a head
+  count, with 43.5.4 listing "a vote count" among the things that do not constitute it — and
+  withdrew it, recording why. The document that actually names the extensions was not touched in
+  that change, so the ballot survived there. Corrected, with the withdrawal recorded in the same
+  form: Article 35.6's ninety days are an objection window, not a voting period.
+
+- **The half-fix is now the thing being guarded, not the ballot.** Each document read as settled
+  on its own; the defect was only visible with both open, which is the same shape as every other
+  cross-document finding this audit has turned up. `check-counts.py` gains a **paired statement**
+  mechanism: a phrase that must be present in every listed document and whose withdrawn form must
+  be absent from all of them.
+
+  Both halves are needed, and neither alone would have caught this. Requiring only the presence
+  lets the old rule sit two paragraphs below the new one — which is exactly how a document ends
+  up asserting both. Requiring only the absence lets a document drop the subject entirely and
+  look compliant by saying nothing. The absent-check runs against text with quoted and bolded
+  spans removed, so a paragraph recording what was withdrawn — which has to quote it — is not
+  itself a violation.
+
+  Mutation-tested four ways: reinstating the vote in `NAMESPACE.md` alone, and deleting the
+  settled sentence from each document in turn. All four refused.
+
+### Fixed — the specification's only complete record was one the specification rejects
+
+- **`REGISTRY.md`'s Worked Example carried the pre-hardening proof-of-work shape.**
+  `{alg: "argon2id", m: 262144, t: 3, p: 1, salt: …, nonce: <integer>, bits: 22}` — the exact form
+  the schema section three paragraphs above forbids in terms ("exactly three keys"; "A verifier
+  MUST reject a `powProof` carrying `m`, `t`, `p` or `salt`"), and which the reference
+  implementation refuses three separate ways. `bits: 22` also exceeded the schedule's ceiling of
+  18, overstating the cost budget roughly fourfold.
+
+  The provenance is a missed edit, not a disagreement: the commit that removed those dials
+  rewrote the schema paragraph, said "REGISTRY.md is corrected to match PROOF-OF-WORK.md", and
+  touched nothing else — leaving the only complete record in the corpus modelling the shape the
+  same commit had just called an attack.
+
+  **The consequence was sharper than a stale paragraph.** `conformance/vectors.json` publishes
+  `schema/pow-carrying-cost-parameters`, which requires an implementation to *reject* exactly
+  that shape. So the artifact that measures a second implementation demanded refusing the only
+  record the specification models — in a project whose Phase 6 acceptance is an independent
+  implementation built from the specification alone.
+
+- **A test now parses the example out of the document** and runs it through the verifier's schema
+  rules. Signatures are not checked, since the example's `sig` is illustrative and cannot verify;
+  everything structural is, which is where the defect was. Mutation-tested three ways: restoring
+  the old `powProof`, raising `bits` past the schedule ceiling, and deleting the `suite` field the
+  agility work had just added. All three refused.
+
+  An example nobody parses is prose, and this one had been prose for two commits.
+
 ### Fixed — a subordinate document added a third relaxation to a security profile it does not own
 
 - **`PUBLISHING.md` section 2.1 let the resolver append per-site `'sha256-…'` expressions to

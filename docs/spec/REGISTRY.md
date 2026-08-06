@@ -831,13 +831,9 @@ A registration of `atlas.vayu` as JSON, byte strings in unpadded base64url.
     { "type": "txt", "value": "v=vayuweb1; contact=atlas@example.invalid" }
   ],
   "powProof": {
-    "alg": "argon2id",
-    "m": 262144,
-    "t": 3,
-    "p": 1,
-    "salt": "XaGvK-1McJRNX-agVfElbQ",
-    "nonce": 41827366,
-    "bits": 22
+    "alg": "argon2id-v19-m65536-t2-p1",
+    "nonce": "EBESExQVFhcYGRobHB0eHw",
+    "bits": 12
   },
   "prevHash": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
   "sig": "Uh776MCNj1iWUJDLToU9-pHOMasXTvZNhiA9MzH2yDHzQjSPhRSOICQlslN0FCMn313ju_XvM-3oB2CsgXIVjA"
@@ -846,6 +842,17 @@ A registration of `atlas.vayu` as JSON, byte strings in unpadded base64url.
 
 A subsequent `UPDATE` would carry `seq: 1`, `prevHash` set to the record hash of the bytes
 above, an unchanged `notAfter`, and `powProof: null`.
+
+`sig` here is illustrative and does not verify; every other field is structurally valid and a
+test parses this block out of this document and runs it through the reference verifier's schema
+rules. That test exists because this example was, until recently, a record the specification
+three paragraphs above forbids: it carried the pre-hardening `powProof` shape — `alg:
+"argon2id"` with `m`, `t`, `p` and `salt` as record fields, and an integer `nonce` — which the
+schema section rejects in terms, and `bits: 22` against a schedule that tops out at 18. The
+commit that removed those dials rewrote the schema and left the only complete record in the
+corpus modelling the shape it had just called an attack, while `conformance/vectors.json`
+published a vector requiring implementations to reject exactly that shape. An example nobody
+parses is prose.
 
 ## Known Limitations
 

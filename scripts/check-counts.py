@@ -129,6 +129,33 @@ def count_csp_relaxations():
     return len(grants), None
 
 
+# A rule two documents both state, where fixing one and not the other has already happened.
+#
+# Not a count: a phrase that must be present in EVERY listed file, or absent from every one. It
+# exists because the failure mode is specific and has occurred — NAMES.md specified ratification
+# by "a two-thirds supermajority of ballots cast over 30 days, with a quorum of 25 percent of
+# eligible signing keys", found it contradicted Article 43.1 (consensus is expressly not a vote)
+# and withdrew it; NAMESPACE.md carried the same rule and was not touched in that change, so the
+# vote survived in the document that names the extensions. Each file's own text looked settled.
+AGREEMENTS = [
+    {
+        "label": "no ballot in VayuWeb naming",
+        "files": ["docs/spec/NAMES.md", "docs/spec/NAMESPACE.md"],
+        # `\s+` rather than a literal space: these documents are hard-wrapped, so the sentence
+        # falls across a line break in one of them and not the other.
+        "present": re.compile(
+            r"no ballot,\s+no threshold and no quorum\s+anywhere\s+in VayuWeb naming", re.I),
+        "absent": re.compile(
+            r"(?<!\")(?:two-thirds (?:super)?majority|30-day voting period)(?![^\n]*\")"),
+        "note": (
+            "Article 43.1 makes consensus the absence of unaddressed substantive technical "
+            "objection and 43.5.4 lists a vote count among the things that do not constitute it; "
+            "Article 35.6's window is for objections, not ballots."
+        ),
+    },
+]
+
+
 # Each rule: a label, a function deriving the true number, and the claim patterns that
 # must agree with it. A pattern's one capture group is the asserted quantity.
 RULES = [
@@ -290,6 +317,41 @@ def markdown_files():
                 yield rel, path
 
 
+def check_agreements(failures):
+    """Each paired statement must be present in every listed file, and its withdrawn form absent.
+
+    Both halves matter. Requiring only the presence lets the old rule sit two paragraphs below
+    the new one, which is exactly how a document ends up saying both things; requiring only the
+    absence lets a document drop the subject entirely and look compliant by silence.
+
+    The `absent` pattern is applied to the text with quoted spans removed, so that a paragraph
+    recording what was withdrawn -- which has to quote it -- is not itself a violation.
+    """
+    checked = 0
+    for item in AGREEMENTS:
+        for rel in item["files"]:
+            text = read(rel)
+            if text is None:
+                failures.append(f"{item['label']}: {rel} is missing")
+                continue
+            if item["present"].search(text) is None:
+                failures.append(
+                    f"{rel}: does not carry the settled rule '{item['label']}'. If it was "
+                    f"amended, update this check in the same commit; if the other document was "
+                    f"fixed and this one was not, that is the defect this rule exists for. "
+                    f"{item['note']}")
+                continue
+            unquoted = re.sub(r'"[^"]*"|\*\*[^*]+\*\*', " ", text)
+            stale = item["absent"].search(unquoted)
+            if stale is not None:
+                failures.append(
+                    f"{rel}: still states '{stale.group(0)}' outside a quotation, against "
+                    f"'{item['label']}'. {item['note']}")
+                continue
+            checked += 1
+    return checked
+
+
 def main():
     failures = []
     checked = 0
@@ -348,13 +410,20 @@ def main():
               "they guard, so this check is enforcing nothing", file=sys.stderr)
         return 1
 
+    agreed = check_agreements(failures)
+
     if failures:
         print(f"\n{len(failures)} counted claim(s) disagree with their source:\n", file=sys.stderr)
         for failure in failures:
             print(f"  {failure}", file=sys.stderr)
         return 1
+    if agreed == 0:
+        print("::error::no paired statement checked -- that half is enforcing nothing",
+              file=sys.stderr)
+        return 1
 
-    print(f"\nOK -- {checked} counted claim(s) agree with the source that defines them.")
+    print(f"\nOK -- {checked} counted claim(s) agree with the source that defines them, and "
+          f"{agreed} paired statement(s) agree across documents.")
     return 0
 
 

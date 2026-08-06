@@ -125,9 +125,19 @@ VayuWeb declines to adjudicate rather than pretending it has solved the problem.
 ## 4. Creating an extension
 
 4.1 A new extension requires a ratified Naming-category VWIP, per Constitution Article 35.6 and
-[NAMES.md](NAMES.md). Ratification requires, over a 30-day voting period, at least a two-thirds
-majority, followed by a dormancy period of not less than 180 days between ratification and first
-registration.
+[NAMES.md](NAMES.md): a public objection window of not less than 90 days, then a dormancy period
+of not less than 180 days between ratification and first registration.
+
+An earlier revision of this clause required "over a 30-day voting period, at least a two-thirds
+majority". `NAMES.md` carried the same rule, found it wrong and withdrew it; this document was
+not updated in the same change, so the vote survived in the specification that names the
+extensions. It contradicted Article 43.1, under which consensus is the absence of unaddressed
+substantive technical objection and is expressly *not* a head count, a majority or a vote —
+43.5.4 lists "a vote count" among the things that do not constitute consensus — and any franchise
+computed from signing keys is one an attacker mints keys to enlarge, which Article 40 addresses
+by refusing to count identities at all. **There is no ballot, no threshold and no quorum anywhere
+in VayuWeb naming.** The 90-day objection window is Article 35.6's, and it is a window for
+objections rather than for votes.
 
 4.2 The dormancy period is the anti-landrush mechanism and MUST NOT be shortened. It exists so
 that a newly created extension cannot be swept by whoever was watching the proposal, giving

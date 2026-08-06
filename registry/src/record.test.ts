@@ -290,3 +290,68 @@ test('AUDIT: every implemented operation is a name Article 29.4 closed the set t
   const outside = OPERATIONS.filter((op) => !closed.has(op));
   assert.deepEqual(outside, ['RENEW'], 'a new operation outside Article 29.4 appeared');
 });
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT FINDING: the spec's only complete record was one the spec rejects      */
+/* -------------------------------------------------------------------------- */
+
+test("AUDIT: REGISTRY.md's worked example is a record this implementation accepts", () => {
+  // The Worked Example is the only complete record in the corpus, introduced plainly as "A
+  // registration of atlas.vayu as JSON" — not as a counter-example. It was a literal survival of
+  // the pre-fix proof-of-work schema: `{alg: "argon2id", m, t, p, salt, nonce: <integer>, bits:
+  // 22}`, which the schema section three lines above forbids in terms ("exactly three keys"; "A
+  // verifier MUST reject a powProof carrying m, t, p or salt"), and which this module refuses
+  // three separate ways.
+  //
+  // The consequence was sharper than a stale paragraph: conformance/vectors.json publishes a
+  // vector requiring implementations to REJECT exactly that shape. The artifact measuring a
+  // second implementation demanded refusing the only record the specification models, in a
+  // project whose Phase 6 acceptance is an independent implementation built from the
+  // specification alone.
+  //
+  // This parses the example rather than eyeballing it. Signatures are not checked — the example's
+  // `sig` is illustrative and cannot verify — but every structural rule is, which is where the
+  // defect was.
+  const spec = readFileSync(new URL('../../docs/spec/REGISTRY.md', import.meta.url), 'utf8');
+  const block = /## Worked Example\n[\s\S]*?```json\n([\s\S]*?)\n```/.exec(spec);
+  assert.ok(block, 'the Worked Example must be a fenced json block, or this check is inert');
+
+  const b64url = (s: string): Uint8Array =>
+    new Uint8Array(Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64'));
+  const BYTE_FIELDS = new Set(['ownerKey', 'prevHash', 'sig', 'coSig']);
+
+  // The document renders byte strings as unpadded base64url, so the reader has to know which
+  // fields are bytes. That list is exactly what the schema table says, and getting it wrong here
+  // would make the check pass for the wrong reason.
+  const toCbor = (value: unknown, key?: string): CborValue => {
+    if (typeof value === 'string' && key !== undefined && BYTE_FIELDS.has(key))
+      return b64url(value);
+    if (Array.isArray(value)) return value.map((v) => toCbor(v)) as CborValue;
+    if (value !== null && typeof value === 'object') {
+      const obj = value as Record<string, unknown>;
+      const m = new Map<string | Uint8Array, CborValue>();
+      // A `records` entry's `value` is bytes for `peer` and `cid` and text for the rest, and the
+      // pow `nonce` is always bytes.
+      const entryBytes = obj['type'] === 'peer' || obj['type'] === 'cid';
+      for (const [k, v] of Object.entries(obj)) {
+        const isBytes = (k === 'nonce' && typeof v === 'string') || (k === 'value' && entryBytes);
+        m.set(k, isBytes ? b64url(v as string) : toCbor(v, k));
+      }
+      return m;
+    }
+    return value as CborValue;
+  };
+
+  const parsed = toCbor(JSON.parse(block[1]!)) as CborMap;
+  const record = parseRecord(parsed);
+  assert.equal(record.name, 'atlas');
+  assert.equal(record.op, 'REGISTER');
+
+  // The two things that were actually wrong, pinned by name so a regression is legible.
+  assert.equal(record.powProof?.alg, POW_ALGORITHM);
+  assert.ok(
+    record.powProof !== null && record.powProof.bits <= 18,
+    'PROOF-OF-WORK.md caps the schedule at 18 bits; the example claimed 22, overstating the ' +
+      'cost budget roughly fourfold',
+  );
+});
