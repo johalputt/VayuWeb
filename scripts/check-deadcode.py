@@ -7,8 +7,42 @@ still has to be reasoned about by the next person. VayuPress gates this with
 `scripts/deadcode-gate.sh`; this is the same rule for a TypeScript tree.
 
 The bar is deliberately "imported somewhere OR named in a test". Something exercised only by
-tests is not dead — it is verified surface, and this project deliberately exports internals so
+tests is not dead -- it is verified surface, and this project deliberately exports internals so
 they can be attacked directly.
+
+## Four ways this check was not doing its job
+
+Every one was found by mutating it -- deliberately re-breaking the code after fixing the defect
+before it -- and none by reading it. That matters, because the previous version reads perfectly
+well.
+
+**`export { X }` was not matched at all.** The pattern covered `export function`, `export const`
+and their siblings, and a bare re-export statement is none of those. `fetch.ts` re-exporting
+`ContentError` for no reason was not merely passed over, it was never examined. A gate that
+silently declines to look at a whole syntactic form is worse than one that looks and is wrong,
+because nothing in its output says so. Both `export { A, B as C }` and
+`export { A } from './m.ts'` are now read, and it is the *exported* name that has to be used.
+
+**A hit could come from anywhere.** Searching for the bare word across the corpus meant any
+symbol sharing a name with something used elsewhere was invisible: an `export const sha256Helper`
+counted as used because `sha256` appears in another module. The evidence has to be a dependency,
+so a consuming file must both name the symbol and import from the module that defines it.
+
+**A re-export could justify itself.** With both fixes in place the `ContentError` case still
+passed, and this third cause is the one worth remembering: a re-export names its symbol twice in
+the defining file -- once to import it, once to export it -- so the "used elsewhere in this file"
+rule was satisfied by the re-export statement itself. That rule is right for a helper a module
+uses internally and exactly wrong here, because a re-export exists for another module by
+definition. Re-exported names therefore require an external dependent.
+
+Fixing those three immediately surfaced a real one: `store.ts` re-exported `GRACE_SECONDS` and
+`QUARANTINE_SECONDS`, which every consumer imports from `lifecycle.ts` instead. The re-export and
+the import feeding it were both inert, and had been invisible the whole time.
+
+**And there was no floor.** Narrowing the export pattern so `function`, `const`, `interface` and
+`type` were ignored dropped the corpus from 305 matches to 18 and still printed OK, because
+nothing asked whether the number was plausible. A gate that has stopped matching is
+indistinguishable from a gate with nothing to report unless it says how much it looked at.
 
     python3 scripts/check-deadcode.py [root]
 
@@ -26,15 +60,57 @@ EXTRA_ROOTS = [
     os.path.join(ROOT, "registry", "scripts"),
 ]
 
+# A floor on how many exports the patterns must find. Not a bound on the codebase: it is here so
+# that a pattern which stops matching fails loudly instead of reporting a clean run over almost
+# nothing. Today's corpus is a little over 300; a broken pattern drops it to double digits.
+MINIMUM = 150
+
 EXPORT = re.compile(
     r"^export\s+(?:async\s+)?(?:function|class|const|let|interface|type|enum)\s+([A-Za-z_$][\w$]*)",
     re.M,
 )
 
+# `export { A, B as C };` and `export { A } from './m.ts';`. A separate pattern because the
+# declaration form above cannot express it, and its absence meant re-exports went unexamined.
+REEXPORT = re.compile(r"^export\s+(?:type\s+)?\{([^}]*)\}", re.M)
+
 
 def read(path):
     with open(path, encoding="utf-8") as handle:
         return handle.read()
+
+
+def exported_symbols(text):
+    """Every name a file exports, as `(symbol, line, is_reexport)`.
+
+    The third element matters: a re-export may not be justified by a mention in its own file,
+    because that mention IS the export.
+    """
+    found = []
+    for match in EXPORT.finditer(text):
+        found.append((match.group(1), text[: match.start()].count("\n") + 1, False))
+    for match in REEXPORT.finditer(text):
+        line = text[: match.start()].count("\n") + 1
+        for piece in match.group(1).split(","):
+            piece = piece.strip()
+            if not piece:
+                continue
+            # `B as C` exports C, so C is the name a consumer imports and therefore the name to
+            # check. Taking B would ask whether the *source* symbol is used, which it always is.
+            name = piece.split(" as ")[-1].strip()
+            if re.fullmatch(r"[A-Za-z_$][\w$]*", name) and name != "default":
+                found.append((name, line, True))
+    return found
+
+
+def depends_on(body, module_filename):
+    """Does `body` import from the module in `module_filename`?
+
+    Matched on the module specifier rather than on any mention of the name, because the point is
+    to require a dependency and not a coincidence. Both `./foo.ts` and `../src/foo.ts` count; a
+    bare mention of the word `foo` in prose does not.
+    """
+    return re.search(rf"""from\s+['"][^'"]*/{re.escape(module_filename)}['"]""", body) is not None
 
 
 def ts_files(root):
@@ -50,7 +126,7 @@ def ts_files(root):
 def main():
     sources = [p for p in ts_files(SRC)]
     if not sources:
-        print("::error::no source files found — this check is enforcing nothing", file=sys.stderr)
+        print("::error::no source files found -- this check is enforcing nothing", file=sys.stderr)
         return 1
 
     consumers = list(sources)
@@ -68,35 +144,43 @@ def main():
         rel = os.path.relpath(path, ROOT)
         text = corpus[path]
 
-        for match in EXPORT.finditer(text):
-            symbol = match.group(1)
+        for symbol, line, is_reexport in exported_symbols(text):
             total += 1
-            # Referenced anywhere other than its own definition line?
             used = False
             word = re.compile(rf"\b{re.escape(symbol)}\b")
             for other, body in corpus.items():
                 if other == path:
-                    # Within the defining file, a use elsewhere in that file counts too.
-                    hits = len(word.findall(body))
-                    if hits > 1:
+                    # Within the defining file, a use elsewhere in that file counts too -- but
+                    # never for a re-export, whose two mentions are the import and the export.
+                    if is_reexport:
+                        continue
+                    if len(word.findall(body)) > 1:
                         used = True
                         break
                     continue
-                if word.search(body):
+                # The name AND a dependency on the module that defines it. Without the second
+                # half, a symbol whose name appears anywhere -- in an unrelated module, in a
+                # comment, in another module's export of the same name -- counts as used, and the
+                # check silently stops enforcing anything for that symbol.
+                if word.search(body) and depends_on(body, name):
                     used = True
                     break
             if not used:
-                line = text[:match.start()].count("\n") + 1
                 unused.append(f"{rel}:{line}: '{symbol}' is exported but never imported or tested")
 
     print(f"checked {total} export(s) across {len(sources)} source file(s)")
+    if total < MINIMUM:
+        print(f"::error::only {total} export(s) matched, below the floor of {MINIMUM} -- the "
+              f"export patterns have stopped matching rather than the code having shrunk",
+              file=sys.stderr)
+        return 1
     if unused:
         print(f"\n{len(unused)} unused export(s):\n", file=sys.stderr)
         for u in unused:
             print(f"  {u}", file=sys.stderr)
         print("\n  Either use it, test it, or stop exporting it.", file=sys.stderr)
         return 1
-    print("OK — every export is imported or exercised by a test.")
+    print("OK -- every export is imported or exercised by a test.")
     return 0
 
 

@@ -56,7 +56,7 @@ import {
   type Verdict,
 } from './verify.ts';
 import { verifyPow, rateWindow, requiredBits, EPOCH_SECONDS } from './pow.ts';
-import { lifecycleOf, isFullyReleased, GRACE_SECONDS, QUARANTINE_SECONDS } from './lifecycle.ts';
+import { lifecycleOf, isFullyReleased } from './lifecycle.ts';
 
 const LENGTH_PREFIX_BYTES = 4;
 
@@ -578,8 +578,6 @@ export class Store implements RegistryView {
     return requiredBits(label.length, this.registrationsInWindow(tld, at));
   }
 }
-
-export { GRACE_SECONDS, QUARANTINE_SECONDS };
 
 /** Write a log file from scratch. Used by tooling and tests, never during normal operation. */
 export function writeLog(path: string, entries: readonly Uint8Array[]): void {
