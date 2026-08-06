@@ -105,6 +105,46 @@ resolver, holds the key handling UI, runs the proof-of-work for registration and
 publishes a folder as a site. It is a front end over the libraries the CLI uses and has no
 private capability.
 
+## Implementation Language
+
+**The protocol fixes formats, not languages.** Everything a second implementation must match is
+language-neutral by construction: deterministic CBOR, Ed25519, Argon2id, BLAKE2b-256, dag-pb,
+lowercase unpadded base32, and the byte orderings around them. The conformance vectors in
+[`conformance/vectors.json`](../conformance/vectors.json) are hex and JSON for the same reason.
+Nothing in `docs/spec/` requires a runtime, and a clause that did would be a defect against
+Constitution Article 44.6 rather than a design decision.
+
+The reference implementation is TypeScript on Node because the **reference transport binding**
+is: Hypercore, Hyperbee, Hyperswarm and HyperDHT have no mature equivalent outside that
+ecosystem. That is a dependency worth stating rather than absorbing.
+[CRYPTO-AGILITY.md](spec/CRYPTO-AGILITY.md) 7.4 already says at least one of Hypercore,
+Hyperswarm and IPFS will not survive a century, and a substrate only one ecosystem implements is a
+substrate whose ecosystem is load-bearing — the shape of concentration Article 4 exists to refuse,
+arriving through the toolchain rather than through an operator.
+
+**Rust is a first-class choice for any component, and the expected one for some.** Three places
+where it is the better answer, none of them controversial:
+
+- **The desktop client is already Rust.** Tauri 2.x is a Rust backend with a web front end, so
+  Surface 2 is not a language question but a question of how much lives below that boundary.
+- **The resolver and proxy** are long-running processes whose entire input is bytes from
+  strangers — the verified traversal in `registry/src/fetch.ts` exists precisely because that
+  input is hostile. Memory safety without a garbage collector, and a type system that makes an
+  unhandled refusal a compile error, are worth more here than anywhere else in the system.
+- **The proof-of-work worker** is a tight Argon2id loop at 64 MiB per evaluation, where the
+  runtime's own overhead is most of what is left to save.
+
+What a rewrite must not do is fork the contract. A component reimplemented in another language
+passes the same conformance suites or it is not the same component, and "the Rust one behaves
+slightly differently" is exactly the fork this project spends most of its effort refusing. The
+suites are what makes a language change an ordinary engineering decision here rather than a leap:
+a second implementation is measured against the vector file, never against `registry/src`.
+
+A rewrite is also not owed, and must not be reported as progress toward Phase 6. That phase asks
+for a second implementation **by parties with no common employer or funder**; a second language
+written by the same hands does not satisfy it and never will. Rust is permitted, expected in
+places, and not a substitute for that.
+
 ## Repository Layout
 
 | Path | Contents |
@@ -323,8 +363,11 @@ is accepted. Availability is not guaranteed, only resolution.
 
 ## Status
 
-Status: Draft — not yet implemented. This document describes the pre-implementation design and
-will be revised as the `docs/spec/` documents are ratified.
+Status: Draft, partially implemented. This document described a pre-implementation design and
+no longer does: the registry, replication, resolution, the browsing proxy, the control API and
+the content encoders are in `registry/src`. Nothing is *running* — there is no network, no
+registered name and no release — and no roadmap phase past 0 has met its acceptance test.
+This document will be revised as the `docs/spec/` documents are ratified.
 
 ## See also
 
