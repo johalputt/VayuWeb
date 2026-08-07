@@ -779,9 +779,9 @@ Consequences, all normative:
   the moment the VWIP reached Accepted, and at least two epoch boundaries beyond it. Article 47.3
   forbids a silent breaking change; these are the intervals that make the prohibition operable.
 
-  An earlier revision required only "two epochs — roughly sixty days minimum". That is a quarter
+  An earlier revision required only "two epochs — roughly sixty days minimum". That is a third
   of the floor Articles 20.3, 20.11, 35.7 and 47.6 all set at 180 days, so a VWIP scheduled by
-  this document would have activated four times sooner than the charter permits, and every one of
+  this document would have activated three times sooner than the charter permits, and every one of
   those four Articles states the bound in seconds rather than in epochs, so the discrepancy was
   not even a unit confusion. Article 3.7 voids the specification here too.
 - A peer that has not yet reached the activation epoch MUST continue to apply the previous rules.

@@ -209,6 +209,33 @@ def count_record_vectors():
     return len(vectors), None
 
 
+def epoch_shortfall_ratio():
+    """How many times sooner a two-epoch activation would fire than the charter's floor allows.
+
+    A ratio between two constants the corpus states itself, in the paragraph whose entire purpose
+    is to record honestly how far a subordinate document had drifted from the charter. It was
+    written as "a quarter of the floor ... four times sooner" when 2 x 2,592,000 is a THIRD of
+    15,552,000 and three times sooner -- and the error was introduced by the fix for the original
+    drift finding, so it was new text that no pass had recomputed, and it propagated to two other
+    files before anyone divided.
+
+    Both inputs are read out of REGISTRY.md rather than restated here. A checker carrying its own
+    copy of the numbers it checks is a second source that drifts alongside the first.
+    """
+    text = read("docs/spec/REGISTRY.md")
+    if text is None:
+        return None, "docs/spec/REGISTRY.md is missing"
+    floor = re.search(r"\*\*`([\d,]+)` seconds \(180 days\)\*\*", text)
+    epoch = re.search(r"An earlier revision set the first condition at `([\d,]+)` seconds \(30 days\)", text)
+    if floor is None or epoch is None:
+        return None, "REGISTRY.md no longer states both the 180-day floor and the 30-day epoch"
+    floor_s = int(floor.group(1).replace(",", ""))
+    epoch_s = int(epoch.group(1).replace(",", ""))
+    if epoch_s == 0:
+        return None, "the epoch length is zero"
+    return floor_s // (2 * epoch_s), None
+
+
 def count_vector_suites():
     """Top-level vector suites in the committed artifact.
 
@@ -528,6 +555,15 @@ RULES = [
         "source": "conformance/vectors.json",
         "patterns": [
             re.compile(r"`vectors` holds ([\w,]+) record-verification vectors", re.I),
+        ],
+    },
+    {
+        "label": "times sooner a two-epoch activation would fire",
+        "derive": epoch_shortfall_ratio,
+        "source": "docs/spec/REGISTRY.md's own 180-day floor and 30-day epoch",
+        "patterns": [
+            re.compile(r"activated ([\w]+) times sooner than the charter permits", re.I),
+            re.compile(r"activate ([\w]+) times sooner than the charter permits", re.I),
         ],
     },
     {

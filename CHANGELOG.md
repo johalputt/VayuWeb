@@ -124,6 +124,26 @@ limit is 2.1 MB of hex zeros in the artifact, of which every byte after the firs
 information. The vectors file went from 159 KB to 2.25 MB before this was noticed. A runner builds
 the buffer from the stated length and tests exactly what one reading two million zeros would.
 
+### Fixed — a ratio the previous fix got wrong, in the paragraph about getting ratios wrong
+
+`REGISTRY.md` said a two-epoch activation floor was "a quarter of the floor … four times sooner
+than the charter permits". Two epochs is 5,184,000 seconds and the charter's floor is 15,552,000,
+so it is a **third**, and **three** times sooner.
+
+Two things make this worth more than the correction. It was **introduced by the fix** for the
+original 60-versus-180 drift finding, so it was new text that no pass had recomputed. And it sits
+in the paragraph whose entire purpose is recording honestly how far a subordinate document had
+drifted from the charter — the worst possible place for an unchecked figure, since a reader
+auditing the severity of the withdrawn rule is handed one inflated by a third. It had already
+propagated to `VWIP-0002.md` and to this file before anybody divided.
+
+Corrected in all three, and the ratio is now **derived** by `scripts/check-counts.py` from the two
+constants REGISTRY.md states itself, rather than asserted. The deriver reads both numbers out of
+the document instead of carrying its own copies — a checker holding the values it checks is a
+second source that drifts alongside the first.
+
+Found by a corpus-wide sweep for the defect classes the VWIP-0005 audit turned up.
+
 ### Fixed — the first WANT of every cold sync could not be sent
 
 **A real bug, not a documentation defect, and it sat behind a sentence nobody recomputed.**
@@ -1701,7 +1721,7 @@ unbuilt.
 - **`VWIP-0002` had already inherited it.** Its activation clause said "at least two epochs beyond
   the epoch in which this proposal reaches Accepted, per Article 47.3 and the epoch definition in
   REGISTRY.md" — faithfully following a subordinate document that was itself wrong, and so
-  scheduling its own activation at a quarter of the constitutional floor. It now states the floor
+  scheduling its own activation at a third of the constitutional floor. It now states the floor
   directly rather than inheriting it through a reference, which is the general lesson: a
   cross-reference to a document that can be wrong is a way to be wrong without looking wrong.
 
