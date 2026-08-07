@@ -124,6 +124,45 @@ limit is 2.1 MB of hex zeros in the artifact, of which every byte after the firs
 information. The vectors file went from 159 KB to 2.25 MB before this was noticed. A runner builds
 the buffer from the stated length and tests exactly what one reading two million zeros would.
 
+### Fixed — the first WANT of every cold sync could not be sent
+
+**A real bug, not a documentation defect, and it sat behind a sentence nobody recomputed.**
+
+`REPLICATION.md`'s limits table said the 65,536-byte message bound "holds a full `RECORDS` batch
+with framing overhead and nothing more". It does not. Only **fifteen** maximum-size records fit,
+and 256 records at 258 bytes — the smallest encoding in this project's own conformance vectors —
+is 66,048 bytes and already over.
+
+That false justification reached the code exactly where it would do the most damage.
+`nextWant` asks for `wantCount` (256) whenever a peer is that far behind, which is every peer
+starting from nothing. `onWant` then gathered up to 256 encodings **with no size accounting at
+all** and returned them. `encodeMessage` refused the result — measured on an ordinary log at
+COST.md's own 300 bytes per record: 77,593 bytes against a 65,536 limit.
+
+The throw was then swallowed by `send` in `swarm.ts`, whose `catch` destroys the stream under the
+comment *"A write that fails is a connection that is gone."* It was not gone. Our own encoder
+refused our own message, and the connection was dropped with the failure attributed to the peer —
+a silent stall on the first message of every cold sync that looks exactly like a broken network.
+
+Nothing caught it because every existing test syncs a handful of records, where 256 never arises
+and the sizes fit.
+
+- `onWant` now counts **bytes** against the message bound, with a stated envelope margin.
+- `REPLICATION.md` gains **4.3.a**: a responder MUST truncate to fit, counting bytes rather than
+  records, and MUST NOT emit a message it cannot encode.
+- The adjacent promise that "an honest reply is never split for a reason the requester cannot
+  predict" was **inverted** — the split is unavoidable at scale and falls on a byte total the
+  requester has not seen. Corrected, with the consequence spelled out: a requester MUST NOT read a
+  short reply as evidence the responder holds no more.
+
+**The margin survived its first mutation, which meant the test was wrong.** Removing
+`RECORDS_ENVELOPE_BYTES` changed nothing, because 300-byte records stop the greedy loop well short
+of the boundary. Ninety-one record sizes between 200 and 4,096 bytes *do* land in that band. A
+single size is a sample and the bug is a boundary, so the test now sweeps a thousand sizes and
+asserts every reply encodes; the mutation fails against it. Four mutations in total, all failing
+their intended test: the budget removed, the margin removed, truncation to one record (which the
+progress test catches), and the specification clause weakened to SHOULD.
+
 ### Fixed — the conformance artifact could not be used without this repository
 
 `docs/ROADMAP.md` tells contributors that `conformance/vectors.json` "is readable without any of

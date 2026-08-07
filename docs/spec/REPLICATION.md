@@ -94,6 +94,21 @@ MAY decline entirely. **Declining is not an error condition** and MUST NOT be re
 serving is voluntary, no peer owes another bandwidth, and Article 28 states duties without a
 custodian precisely so that no participant can be said to have failed one.
 
+4.3.a A responder **MUST** truncate a `RECORDS` reply to fit the message bound in section 5,
+counting bytes rather than records, and MUST NOT emit a message it cannot encode.
+
+This is stated because leaving it implicit produced a defect in this project's own
+implementation, on the commonest request in the protocol. `RECORDS.recs` and `WANT.count` are both
+256, which reads as a matched pair, and a responder that gathers 256 records has built a reply of
+roughly a megabyte against a 65,536-byte bound. A peer starting from nothing asks for exactly 256,
+so the failure was on the first message of every cold sync — and because a sender's own encoder
+refuses it at the last step, the error looked like a broken connection rather than a bug.
+
+An honest reply is therefore **routinely split**, for a reason the requester cannot predict: the
+split falls on a byte total the requester has not seen. A requester MUST NOT treat a short reply as
+evidence of anything, and in particular MUST NOT infer that the responder holds no more — 4.2's
+"fewer than requested" is the normal case at scale, not the exception.
+
 4.4 On receiving `RECORDS`, a peer MUST, for each record independently:
 
 ```text
@@ -125,9 +140,9 @@ the only attack a hostile peer retains, and an unbounded field is an invitation.
 
 | Quantity | Limit | Why this number |
 |---|---|---|
-| Message encoding | 65,536 bytes | Holds a full `RECORDS` batch with framing overhead and nothing more. |
+| Message encoding | 65,536 bytes | Holds **fifteen** maximum-size records, or roughly 190 at the median size in `conformance/vectors.json`. This bound, not `RECORDS.recs`, is what limits a reply's volume. |
 | `WANT.count` | 256 | Bounds the work one message can ask for. A syncing peer sends many `WANT`s rather than one large one. |
-| `RECORDS.recs` length | 256 | Matches `WANT.count`, so an honest reply is never split for a reason the requester cannot predict. |
+| `RECORDS.recs` length | 256 | Matches `WANT.count`. It bounds array iteration, not volume — see 4.3a. |
 | Each record encoding | 4,096 bytes | The record limit from REGISTRY.md, restated so a receiver checks it before parsing rather than after. |
 | Outstanding `WANT`s per connection | 8 | Bounds memory held for in-flight requests. |
 | Deferred (`CLOCK_SKEW`) records held | 1,024 | Bounded because a deferred record is memory an attacker can allocate by dating records into the near future. Oldest evicted first. |

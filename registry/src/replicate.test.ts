@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -13,6 +13,7 @@ import {
   encodeMessage,
   verifyEquivocation,
   type Message,
+  type Records,
   type ReplicationSink,
 } from './replicate.ts';
 import { Store } from './store.ts';
@@ -855,4 +856,164 @@ test('HELLO may only be sent once', () => {
     () => p.session.open(),
     (error: unknown) => error instanceof ReplicationError && error.code === 'HELLO_REPEATED',
   );
+});
+
+/* -------------------------------------------------------------------------- */
+/* A reply this peer cannot send                                               */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: an honest reply to the commonest WANT can actually be encoded', () => {
+  // **This kills the first WANT of every cold sync on any real registry.**
+  //
+  // `nextWant` asks for `LIMITS.wantCount` — 256 — whenever a peer is that far behind, which is
+  // every peer starting from nothing. `onWant` then gathers up to 256 encodings with no size
+  // accounting at all and hands them back as a `RECORDS`. `encodeMessage` refuses it, because 256
+  // records do not fit in the 65,536-byte message bound: only **15** maximum-size records fit, and
+  // even 256 records at 258 bytes — the smallest encoding in this project's own conformance
+  // vectors — is 66,048 bytes and over the limit.
+  //
+  // The throw is then swallowed by `send` in swarm.ts, whose catch destroys the stream under the
+  // comment "A write that fails is a connection that is gone". It was not gone. Our own encoder
+  // refused our own message, and the connection was dropped with the failure attributed to the
+  // peer — a silent stall that looks like the network.
+  //
+  // Nothing caught it because every existing test syncs a handful of records, where 256 never
+  // arises and the sizes fit. So this builds a sink big enough for the bug rather than big enough
+  // for the test.
+  const encodings: Uint8Array[] = [];
+  for (let i = 0; i < LIMITS.wantCount; i += 1) {
+    // 300 bytes is COST.md's own per-record figure, so this is an ordinary log rather than an
+    // adversarial one. The defect does not need maximal records.
+    encodings.push(new Uint8Array(300).fill(i & 0xff));
+  }
+  const sink: ReplicationSink = {
+    append: () => {
+      throw new Error('this test never appends; it only asks what we would send');
+    },
+    encodingAt: (index) => encodings[index] ?? null,
+    length: () => encodings.length,
+    treeRoot: () => new Uint8Array(32),
+  };
+  const session = new ReplicationSession(sink);
+  session.open();
+  session.receive(
+    { t: 'HELLO', v: PROTOCOL_VERSION, len: encodings.length, root: new Uint8Array(32) },
+    NOW,
+  );
+
+  // Exactly what a peer starting from nothing sends.
+  const want = session.nextWant(0);
+  assert.ok(want, 'a peer behind by a full batch must ask for one');
+  assert.equal(want.count, LIMITS.wantCount);
+
+  const outcome = session.receive(want, NOW);
+  assert.equal(outcome.replies.length, 1, 'a peer holding the records must answer');
+
+  // The assertion that matters: what we decided to send, we can send.
+  assert.doesNotThrow(
+    () => encodeMessage(outcome.replies[0]!),
+    'onWant produced a RECORDS this peer cannot encode',
+  );
+});
+
+test('AUDIT: the reply bound is a byte count, and the specification says so', () => {
+  // Two halves that must not drift apart. The behavioural half above proves this peer can send
+  // what it decided to send; this one proves the document requires it, and that the limits table
+  // no longer carries the justification that was false by more than 16x.
+  const spec = readFileSync(new URL('../../docs/spec/REPLICATION.md', import.meta.url), 'utf8');
+  assert.match(spec, /MUST\*\* truncate a `RECORDS` reply to fit the message bound/);
+  assert.match(spec, /counting bytes rather than records/);
+  assert.doesNotMatch(spec, /Holds a full `RECORDS` batch/);
+  // And the inverted promise is gone: a reply IS split for a reason the requester cannot predict.
+  assert.doesNotMatch(spec, /an honest reply is never split/);
+
+  // A short reply must not be readable as "there is no more". The requester keeps asking, which
+  // is what makes truncation safe rather than a silent truncation of the sync itself.
+  assert.match(spec, /MUST NOT infer that the responder holds no more/);
+});
+
+test('a truncated reply still makes progress, and the next want resumes where it stopped', () => {
+  // Truncation is only safe if the requester comes back for the rest. A responder that returns
+  // fewer records than asked, and a requester that treats that as the end of the log, is a sync
+  // that silently stops at whatever fits in one message — which would be a worse bug than the one
+  // being fixed, and is exactly the shape a careless fix takes.
+  const encodings: Uint8Array[] = [];
+  for (let i = 0; i < LIMITS.wantCount; i += 1) encodings.push(new Uint8Array(300).fill(i & 0xff));
+  const sink: ReplicationSink = {
+    append: () => {
+      throw new Error('this test never appends');
+    },
+    encodingAt: (index) => encodings[index] ?? null,
+    length: () => encodings.length,
+    treeRoot: () => new Uint8Array(32),
+  };
+  const session = new ReplicationSession(sink);
+  session.open();
+  session.receive(
+    { t: 'HELLO', v: PROTOCOL_VERSION, len: encodings.length, root: new Uint8Array(32) },
+    NOW,
+  );
+
+  const first = session.receive(session.nextWant(0)!, NOW).replies[0] as Records;
+  assert.ok(first.recs.length > 0 && first.recs.length < LIMITS.wantCount, 'the reply is short');
+  assert.doesNotThrow(() => encodeMessage(first));
+
+  // The requester asks again from where it got to, and the rest arrives. Walk it to the end so a
+  // fix that made progress but never terminated would fail here rather than pass.
+  let have = first.recs.length;
+  for (let round = 0; round < 32 && have < encodings.length; round += 1) {
+    const want = session.nextWant(have);
+    assert.ok(want, `a peer at ${have} of ${encodings.length} must still ask`);
+    const reply = session.receive(want, NOW).replies[0] as Records;
+    assert.equal(reply.from, have, 'the reply resumes where the requester stopped');
+    assert.ok(reply.recs.length > 0, 'a responder holding records must not answer with none');
+    assert.doesNotThrow(() => encodeMessage(reply));
+    have += reply.recs.length;
+  }
+  assert.equal(have, encodings.length, 'the whole log is reachable in bounded rounds');
+});
+
+test('AUDIT: a reply encodes at every record size, not just the one a test happened to pick', () => {
+  // **The margin in `onWant`'s budget survived its first mutation, which means the first test was
+  // inadequate rather than the fix unnecessary.** Removing `RECORDS_ENVELOPE_BYTES` changed
+  // nothing, because 300-byte records stop the greedy loop well short of the boundary and the
+  // envelope never mattered. Ninety-one record sizes between 200 and 4,096 bytes DO land in that
+  // band, and at each of them a budget without the margin fills to the byte limit and then the
+  // message header pushes the encoding over it.
+  //
+  // A single size is a sample. The bug is a boundary, so the test has to sweep.
+  const failures: string[] = [];
+  for (let size = 200; size <= 1200; size += 1) {
+    const encodings: Uint8Array[] = [];
+    for (let i = 0; i < LIMITS.wantCount; i += 1)
+      encodings.push(new Uint8Array(size).fill(i & 0xff));
+    const sink: ReplicationSink = {
+      append: () => {
+        throw new Error('this test never appends');
+      },
+      encodingAt: (index) => encodings[index] ?? null,
+      length: () => encodings.length,
+      treeRoot: () => new Uint8Array(32),
+    };
+    const session = new ReplicationSession(sink);
+    session.open();
+    session.receive(
+      { t: 'HELLO', v: PROTOCOL_VERSION, len: encodings.length, root: new Uint8Array(32) },
+      NOW,
+    );
+    const reply = session.receive(session.nextWant(0)!, NOW).replies[0];
+    if (reply === undefined) {
+      failures.push(`size ${size}: a peer holding records answered with none`);
+      continue;
+    }
+    try {
+      const bytes = encodeMessage(reply);
+      if (bytes.length > LIMITS.messageBytes) {
+        failures.push(`size ${size}: encoded to ${bytes.length}`);
+      }
+    } catch (error) {
+      failures.push(`size ${size}: ${String(error)}`);
+    }
+  }
+  assert.deepEqual(failures.slice(0, 5), []);
 });

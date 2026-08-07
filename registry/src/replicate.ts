@@ -54,11 +54,24 @@ export const PROTOCOL_VERSION = 1;
  * scattered as literals because a limit nobody can enumerate is a limit nobody audits.
  */
 export const LIMITS = {
-  /** Whole-message encoding. Holds a full RECORDS batch with framing and nothing more. */
+  /**
+   * Whole-message encoding.
+   *
+   * This said "holds a full RECORDS batch with framing and nothing more" and it was false by more
+   * than 16x: fifteen maximum-size records fit, and 256 records at the SMALLEST encoding in
+   * conformance/vectors.json is already over. `recordsPerBatch` is therefore a bound on array
+   * iteration; this is the bound on volume, and `onWant` counts bytes against it.
+   */
   messageBytes: 65_536,
   /** How many records one WANT may ask for. A syncing peer sends many, not one large one. */
   wantCount: 256,
-  /** How many records one RECORDS may carry. Matches wantCount so an honest reply is never split. */
+  /**
+   * How many records one RECORDS may carry.
+   *
+   * Matches `wantCount`, but NOT so that "an honest reply is never split" — that claim was
+   * inverted. An honest reply to a full `WANT` is routinely split, because `messageBytes` binds
+   * first and it binds on a byte count the requester has not seen.
+   */
   recordsPerBatch: 256,
   /** REGISTRY.md's record limit, checked before parsing rather than after. */
   recordBytes: 4_096,
@@ -123,6 +136,16 @@ export class ReplicationError extends Error {
     this.code = code;
   }
 }
+
+/**
+ * Bytes a `RECORDS` message spends on everything that is not a record.
+ *
+ * The map header, the `t` key and its value, the `from` key and a four-byte index, and the `recs`
+ * key with the array header that grows as the array does. Sixty-four bytes is several times what
+ * any of that costs, and the margin is the point: this bounds a reply the sender must be able to
+ * encode, and one byte short is a dropped connection while one record fewer is a round trip.
+ */
+const RECORDS_ENVELOPE_BYTES = 64;
 
 /**
  * What a session needs from the local registry.
@@ -478,13 +501,33 @@ export class ReplicationSession {
   private onWant(message: Want): ReceiveOutcome {
     if (message.count === 0 || message.count > LIMITS.wantCount) return EMPTY;
 
+    // Truncate to what a `RECORDS` can actually carry, counting BYTES rather than records.
+    //
+    // Counting only records was wrong for every log with more than a couple of hundred entries,
+    // which is every real one. `wantCount` and `recordsPerBatch` are both 256, and 256 records do
+    // not fit in a 65,536-byte message: fifteen maximum-size records fit, and 256 at the smallest
+    // encoding in this project's own conformance vectors is already over. So the first `WANT` of
+    // every cold sync produced a reply this peer could not encode, `send` in swarm.ts swallowed
+    // the throw, and the connection was destroyed with the failure attributed to the peer.
+    //
+    // The budget below is deliberately conservative rather than exact. `RECORDS` carries `t` and
+    // `from` beside the array, and a CBOR array's own header grows with its length, so a reply
+    // built to the byte is a reply that fails on the header — and the cost of being wrong here is
+    // a dropped connection, while the cost of sending one record fewer is one more round trip.
+    const budget = LIMITS.messageBytes - RECORDS_ENVELOPE_BYTES;
     const recs: Uint8Array[] = [];
+    let used = 0;
     const length = this.sink.length();
     for (let index = message.from; index < message.from + message.count; index += 1) {
       if (index >= length) break;
       const encoding = this.sink.encodingAt(index);
       if (encoding === null) break;
+      // Each byte string costs its own CBOR header too, and at these sizes that header is at most
+      // three bytes. Charged per record so the running total cannot drift under the real cost.
+      const cost = encoding.length + 3;
+      if (used + cost > budget && recs.length > 0) break;
       recs.push(encoding);
+      used += cost;
     }
     if (recs.length === 0) {
       // REPLICATION.md 4.3: declining is not an error. Serving is voluntary and no peer owes
