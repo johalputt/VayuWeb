@@ -192,6 +192,70 @@ Attacked: the new content path end to end, and the acceptance harness itself.
   case is a test that passes whatever the code does. Now asserted at the profile level, with the
   decoder's own guard kept and labelled as unreachable-until-the-profile-widens.
 
+#### Then the same treatment applied to VWIP-0005, which found seven more
+
+The roadmap ranks attacking a document above writing a module, on the evidence that every defect
+found in this implementation was a defect in a document first. A new normative document had just
+been added, so it was attacked. Each finding was written as a failing test against the
+specification's text before the text was changed, and each fix was mutation-tested by reverting
+the clause.
+
+- **The amplification figure in the security section was wrong by a factor of 64.** It said the
+  limits "cap one message's leverage at 64 megabytes of response for a few kilobytes of request" —
+  64 blocks at 1 MiB each. But 64 MiB does not fit in a 1,114,112-byte message, so that reply
+  cannot exist: the bounds interact and the binding one is the message size, which makes
+  `BLOCKS.blks` a bound on array iteration rather than on volume. The real figure is **272×**. It
+  overstated the exposure in the direction that makes a security section look thorough, which is
+  the reassuring kind of wrong. Now derived from the limits by a test rather than asserted in
+  prose.
+
+- **`BHELLO.max` could raise a receiver's own limit.** 3.4 said only that a peer MUST NOT send a
+  block larger than the remote's declared maximum. Read alone that makes the *advertisement* the
+  governing bound, so an implementer accepts a ten-megabyte block from a peer that declared ten
+  megabytes — a stranger raising the receiver's limit by asking it to. 3.4.a now caps a declared
+  maximum at the protocol's and makes the protocol bound win regardless.
+
+- **The identical-refusal rule was written as a duty on the receiver**, who cannot obey it.
+  "A receiver MUST NOT attempt to distinguish them by timing" is unenforceable: nothing stops a
+  receiver measuring, and a rule only the honest follow is not a rule. The duty is now on the
+  sender, who can. And `BDONE` moves from SHOULD to MUST for the same reason — if answering were
+  optional then *whether* a peer answers is itself the signal, and an optional message is a
+  channel.
+
+- **Two rules combined into a free deadlock.** Eight outstanding requests per connection, no
+  liveness obligation on a peer (deliberately), and no requirement that a requester ever gives up.
+  A peer that greets and then says nothing takes every slot permanently while breaking no rule.
+  4.5.a requires the requester to bound its own wait: the absence of a duty on one side has to be
+  paid for by a bound on the other.
+
+- **A `BWANT` could name one identifier sixty-four times** — a request for one block and a demand
+  for sixty-four, passing every limit in section 5. Refused by 3.6.a.
+
+- **"No cancellation" was presented as a free win.** It is a trade: a requester that obtained a
+  block elsewhere still receives the copy it no longer needs. The cost is now stated, with why it
+  is accepted — the wasted transfer is bounded and paid by the requester, while the disclosure
+  would be unbounded in time and paid by somebody who never chose it.
+
+- **An overclaim, which is the finding this project treats most seriously.** The
+  impossibility analysis said it is impossible to know what a peer holds without it choosing to
+  tell you. Falsifying that takes one request: name an identifier, see whether the block arrives.
+  A peer that holds it and serves it has answered, and serving is what the protocol is *for* —
+  6.1 and 6.2 make a refusal indistinguishable and can do nothing about a success. So an adversary
+  who knows a site's root can determine whether a given peer hosts it, at the cost of one transfer.
+  What those sections actually close is the **cheap** oracle: bulk enumeration, and probing without
+  paying for the transfer. That is real and worthwhile and much smaller than what was claimed. The
+  correction is recorded in the document rather than quietly edited.
+
+- Four conformance tests added for the new clauses (7.8 to 7.11), including the one that pins the
+  hard case: a peer holding none of the requested blocks and a peer holding all of them but serving
+  none must produce the same sequence of messages.
+
+- **`git checkout` on a specification file destroyed all six fixes mid-audit** — the third time in
+  this project that restoring from the index rather than from an explicit backup has thrown work
+  away. Recovered from the backup taken before the mutation run. The rule that was already written
+  down after the second time is the right one and was not followed: mutation cleanup copies from an
+  explicit backup, never from the index.
+
 ## [0.2.1] — 2026-08-06
 
 **The release 0.2.0 was supposed to be.** `v0.2.0`'s tag exists on the remote and produced no

@@ -321,3 +321,117 @@ test('AUDIT: the message set is exactly the four VWIP-0005 declares', () => {
     );
   }
 });
+
+/* -------------------------------------------------------------------------- */
+/* Adversarial pass over VWIP-0005 itself                                      */
+/* -------------------------------------------------------------------------- */
+
+const SPEC = (): string =>
+  readFileSync(new URL('../../docs/spec/VWIP-0005.md', import.meta.url), 'utf8');
+
+test('AUDIT: the published amplification figure is the one the limits actually produce', () => {
+  // **The first version of this section was wrong by a factor of 64.** It said the limits "cap
+  // one message's leverage at 64 megabytes of response for a few kilobytes of request" — but 64
+  // blocks of 1 MiB is 64 MiB, and the whole-message bound is 1,114,112 bytes, so that reply
+  // cannot exist. The two limits interact and the binding one is the message size.
+  //
+  // A wrong number in a security analysis is worse than no number: it is the reassuring kind of
+  // wrong, and a reviewer who checks it finds the section unserious. So the figure is derived
+  // here from the limits and compared against what the document says, the way every other counted
+  // claim in this corpus is checked against its source.
+  const maxRequest = BX_LIMITS.wantCids * BX_LIMITS.cidBytes;
+  const maxReply = BX_LIMITS.messageBytes;
+  const leverage = Math.floor(maxReply / maxRequest);
+
+  // 64 blocks at the block limit do NOT fit in one message. If this ever becomes true, the
+  // message bound has been raised and the figure below must be recomputed.
+  assert.ok(
+    BX_LIMITS.blocksPerMessage * BX_LIMITS.blockBytes > BX_LIMITS.messageBytes,
+    'the message bound is what caps a reply, not the block count',
+  );
+
+  const spec = SPEC();
+  const stated = /leverage at\s+roughly \*\*(\d+)×\*\*/.exec(spec);
+  assert.ok(stated, 'the security section must state the per-message leverage');
+  assert.equal(Number(stated[1]), leverage);
+});
+
+test('AUDIT: a declared maximum can never raise the receiver`s own bound', () => {
+  // VWIP-0005 3.4 said only that a peer MUST NOT send a block larger than the remote's declared
+  // `max`. Read alone, that makes the ADVERTISEMENT the governing bound — so an implementer could
+  // accept a 10 MiB block from a peer that declared 10 MiB, and a peer would then be able to raise
+  // the receiver's limit by asking it to. The protocol bound has to win, and the document has to
+  // say so.
+  assert.match(SPEC(), /MUST NOT declare a `max` above/);
+  assert.match(SPEC(), /regardless of any `max` (?:it|either peer) (?:has )?declared/);
+
+  // The implementation cannot get this wrong, and the reason is structural rather than careful:
+  // `decodeBlockMessage` holds no session state, so there is nowhere for a declared maximum to be
+  // remembered. Asserted by decoding an absurd BHELLO and then an over-limit block.
+  decodeBlockMessage(encodeBlockMessage({ t: 'BHELLO', v: 1, max: Number.MAX_SAFE_INTEGER }));
+  const over = raw([
+    ['t', 'BLOCKS'],
+    ['blks', [new Uint8Array(BX_LIMITS.blockBytes + 1)]],
+  ]);
+  assert.equal(
+    refusal(() => decodeBlockMessage(over)),
+    'LIMIT_EXCEEDED',
+  );
+});
+
+test('AUDIT: the identical-refusal duty is on the sender, who can obey it', () => {
+  // The rule was written as "a receiver MUST NOT attempt to distinguish them by timing, ordering
+  // or any other observable". That is unenforceable and points at the wrong party: nothing stops
+  // a receiver measuring, and a rule only the honest follow is not a rule.
+  //
+  // Worse, 3.7 made BDONE a SHOULD. If answering is optional then WHETHER you answer is itself
+  // the signal — a peer that reports the blocks it lacks and stays silent on the ones it declines
+  // has defeated the identical-message rule without ever sending a distinguishable message.
+  const spec = SPEC();
+  assert.match(spec, /\*\*MUST\*\* send `BDONE`/);
+  assert.doesNotMatch(spec, /SHOULD send `BDONE`/);
+  assert.match(spec, /obligation is on the sender/);
+});
+
+test('AUDIT: an outstanding request cannot be held open forever', () => {
+  // Eight want-slots per connection, no liveness obligation on a peer (4.5, deliberately), and no
+  // requirement that the requester ever gives up. A peer that greets and then answers nothing
+  // takes all eight slots permanently, and the requester waits for a reply the protocol has
+  // already said it is under no duty to send. The absence of a duty on one side has to be paid
+  // for by a bound on the other.
+  assert.match(SPEC(), /MUST bound how long a `BWANT` stays outstanding/);
+});
+
+test('AUDIT: the same identifier cannot be asked for repeatedly in one message', () => {
+  // 64 copies of one identifier is a request for one block and a demand for sixty-four, inside a
+  // message that passes every limit in section 5. It is small amplification, but it is free, and
+  // the fix is a sentence.
+  assert.match(SPEC(), /MUST NOT name the same identifier twice/);
+});
+
+test('AUDIT: each deliberate omission states its cost, not only its benefit', () => {
+  // Five features are refused, and an analysis that lists only what refusing them buys is an
+  // advertisement. The one that had no cost written down was cancellation: without it, a
+  // requester that obtained a block elsewhere still receives the copy it no longer needs, and
+  // that is bandwidth spent for a privacy gain — a trade, not a free win.
+  assert.match(SPEC(), /receives a copy it no longer needs/);
+});
+
+test('AUDIT: the impossibility claim does not overstate what 6.1 and 6.2 close', () => {
+  // **An overclaim in this project's own proposal, and the serious kind.** The section said it is
+  // "impossible" to know what a peer holds without it choosing to tell you. That is false, and
+  // falsifying it takes one request: ask for a specific identifier and see whether the block
+  // arrives. A peer that holds it and serves it has answered the question. Sections 6.1 and 6.2
+  // make a REFUSAL indistinguishable; they do nothing about a success, which is perfectly
+  // distinguishable and is the whole point of the protocol.
+  //
+  // So an adversary holding the root identifier of a site can determine whether a given peer
+  // hosts it, at the cost of one transfer, and nothing in this protocol prevents that. What is
+  // actually closed is the CHEAP oracle — bulk enumeration, and probing for existence without
+  // paying for the transfer. That is a real and worthwhile property. It is not the one that was
+  // claimed.
+  const spec = SPEC();
+  assert.doesNotMatch(spec, /impossible: knowing what a peer holds/);
+  assert.match(spec, /one request is enough to answer it/);
+  assert.match(spec, /bulk enumeration/);
+});
