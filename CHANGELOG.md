@@ -124,6 +124,38 @@ limit is 2.1 MB of hex zeros in the artifact, of which every byte after the firs
 information. The vectors file went from 159 KB to 2.25 MB before this was noticed. A runner builds
 the buffer from the stated length and tests exactly what one reading two million zeros would.
 
+### Fixed — the conformance artifact could not be used without this repository
+
+`docs/ROADMAP.md` tells contributors that `conformance/vectors.json` "is readable without any of
+this repository". That is the artifact's whole reason to exist — it is a contract for a second
+implementation, and a contract whose terms are defined in the other party's source code is not one.
+The claim went stale the same day, and the defect was this session's own doing.
+
+- **The `construct` recipe was undocumented.** A reader outside this repository met
+  `{"kind":"blocks-of-zeros","count":1,"bytes":1048577}` with no `message` beside it and nothing
+  anywhere saying what to build. The vector was not wrong; it was unusable, which for a conformance
+  artifact is the same thing. The notes now define the recipe format and every kind, close the
+  list, and say that a runner meeting an unknown kind must fail rather than skip — a skipped vector
+  reports as a passing one.
+
+- **`generatedFor` still named one document for seven suites.** It said `docs/spec/REGISTRY.md`
+  while the file carried vectors for six other specifications. Now a list.
+
+Worth naming separately: **every other test in `vectors.test.ts` imports the generator and the
+decoder**, so all of them prove the implementation agrees with *itself*. The new one reads nothing
+but the file, which is the only way to test the property the roadmap actually claims.
+
+### Fixed — a checker that was right until the shape changed
+
+Making `generatedFor` a list immediately failed `scripts/check-counts.py`: it counted "any
+non-empty top-level array" as a suite, so a metadata list read as an eighth one and two accurate
+sentences were sent to the failure list. A heuristic that is right until the shape changes reports
+the shape change as a documentation defect.
+
+A suite is now an array **of vectors**, and a vector is an object with a `name`. The same loose
+rule had been copied into the new test, and is fixed there too — it asserted `>= 7` and would have
+sat quietly at eight.
+
 ### Changed — two documents that had gone stale by being true
 
 - **`HOSTING.md` said "No publishing tool exists, no site has been published."** Both were true

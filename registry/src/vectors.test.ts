@@ -459,3 +459,83 @@ function candidate(hex: string): Candidate {
     valid: true,
   };
 }
+
+/* -------------------------------------------------------------------------- */
+/* The artifact has to stand on its own                                        */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: every field a runner must act on is explained inside the artifact', () => {
+  // `docs/ROADMAP.md` tells contributors that `conformance/vectors.json` "is readable without any
+  // of this repository". That is the artifact's entire reason to exist — it is a contract for a
+  // second implementation, and a contract whose terms are defined in the other party's source code
+  // is not one.
+  //
+  // The claim went stale the moment a `construct` recipe was added to the block-exchange suite. A
+  // reader outside this repository meets `{"kind":"blocks-of-zeros","count":1,"bytes":1048577}`
+  // with no `message` beside it and no statement anywhere of what to build from it. The vector is
+  // not wrong; it is unusable, which for a conformance artifact is the same thing.
+  //
+  // Every test in this file until now imported the generator and the decoder, so all of them
+  // proved the implementation agrees with ITSELF. This one deliberately reads nothing but the
+  // file.
+  const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')) as Record<string, unknown>;
+  const notes = artifact['notes'] as Record<string, string>;
+  const prose = Object.values(notes).join('\n');
+
+  // A suite is an array OF VECTORS, and a vector is an object with a name. "Any top-level array"
+  // was the first rule here and it was wrong the moment `generatedFor` became a list of source
+  // documents — the same loose heuristic that made `scripts/check-counts.py` announce an eighth
+  // suite and fail two accurate sentences.
+  const suites = Object.entries(artifact).filter(
+    ([, v]) =>
+      Array.isArray(v) &&
+      v.length > 0 &&
+      v.every((e) => typeof e === 'object' && e !== null && 'name' in e),
+  ) as [string, Record<string, unknown>[]][];
+  assert.equal(suites.length, 7, 'the artifact carries exactly its seven vector suites');
+
+  // Every recipe kind a runner would have to implement is named in the notes.
+  const kinds = new Set<string>();
+  for (const [, vectors] of suites) {
+    for (const vector of vectors) {
+      const construct = vector['construct'] as { kind?: string } | undefined;
+      if (construct?.kind !== undefined) kinds.add(construct.kind);
+    }
+  }
+  assert.ok(kinds.size > 0, 'this check is vacuous unless at least one recipe exists');
+  for (const kind of kinds) {
+    assert.ok(
+      prose.includes(kind),
+      `a runner must build "${kind}" and the artifact never says what it is`,
+    );
+  }
+
+  // A vector carries either the bytes or a recipe. Neither is a vector nobody can run.
+  for (const [suite, vectors] of suites) {
+    for (const vector of vectors) {
+      if (suite !== 'blockExchange' && suite !== 'replication') continue;
+      assert.ok(
+        vector['message'] !== undefined || vector['construct'] !== undefined,
+        `${suite}/${String(vector['name'])} carries neither a message nor a recipe`,
+      );
+    }
+  }
+
+  // And the document pointer must name the documents the suites actually come from. It said
+  // `docs/spec/REGISTRY.md` while the file carried vectors for six other specifications — true
+  // when written, and steadily less true afterwards, which is this corpus's most reliable defect.
+  const generatedFor = artifact['generatedFor'];
+  assert.ok(Array.isArray(generatedFor), 'generatedFor must name every source document');
+  for (const doc of [
+    'REGISTRY.md',
+    'RESOLUTION.md',
+    'REPLICATION.md',
+    'PROOF-OF-WORK.md',
+    'VWIP-0005.md',
+  ]) {
+    assert.ok(
+      (generatedFor as string[]).some((d) => d.endsWith(doc)),
+      `generatedFor omits ${doc}, which has vectors in this file`,
+    );
+  }
+});

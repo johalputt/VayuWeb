@@ -224,9 +224,19 @@ def count_vector_suites():
         data = json.loads(text)
     except ValueError as exc:
         return None, f"conformance/vectors.json is not valid JSON: {exc}"
-    suites = [k for k, v in data.items() if isinstance(v, list) and v]
+    # A suite is an array OF VECTORS, and a vector is an object with a name. "Any non-empty
+    # top-level array" was the earlier rule and it counted the wrong thing the first time a
+    # metadata list appeared beside the suites: `generatedFor` became a list of source documents
+    # and the corpus was instantly told it had eight suites, sending two accurate sentences to
+    # the failure list. A heuristic that is right until the shape changes is a heuristic that
+    # reports the shape change as a documentation defect.
+    suites = [
+        k
+        for k, v in data.items()
+        if isinstance(v, list) and v and all(isinstance(e, dict) and "name" in e for e in v)
+    ]
     if not suites:
-        return None, "conformance/vectors.json carries no non-empty suite arrays"
+        return None, "conformance/vectors.json carries no suite arrays of named vectors"
     return len(suites), None
 
 

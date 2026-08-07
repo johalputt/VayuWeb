@@ -45,7 +45,16 @@ const artifact = {
     'outcome: a record with two defects must produce the same code everywhere, which is what ' +
     'makes check order testable across implementations.',
   version: 1,
-  generatedFor: 'docs/spec/REGISTRY.md',
+  // Every document a suite here comes from. It named REGISTRY.md alone while the file carried
+  // vectors for six other specifications — true when written, and steadily less true afterwards.
+  // A runner outside this repository uses this to know which text to read beside which suite.
+  generatedFor: [
+    'docs/spec/REGISTRY.md',
+    'docs/spec/RESOLUTION.md',
+    'docs/spec/REPLICATION.md',
+    'docs/spec/PROOF-OF-WORK.md',
+    'docs/spec/VWIP-0005.md',
+  ],
   notes: {
     clock:
       'now is a Unix timestamp in seconds. Vectors never depend on the wall clock of the ' +
@@ -72,6 +81,15 @@ const artifact = {
       'implementation do". blockExchange is the wire format of VWIP-0005, which is a DRAFT: ' +
       'these vectors are generated so that the proposal carries executed encodings rather than ' +
       'transcribed ones, and they are not stable until it leaves Draft.',
+    construct:
+      'A vector carries EITHER a `message` in hex OR a `construct` recipe, never neither. A ' +
+      'recipe is used where publishing the bytes would publish no information: the one case ' +
+      'today is a block one octet over the megabyte limit, which written out is 2.1 MB of hex ' +
+      'zeros of which every byte after the first says nothing. Build the message from the recipe ' +
+      'and decode it exactly as you would a hex one. Kinds: `blocks-of-zeros` — a BLOCKS message ' +
+      'whose `blks` array holds `count` byte strings of `bytes` zero octets each, encoded as ' +
+      'deterministic CBOR per REGISTRY.md. This list is closed; a runner meeting a kind it does ' +
+      'not know must fail rather than skip, because a skipped vector reports as a passing one.',
   },
   vectors,
   convergence,
