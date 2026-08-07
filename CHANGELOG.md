@@ -232,14 +232,26 @@ been added, so it was attacked. Each finding was written as a failing test again
 specification's text before the text was changed, and each fix was mutation-tested by reverting
 the clause.
 
-- **The amplification figure in the security section was wrong by a factor of 64.** It said the
-  limits "cap one message's leverage at 64 megabytes of response for a few kilobytes of request" —
-  64 blocks at 1 MiB each. But 64 MiB does not fit in a 1,114,112-byte message, so that reply
-  cannot exist: the bounds interact and the binding one is the message size, which makes
-  `BLOCKS.blks` a bound on array iteration rather than on volume. The real figure is **272×**. It
-  overstated the exposure in the direction that makes a security section look thorough, which is
-  the reassuring kind of wrong. Now derived from the limits by a test rather than asserted in
-  prose.
+- **The amplification figure in the security section has been wrong twice, in the same
+  direction.** It first said the limits "cap one message's leverage at 64 megabytes of response for
+  a few kilobytes of request" — 64 blocks at 1 MiB each. But 64 MiB does not fit in a
+  1,114,112-byte message, so that reply cannot exist: the bounds interact and the binding one is
+  the message size, which makes `BLOCKS.blks` a bound on array iteration rather than on volume.
+  Wrong by 64×.
+
+  The correction was **272×**, and it was wrong too, for a worse reason: it divided the largest
+  reply by the *largest* request. Amplification is max(response) over **min**(request) — dividing
+  by the biggest possible request yields the smallest ratio, which is the opposite of a cap, two
+  sentences after the section opens "a small request names a large response". The real figure is
+  **19,784×**: a minimal `BWANT` naming one 36-byte identifier encodes to 53 bytes, and the largest
+  honest reply to it is 1,048,597. Wrong by another 73×, written by the pass that was fixing the
+  first error, and the test written alongside it enshrined the same mistake — so the number carried
+  a green check it had not earned.
+
+  Both flattered the protocol, which makes this the class worth naming rather than the instance: an
+  implementation sizing per-connection egress budgets from 272× would set them two orders of
+  magnitude too loose. The divisor is now the *measured* encoding of the minimal request rather
+  than a product of two limits, and the published figure is recomputed from the codec on every run.
 
 - **`BHELLO.max` could raise a receiver's own limit.** 3.4 said only that a peer MUST NOT send a
   block larger than the remote's declared maximum. Read alone that makes the *advertisement* the

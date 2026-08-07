@@ -329,31 +329,45 @@ test('AUDIT: the message set is exactly the four VWIP-0005 declares', () => {
 const SPEC = (): string =>
   readFileSync(new URL('../../docs/spec/VWIP-0005.md', import.meta.url), 'utf8');
 
-test('AUDIT: the published amplification figure is the one the limits actually produce', () => {
-  // **The first version of this section was wrong by a factor of 64.** It said the limits "cap
-  // one message's leverage at 64 megabytes of response for a few kilobytes of request" — but 64
-  // blocks of 1 MiB is 64 MiB, and the whole-message bound is 1,114,112 bytes, so that reply
-  // cannot exist. The two limits interact and the binding one is the message size.
+test('AUDIT: the published amplification figure is computed the way amplification is', () => {
+  // This figure has now been wrong twice, in the same direction, for two different reasons.
   //
-  // A wrong number in a security analysis is worse than no number: it is the reassuring kind of
-  // wrong, and a reviewer who checks it finds the section unserious. So the figure is derived
-  // here from the limits and compared against what the document says, the way every other counted
-  // claim in this corpus is checked against its source.
-  const maxRequest = BX_LIMITS.wantCids * BX_LIMITS.cidBytes;
-  const maxReply = BX_LIMITS.messageBytes;
-  const leverage = Math.floor(maxReply / maxRequest);
+  // First it said 64 MiB — 64 blocks at the 1 MiB block limit — for a reply that cannot exist,
+  // because 64 MiB does not fit in the 1,114,112-byte message bound. That was 64× too high.
+  //
+  // The correction was 272×, and it was wrong too: it divided the largest reply by the LARGEST
+  // request. Amplification is max(response) / min(request) — dividing by the biggest possible
+  // request yields the SMALLEST ratio, which is the opposite of a cap, two sentences after the
+  // section opens "a small request names a large response". The real figure is ~19,800×.
+  //
+  // Both errors flattered the protocol, and the second was written by the pass that was fixing
+  // the first. So the divisor is no longer a product of two limits — it is the encoded length of
+  // the smallest request that elicits the largest reply, measured here rather than reasoned about.
+  const minimalRequest = encodeBlockMessage({ t: 'BWANT', cids: [new Uint8Array(36)] });
+  const maximalReply = encodeBlockMessage({
+    t: 'BLOCKS',
+    blks: [new Uint8Array(BX_LIMITS.blockBytes)],
+  });
+  const leverage = Math.floor(maximalReply.length / minimalRequest.length);
 
-  // 64 blocks at the block limit do NOT fit in one message. If this ever becomes true, the
-  // message bound has been raised and the figure below must be recomputed.
+  // A maximal reply must not fit alongside a second one: if 64 blocks at the block limit ever fit
+  // in a message, the message bound has been raised and every figure here must be recomputed.
   assert.ok(
     BX_LIMITS.blocksPerMessage * BX_LIMITS.blockBytes > BX_LIMITS.messageBytes,
     'the message bound is what caps a reply, not the block count',
   );
+  // And the divisor must actually be small. A regression that made the minimal request large
+  // would silently restore the flattering number.
+  assert.ok(minimalRequest.length < 128, `a minimal BWANT is ${minimalRequest.length} bytes`);
 
   const spec = SPEC();
-  const stated = /leverage at\s+roughly \*\*(\d+)×\*\*/.exec(spec);
+  const stated = /roughly \*\*([\d,]+)×\*\*/.exec(spec);
   assert.ok(stated, 'the security section must state the per-message leverage');
-  assert.equal(Number(stated[1]), leverage);
+  assert.equal(Number(stated[1]!.replace(/,/g, '')), leverage);
+
+  // The old figure must not survive anywhere in the document, including in the paragraph that
+  // narrates the correction — a corrected number and its own history are easy to confuse.
+  assert.doesNotMatch(spec, /caps one message's leverage at\s+roughly \*\*272×\*\*/);
 });
 
 test('AUDIT: a declared maximum can never raise the receiver`s own bound', () => {
