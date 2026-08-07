@@ -7,7 +7,12 @@ privacy obligations, the origin and security model, and the error catalogue.
 The key words MUST, MUST NOT, SHALL, SHOULD, SHOULD NOT and MAY are to be
 interpreted as described in RFC 2119.
 
-Nothing described here has been implemented. This is a design under review.
+This is a design under review, and most of it now runs. The resolution algorithm is in
+`registry/src/resolve.ts`, the browsing proxy in `proxy.ts`, verified traversal in `fetch.ts`, and
+`vayuweb-registry serve` binds them — an unmodified browser renders a `.vayu` name through it, as
+`registry/scripts/acceptance-browser.mjs` demonstrates. What is *not* implemented is named where
+it matters rather than disclaimed here: there is no block exchange with another machine, so
+content is reachable only from a local store.
 
 ## Scope and conformance
 
@@ -183,10 +188,35 @@ timings through the control API, never in the served response.
 ## Record selection
 
 With several content entries present the resolver SHALL select in this order:
-`ipns`, `cid`, `peer`, `alias`. A `txt` entry is never a content source. A
-`peer` entry is the only option whose availability depends on one specific host
-being online, so it ranks below both content-addressed forms; `alias` is last
-because it costs another full resolution.
+`ipns`, `cid`, `alias`. A `txt` entry is never a content source, and `alias` is
+last because it costs another full resolution.
+
+A **`peer` entry is *not* a content source.** It is a **transport hint** — a host
+that may be asked for blocks — and the CID those blocks are checked against MUST
+still come from an `ipns` or `cid` entry. A record carrying only a `peer` entry
+therefore has no fetchable entry and returns 1421.
+
+This was `peer`, third in the order, with no condition on it. Step 11 fetches
+*the CID* and step 12 verifies *the bytes hash to the requested CID*; for a
+`peer` entry there is no CID, so step 12 had no operand and the bytes' only
+authority was the assertion of the host that sent them. That is the substitution
+clause 12.1 exists to close, reached through the front door of the selection
+rule — and reached by an *attacker* rather than only by a publisher, because the
+fallback rule below walks the resolver down the list when an entry "fails".
+Denying `ipns` and `cid` at the network layer is cheap, and it silently
+downgraded the reader from content-addressed verification to host trust on a
+name whose record, owner and signature were all genuine.
+
+One sentence in the corpus did refuse it — [CONTENT-SECURITY.md](CONTENT-SECURITY.md)
+section 6, item 10 — but it sat in a list of conformance *tests* in another
+document and turned on the term "snapshot-verified", which appeared exactly once
+in the entire corpus and was defined nowhere. A rule stated only as a test of an
+undefined term is not a rule an implementer can follow.
+
+Blocks fetched from a hinted peer are verified exactly as any other blocks are:
+recursively, against the referring CID, under clauses 12.1 to 12.3. That is what
+[VWIP-0005](VWIP-0005.md) specifies and it is the only shape in which asking a
+named host for content is safe.
 
 If the chosen entry fails, the resolver **SHOULD** fall back to the next, MUST
 record the fallback in the control API's per-request diagnostics, and MUST mark

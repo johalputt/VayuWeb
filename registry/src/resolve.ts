@@ -127,7 +127,20 @@ export const ALIAS_BUDGET = 3;
  * what the author actually published. The snapshot then serves the purpose HOSTING always said
  * it had: the fallback for when the pointer cannot be resolved.
  */
-export const SOURCE_ORDER = ['ipns', 'cid', 'peer', 'alias'] as const;
+/**
+ * The content sources, in the order RESOLUTION.md selects them.
+ *
+ * **`peer` is deliberately absent.** It was third here, and step 12 — "verify the bytes hash to
+ * the requested CID" — has no operand for a `peer` entry, so a resolver following the order
+ * served whatever the dialled host returned, unhashed. The fallback rule made it attacker-
+ * reachable rather than merely publisher-reachable: deny `ipns` and `cid` at the network layer,
+ * which is cheap, and the resolver walks down to a source nothing can verify.
+ *
+ * A `peer` entry is a transport hint. It says where blocks might be found; the CID they are
+ * checked against still comes from an `ipns` or `cid` entry, which is the shape VWIP-0005 gives
+ * block exchange and the only shape in which asking a named host for content is safe.
+ */
+export const SOURCE_ORDER = ['ipns', 'cid', 'alias'] as const;
 export type SourceType = (typeof SOURCE_ORDER)[number];
 
 export interface ParsedHost {

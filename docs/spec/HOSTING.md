@@ -7,8 +7,10 @@ directory on an author's disk and a CID a resolver can verify.
 The key words MUST, MUST NOT, SHALL, SHOULD, SHOULD NOT and MAY are to be
 interpreted as described in RFC 2119.
 
-Nothing described here has been implemented. There is no running network, no
-published site and no client binary. This is a design under review.
+This is a design under review. The content-addressing parameters, the UnixFS and dag-pb encoders
+and the availability rules are implemented and checked against published reference CIDs, and a
+site has been published and read back through a browser — see the Status section, which states
+precisely what is and is not built. There is still no running network and no client binary.
 
 ## Scope and conformance
 

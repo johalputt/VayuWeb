@@ -124,6 +124,53 @@ limit is 2.1 MB of hex zeros in the artifact, of which every byte after the firs
 information. The vectors file went from 159 KB to 2.25 MB before this was noticed. A runner builds
 the buffer from the stated length and tests exactly what one reading two million zeros would.
 
+### Fixed — `peer` was a content source nothing could verify
+
+**The substitution that clause 12.1 exists to close, reachable through the front door of the
+selection rule.**
+
+`RESOLUTION.md` ranked `peer` third in the content-source order with no condition on it. Step 11
+fetches *the CID* and step 12 verifies *the bytes hash to the requested CID* — for a `peer` entry
+there is no CID, so step 12 had no operand and the bytes' only authority was the assertion of the
+host that sent them. An implementer building a resolver from the document resolvers are built from
+dials the key in the record and serves whatever comes back, unhashed. `registry/src/resolve.ts`
+shipped `SOURCE_ORDER = ['ipns', 'cid', 'peer', 'alias']` to match.
+
+It was **attacker-reachable, not merely publisher-reachable**. The fallback rule walks the
+resolver down the list when an entry "fails", so denying `ipns` and `cid` at the network layer —
+cheap — silently downgraded the reader from content-addressed verification to host trust, on a
+name whose record, owner and signature were all genuine. That is precisely the substitution "a
+reader could never notice".
+
+One sentence in the corpus did refuse it, and the way it failed is the lesson.
+`CONTENT-SECURITY.md` section 6 item 10 said a `peer` record "is refused as a content source
+unless it can be **snapshot-verified**" — a rule sitting in a list of conformance *tests* in
+another document, turning on a term that appeared **exactly once in the entire repository** and
+was defined nowhere. A rule stated only as a test of an undefined term is not a rule an
+implementer can follow.
+
+A `peer` entry is now a **transport hint**: a host that may be asked for blocks, whose CID still
+comes from an `ipns` or `cid` entry and which are verified recursively under 12.1 to 12.3. That is
+exactly the shape [VWIP-0005](docs/spec/VWIP-0005.md) gives block exchange, and the only shape in
+which asking a named host for content is safe. A record carrying only a `peer` entry now returns
+1421.
+
+### Fixed — two documents said "Nothing described here has been implemented"
+
+`RESOLUTION.md` said it while eight modules under `registry/src` cite it as what they implement and
+an unmodified browser renders pages through it. `HOSTING.md` said it too, five modules deep — and
+**that is the same document whose Status section was corrected earlier in this same session**,
+three hundred lines below the sentence that was left standing.
+
+`scripts/check-status-claims.py` exists for exactly this sentence and missed both, on one
+adjective: its pattern was `nothing (?:here )?…implemented`, and the text read "Nothing
+**described** here has been implemented". Widened, and it caught both immediately.
+
+This is the second time this session that a checker was right until the phrasing moved. The
+earlier one counted "any top-level array" as a vector suite; this one matched one exact wording of
+a sentence nobody writes twice the same way. Both were mutation-tested by narrowing them back:
+each then misses the very defect it had just found.
+
 ### Fixed — a ratio the previous fix got wrong, in the paragraph about getting ratios wrong
 
 `REGISTRY.md` said a two-epoch activation floor was "a quarter of the floor … four times sooner

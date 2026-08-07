@@ -177,7 +177,7 @@ test('a weekly publisher is not frozen at their first snapshot', () => {
 });
 
 test('sources are preferred owner-signed-and-current first, and txt is never a source', () => {
-  // ipns before cid before peer before alias. The content is CID-addressed and hash-verified
+  // ipns before cid before alias. The content is CID-addressed and hash-verified
   // either way — an IPNS pointer yields a CID — so preferring the pointer costs no
   // verifiability. What it costs is a resolution step and a liveness assumption, which is the
   // right price for showing the reader what the author actually published.
@@ -202,16 +202,18 @@ test('sources are preferred owner-signed-and-current first, and txt is never a s
     )?.type,
     'ipns',
   );
+  // `peer` used to be selectable here and is not — see the AUDIT test below for why. A record
+  // carrying only a transport hint has no content source at all.
   assert.equal(
-    selectSource(rec('atlas', [entry('txt', 'x'), entry('peer', new Uint8Array(32))]))?.type,
-    'peer',
+    selectSource(rec('atlas', [entry('txt', 'x'), entry('peer', new Uint8Array(32))])),
+    null,
   );
   assert.equal(
     selectSource(rec('atlas', [entry('txt', 'only text')])),
     null,
     'txt is not a source',
   );
-  assert.deepEqual([...SOURCE_ORDER], ['ipns', 'cid', 'peer', 'alias']);
+  assert.deepEqual([...SOURCE_ORDER], ['ipns', 'cid', 'alias']);
 });
 
 test('an unknown entry type is never acted upon, however it is ordered', () => {
@@ -413,4 +415,56 @@ test('AUDIT: a revoked name says so, rather than telling the reader to renew', (
   assert.ok(step8, 'step 8 must exist');
   assert.match(step8[1]!, /lifecycle rules in\s+\[REGISTRY\.md\]/);
   assert.match(step8[1]!, /\*\*not\*\* by comparing `now` against `notAfter`/);
+});
+
+test('AUDIT: a peer entry is never a content source, because nothing can verify what it returns', () => {
+  // **This is the substitution clause 12.1 exists to close, reachable through the front door.**
+  //
+  // `peer` sat third in the selection order with no condition attached. Step 11 says "Fetch the
+  // CID over IPFS" and step 12 says "Verify the bytes hash to the requested CID" — for a `peer`
+  // entry there IS no CID, so step 12 has no operand and the bytes' only authority is the dialled
+  // host's own say-so. An implementer building from RESOLUTION.md, which is the document a
+  // resolver is built from, dials the key in the record and serves whatever comes back.
+  //
+  // The one sentence in the corpus that would have refused this lived in a different document's
+  // CONFORMANCE-TEST list (CONTENT-SECURITY.md section 6, item 10) and turned on the term
+  // "snapshot-verified", which appears exactly once in the whole repository and is defined
+  // nowhere. A rule stated only as a test of a term nobody defined is not a rule.
+  //
+  // And it was attacker-reachable rather than merely publisher-reachable: the fallback rule walks
+  // the resolver down the list when an entry "fails", so denying `ipns` and `cid` at the network
+  // layer — cheap — downgrades the reader from content-addressed verification to host trust,
+  // silently, on a name whose record and owner are entirely genuine.
+  //
+  // A `peer` is now a transport hint: a host to ask for blocks whose CID still comes from a
+  // content-addressed entry, which is exactly the shape VWIP-0005 gives block exchange.
+  assert.equal(
+    selectSource(rec('atlas', [entry('txt', 'x'), entry('peer', new Uint8Array(32))])),
+    null,
+    'a record whose only entry is peer has no content source',
+  );
+  assert.equal(
+    code(
+      resolveName(
+        'atlas.vayu',
+        ports({ 'atlas.vayu': rec('atlas', [entry('peer', new Uint8Array(32))]) }),
+        NOW,
+      ),
+    ),
+    'NO_USABLE_RECORD',
+  );
+
+  // A peer entry alongside a content-addressed one changes nothing about which is chosen — the
+  // hint is carried, not acted on as a source.
+  assert.equal(
+    selectSource(rec('atlas', [entry('peer', new Uint8Array(32)), entry('cid', CID)]))?.type,
+    'cid',
+  );
+
+  // The order no longer lists it, and the specification says why in the document a resolver is
+  // built from rather than in another document's test list.
+  assert.equal([...SOURCE_ORDER].includes('peer' as never), false);
+  const spec = readFileSync(new URL('../../docs/spec/RESOLUTION.md', import.meta.url), 'utf8');
+  assert.match(spec, /`peer` entry is \*?\*?not\*?\*? a content source/);
+  assert.match(spec, /transport hint/);
 });

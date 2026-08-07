@@ -372,9 +372,16 @@ Each is an executable test asserting on **observed behaviour**, not configuratio
 7. `serviceWorker.register()` rejects.
 8. The PAC file contains none of the forbidden functions (static check).
 9. `window.name` is empty after a navigation between two VayuWeb names.
-10. The whole-DAG snapshot is fetched and verified before any path is served, and a `peer` record
-    is refused as a content source unless it can be snapshot-verified — a live peer source would
+10. The whole-DAG snapshot is fetched and verified before any path is served, and a record whose
+    only entry is `peer` returns 1421 rather than being fetched — a live peer source would
     otherwise reintroduce the path-selection oracle that 5.6 exists to close.
+
+    This item used to say a `peer` record "is refused as a content source unless it can be
+    snapshot-verified". That was the only sentence in the corpus refusing it, it sat in a list of
+    conformance *tests* rather than in the resolution algorithm, and "snapshot-verified" appeared
+    exactly once in the whole repository and was defined nowhere. [RESOLUTION.md](RESOLUTION.md)
+    now makes `peer` a transport hint rather than a source, in the document a resolver is built
+    from, so this item tests a rule that exists instead of naming a term that did not.
 
 Test 3 is the one that matters, and test 4 is the one that keeps test 3 honest. Constitution
 Article 14 requires this form of test, and Article 44.8 places it in the same conformance run as

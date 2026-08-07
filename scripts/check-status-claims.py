@@ -37,7 +37,10 @@ CLAIMS = [
     re.compile(r"not yet implemented", re.I),
     re.compile(r"no implementation (?:yet|exists)", re.I),
     re.compile(r"there is no implementation", re.I),
-    re.compile(r"nothing (?:here )?(?:has been |is )implemented", re.I),
+    # `\w+ ` absorbs an adjective. "Nothing DESCRIBED here has been implemented" sat in
+    # RESOLUTION.md, unmatched, while a browser rendered pages through resolve.ts, proxy.ts and
+    # fetch.ts -- a pattern that is exact about a sentence nobody writes twice the same way.
+    re.compile(r"nothing (?:\w+ )?(?:here |below |in this document )?(?:has been |is )implemented", re.I),
     re.compile(r"no (?:registry|proxy|client) code exists", re.I),
 ]
 
@@ -80,7 +83,10 @@ PROJECT_SCOPE = {
 PROJECT_CLAIMS = [
     re.compile(r"there is no implementation", re.I),
     re.compile(r"no implementation (?:yet|exists)", re.I),
-    re.compile(r"nothing (?:here )?(?:has been |is )implemented", re.I),
+    # `\w+ ` absorbs an adjective. "Nothing DESCRIBED here has been implemented" sat in
+    # RESOLUTION.md, unmatched, while a browser rendered pages through resolve.ts, proxy.ts and
+    # fetch.ts -- a pattern that is exact about a sentence nobody writes twice the same way.
+    re.compile(r"nothing (?:\w+ )?(?:here |below |in this document )?(?:has been |is )implemented", re.I),
     re.compile(r"no code to write", re.I),
     re.compile(r"not yet implemented", re.I),
 ]
