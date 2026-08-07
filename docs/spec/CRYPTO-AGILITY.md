@@ -63,9 +63,9 @@ never reused, never renumbered.
 | Suite | Signature | Record hash | Key / signature bytes | Record limit | Status |
 |---|---|---|---|---|---|
 | 1 | Ed25519 | BLAKE2b-256 | 32 / 64 | 4,096 | **Launch default.** Fast, small, universally implemented. Not quantum-resistant. |
-| 2 | Ed25519 **+** ML-DSA-65 (hybrid) | BLAKE2b-256 | 1,984 / 3,373 | 12,288 | Reserved — transition. Both signatures MUST verify; secure if *either* remains unbroken. |
-| 3 | ML-DSA-65 | SHA3-256 | 1,952 / 3,309 | 12,288 | Reserved — post-quantum. FIPS 204. |
-| 4 | SLH-DSA-SHAKE-128s | SHAKE-256 | 32 / 7,856 | 16,384 | Reserved — conservative fallback. FIPS 205. Hash-based, minimal assumptions, very large signatures. The break-glass suite if lattice assumptions fall. |
+| 2 | Ed25519 **+** ML-DSA-65 (hybrid) | BLAKE2b-256 | 1,984 / 3,373 | 10,240 | Reserved — transition. Both signatures MUST verify; secure if *either* remains unbroken. |
+| 3 | ML-DSA-65 | SHA3-256 | 1,952 / 3,309 | 10,240 | Reserved — post-quantum. FIPS 204. |
+| 4 | SLH-DSA-SHAKE-128s | SHAKE-256 | 32 / 7,856 | 12,288 | Reserved — conservative fallback. FIPS 205. Hash-based, minimal assumptions, very large signatures. The break-glass suite if lattice assumptions fall. |
 
 The **Record hash** column is the hash a record's `record_hash` uses, not the hash inside the
 signature scheme. Suite 1 previously read `SHA-256` here, which disagreed with

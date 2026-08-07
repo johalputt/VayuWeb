@@ -97,3 +97,55 @@ test('AUDIT: the suite table and CRYPTO-AGILITY.md state the same sizes', () => 
   assert.equal(SUITES.get(1)!.hash, 'BLAKE2b-256');
   assert.match(spec('REGISTRY.md'), /BLAKE2b-256\s+is chosen because Hypercore already uses it/);
 });
+
+test('AUDIT: each reserved record limit is the number its own stated derivation produces', () => {
+  // REGISTRY.md gives the rule and then tells the reader not to check it: the reserved limits are
+  // "suite 1's non-signature content plus that suite's own key and signature material, rounded to
+  // a whole number of KiB", followed by **"They are not extra room."**
+  //
+  // They were extra room. Suite 1's non-signature content is 4,096 - 96 = 4,000 bytes, so suite 4
+  // needs 4,000 + 32 + 7,856 = 11,888 -> 12 KiB, and it carried 16,384 — 4,096 bytes of slack,
+  // more than an entire suite-1 record. Suites 2 and 3 each carried 2,048.
+  //
+  // This is the pre-decode bound on untrusted input, so the slack is not cosmetic: on the day the
+  // break-glass suite activates, every verifier would parse a third more attacker-supplied bytes
+  // per record than the derivation justifies, forever, with no VWIP having decided it. The old
+  // test only asserted each reserved limit exceeded 4,096, so nothing derived them from the rule.
+  //
+  // "They are not extra room" is the sentence that tells a reviewer not to check, and it is the
+  // one that was false. That pairing is worth more than the arithmetic.
+  const launch = SUITES.get(1)!;
+  const nonSignatureContent =
+    launch.maxRecordBytes - launch.publicKeyLength - launch.signatureLength;
+  assert.equal(nonSignatureContent, 4000);
+
+  const failures: string[] = [];
+  for (const [id, suite] of SUITES) {
+    if (id === 1) continue;
+    const needed = nonSignatureContent + suite.publicKeyLength + suite.signatureLength;
+    const derived = Math.ceil(needed / 1024) * 1024;
+    if (suite.maxRecordBytes !== derived) {
+      failures.push(
+        `suite ${id}: needs ${needed} -> ${derived}, carries ${suite.maxRecordBytes} ` +
+          `(${suite.maxRecordBytes - derived} bytes of slack)`,
+      );
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+test('the parsing-work factor REGISTRY.md quotes is the one the limits produce', () => {
+  // "Sizing the outer bound to the largest reserved suite instead would hand an attacker four
+  // times the parsing work per record." Four was 16,384/4,096 — true of the inflated value and
+  // not of the derivation, so correcting the limits silently made an adjacent claim wrong. A
+  // number stated beside a number that changed is the one that goes stale unnoticed.
+  const largestReserved = Math.max(
+    ...[...SUITES.entries()].filter(([id]) => id !== 1).map(([, s]) => s.maxRecordBytes),
+  );
+  const factor = largestReserved / SUITES.get(1)!.maxRecordBytes;
+  const spec = readFileSync(new URL('../../docs/spec/REGISTRY.md', import.meta.url), 'utf8');
+  const stated = /would hand an attacker ([a-z]+)\n?\s*times the parsing work/.exec(spec);
+  assert.ok(stated, 'REGISTRY.md must state the parsing-work factor');
+  const words: Record<string, number> = { two: 2, three: 3, four: 4, five: 5 };
+  assert.equal(words[stated[1]!], factor);
+});

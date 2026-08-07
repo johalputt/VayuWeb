@@ -838,16 +838,28 @@ either number requires a ratified VWIP, per [docs/spec/VWIP-0000.md](VWIP-0000.m
 **Per suite, not one global constant**, per [CRYPTO-AGILITY.md](CRYPTO-AGILITY.md) 3.2: an
 ML-DSA-65 key is roughly 1,952 bytes and its signature 3,309, so a suite-3 record cannot fit in
 suite 1's allowance, and a flat limit would make the migration impossible without changing a
-number every deployed verifier already enforces. The reserved limits are 12,288 bytes for suites
-2 and 3 and 16,384 for suite 4 — suite 1's non-signature content plus that suite's own key and
+number every deployed verifier already enforces. The reserved limits are 10,240 bytes for suites
+2 and 3 and 12,288 for suite 4 — suite 1's non-signature content plus that suite's own key and
 signature material, rounded to a whole number of KiB. They are not extra room.
+
+That last sentence was the only one here a reviewer would take on trust, and it was the false one.
+The limits were 12,288 / 12,288 / 16,384, which the stated derivation does not produce: suite 1's
+non-signature content is 4,096 − 96 = 4,000 bytes, so suite 4 needs 4,000 + 32 + 7,856 = 11,888
+and rounds to 12 KiB. It carried 16,384 — **4,096 bytes of slack, more than an entire suite-1
+record** — and suites 2 and 3 carried 2,048 each. Since this is the pre-decode bound on untrusted
+input, that slack is parsing work an attacker gets for free on the day the break-glass suite
+activates, forever, with no VWIP having decided it. The values now follow the rule, and a test
+recomputes each one from `publicKeyLength + signatureLength + 4,000` rather than asserting it.
 
 The check therefore happens **twice**, and a second implementation will meet this: `suite` is a
 field *inside* the record, so nothing can consult a per-suite limit until the bytes are decoded,
 and decoding unbounded input is the denial-of-service the limit exists to prevent. So the bound
 applied before decoding is the maximum over **active** suites — 4096 today — and the suite's own
 bound is applied after parsing. Sizing the outer bound to the largest *reserved* suite instead
-would hand an attacker four times the parsing work per record for suites no key can sign with.
+would hand an attacker three times the parsing work per record for suites no key can sign with.
+(It said *four* — 16,384 / 4,096 — which was true of the inflated limit above and went stale the
+moment that limit was corrected. A number stated beside a number that changed is the one nobody
+rechecks, so a test now derives this factor from the suite table too.)
 
 ## Worked Example
 

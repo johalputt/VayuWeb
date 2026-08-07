@@ -124,6 +124,32 @@ limit is 2.1 MB of hex zeros in the artifact, of which every byte after the firs
 information. The vectors file went from 159 KB to 2.25 MB before this was noticed. A runner builds
 the buffer from the stated length and tests exactly what one reading two million zeros would.
 
+### Fixed — the reserved suite limits did not follow their own stated derivation
+
+`REGISTRY.md` gives the rule and then tells the reader not to check it: the reserved record limits
+are "suite 1's non-signature content plus that suite's own key and signature material, rounded to a
+whole number of KiB", followed by **"They are not extra room."**
+
+They were extra room. Suite 1's non-signature content is 4,096 − 96 = 4,000 bytes, so suite 4 needs
+4,000 + 32 + 7,856 = 11,888 → 12 KiB. It carried **16,384 — 4,096 bytes of slack, more than an
+entire suite-1 record.** Suites 2 and 3 carried 2,048 each.
+
+This is the **pre-decode bound on untrusted input**, so the slack is not cosmetic: on the day the
+break-glass suite activates, every verifier would parse a third more attacker-supplied bytes per
+record than the derivation justifies, forever, with no VWIP having decided it. Corrected to
+10,240 / 10,240 / 12,288 in `suites.ts`, `CRYPTO-AGILITY.md` and `REGISTRY.md`, with a test that
+recomputes each limit from the rule rather than asserting the number. The old test only checked
+that each reserved limit exceeded 4,096, so nothing derived them at all.
+
+**And correcting them made an adjacent claim wrong**, which is the part worth keeping.
+"Sizing the outer bound to the largest reserved suite would hand an attacker **four** times the
+parsing work" was 16,384 / 4,096 — true of the inflated limit, stale the instant it changed. It is
+three, and a second test derives that factor from the suite table too. A number stated beside a
+number that changed is the one nobody rechecks.
+
+The pairing is the lesson rather than the arithmetic: **"They are not extra room" was the only
+sentence in the passage a reviewer would take on trust, and it was the false one.**
+
 ### Fixed — `peer` was a content source nothing could verify
 
 **The substitution that clause 12.1 exists to close, reachable through the front door of the

@@ -87,7 +87,11 @@ const TABLE: readonly Suite[] = [
     // other — which is the shape of the classic hybrid implementation error 4.4 warns about.
     publicKeyLength: 32 + 1952,
     signatureLength: 64 + 3309,
-    maxRecordBytes: 12288,
+    // 4,000 + 1,984 + 3,373 = 9,357, rounded to a whole KiB. This carried 12,288 — 2,048 bytes
+    // of slack the stated derivation does not produce, behind the sentence "They are not extra
+    // room". It is the pre-decode bound on untrusted input, so slack here is parsing work an
+    // attacker gets for free on the day the suite activates.
+    maxRecordBytes: 10240,
     active: false,
     status: 'Reserved — transition. Both signatures MUST verify; secure if either survives.',
   },
@@ -97,7 +101,8 @@ const TABLE: readonly Suite[] = [
     hash: 'SHA3-256',
     publicKeyLength: 1952,
     signatureLength: 3309,
-    maxRecordBytes: 12288,
+    // 4,000 + 1,952 + 3,309 = 9,261, rounded to a whole KiB.
+    maxRecordBytes: 10240,
     active: false,
     status: 'Reserved — post-quantum. FIPS 204.',
   },
@@ -107,7 +112,9 @@ const TABLE: readonly Suite[] = [
     hash: 'SHAKE-256',
     publicKeyLength: 32,
     signatureLength: 7856,
-    maxRecordBytes: 16384,
+    // 4,000 + 32 + 7,856 = 11,888, rounded to a whole KiB. This carried 16,384 — 4,096 bytes of
+    // slack, more than an entire suite-1 record.
+    maxRecordBytes: 12288,
     active: false,
     status: 'Reserved — conservative fallback. FIPS 205; the break-glass suite.',
   },
