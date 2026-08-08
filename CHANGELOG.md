@@ -10,6 +10,51 @@ it.
 
 ## [Unreleased]
 
+### Added — the control-API client the crate has been advertising
+
+`client/Cargo.toml` has described this crate as "identity handling and the control-API client"
+since it was written, and the crate held only the first half. A package description is a pushed
+artifact like any other, and the honest options were to correct the description or to make it true.
+
+`client/src/control.rs` makes it true, and its shape follows the server's rather than being
+invented alongside it:
+
+- **`ControlEndpoint` has one variant, a socket path.** The server refusing to bind TCP is worth
+  nothing if the client offers to speak it, because the pair is what an operator configures.
+  LOCAL-SURFACE.md 1.1 says a TCP control listener is non-conformant "even when it is opt-in and
+  even when it is 'for development', because a development affordance is an attack surface that
+  ships"; the same reasoning binds this end. `127.0.0.1:7653`, `localhost:7653`, `[::1]:7653` and a
+  `http://` URL are all refused at construction, and four real socket paths are accepted — a guard
+  that refuses everything would satisfy the first half of that test and make the client useless.
+- **Requests are an enumeration of constants**, so nothing a user typed reaches the request line
+  and request splitting is unreachable rather than defended against. A test feeds a socket path
+  containing `\r\nX-Injected: 1` and confirms it appears nowhere in the head.
+- **The token is borrowed from a `Secret` straight into the byte buffer that goes on the wire**,
+  never through an owned `String`, and the test counts its occurrences rather than checking the
+  header is present: the failure worth catching is a second copy, which a presence check cannot
+  see. `Origin` and `Upgrade` are asserted absent, because the server refuses both before it
+  authenticates and a client that *could* send one is a client an integration might teach to.
+- **A response body is decoded once or refused.** No lossy decode: the sibling implementation
+  shipped a body decoded as latin-1 at one end and re-encoded as UTF-8 at the other, and a lossy
+  decode here would hand the caller a plausible string that is not what arrived.
+- **`require_success` separates "the request completed" from "the request was answered"**, so a
+  401 body cannot be returned where a status was expected.
+
+All four fixes were mutation-tested: accepting a TCP address, emitting a second copy of the token,
+treating every status as success, and decoding the body lossily each fail a test.
+
+### Changed — the CLI tests spend two proof-of-work solves instead of four
+
+`cli.test.ts` ran a real Argon2id solve per registration, which is deliberate — stubbing the solver
+would take the register command's own ordering out of the test, and that ordering is half of what
+the tests were written for. Four of them put the file at 215 seconds locally and pushed the CI job
+close to its timeout, which is how a thorough suite becomes one that gets switched off.
+
+A record is signed over its own content and not over the log it lands in, so one registration is
+copied into a fresh log per test: the same evidence, since the bytes were still produced by the CLI
+through the solver in the order the command performs, and each test still gets its own log to
+mutate. 215 seconds to 132.
+
 ### Fixed — renewing a name took it down, and the flag check could not have caught it
 
 `records` was hardcoded to `[]` for every successor operation except `UPDATE`. REGISTRY.md says

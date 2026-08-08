@@ -5,9 +5,17 @@
  * involved: each function did what its own contract said, and the tool as a whole still lost what
  * the user typed. That is the level the bug lives at, so it is the level the test runs at.
  */
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -54,6 +62,57 @@ const NOW = 1_782_518_400;
 
 const DIGEST = sha256(new TextEncoder().encode('atlas observatory'));
 const CID_TEXT = encodeCid({ version: 1, codec: CID_PARAMETERS.codecDagPb, digest: DIGEST });
+
+/** The name every test here registers. Sixteen characters sits at the four-bit floor. */
+const NAME = 'atlasobservatory.vayu';
+
+/**
+ * One registered log, solved once and copied for each test that needs one.
+ *
+ * **Every solve here is a real Argon2id at 64 MiB**, which is the point — stubbing the solver would
+ * take the register command's own ordering out of the test, and that ordering is half of what went
+ * wrong. But four of them in one file put this file at 215 seconds locally and past the CI job's
+ * timeout on a shared runner, which is a test suite that stops being run rather than a thorough one.
+ *
+ * A record is signed over its own content and not over the log it lands in, so registering once and
+ * copying the log file is the same evidence as registering four times: the bytes were produced by
+ * the CLI, through the solver, in the order the command performs. Each test still gets its own log
+ * to mutate, so nothing here couples one test's outcome to another's.
+ */
+let solved: { key: string; log: string; dir: string } | null = null;
+
+function registeredLog(into: string): { log: string; key: string } {
+  if (solved === null) {
+    const dir = mkdtempSync(join(tmpdir(), 'vayuweb-cli-fixture-'));
+    const key = join(dir, 'key');
+    const log = join(dir, 'log');
+    assert.equal(run(['keygen', '--key', key]).code, 0);
+    const registered = run([
+      'register',
+      '--log',
+      log,
+      '--key',
+      key,
+      '--name',
+      NAME,
+      '--cid',
+      CID_TEXT,
+      '--at',
+      String(NOW),
+    ]);
+    assert.equal(registered.code, 0, registered.out + registered.err);
+    solved = { key, log, dir };
+  }
+  const log = join(into, 'log');
+  const key = join(into, 'key');
+  copyFileSync(solved.log, log);
+  copyFileSync(solved.key, key);
+  return { log, key };
+}
+
+after(() => {
+  if (solved !== null) rmSync(solved.dir, { recursive: true, force: true });
+});
 
 /* -------------------------------------------------------------------------- */
 /* What you typed is what gets stored                                          */
@@ -364,24 +423,7 @@ test('AUDIT: renewing a name does not take it down', () => {
   // `cmdSuccessor`: the record builder did what it was told and what it was told was the defect.
   const { dir, done } = scratch();
   try {
-    const key = join(dir, 'key');
-    const log = join(dir, 'log');
-    assert.equal(run(['keygen', '--key', key]).code, 0);
-
-    const registered = run([
-      'register',
-      '--log',
-      log,
-      '--key',
-      key,
-      '--name',
-      'atlasobservatory.vayu',
-      '--cid',
-      CID_TEXT,
-      '--at',
-      String(NOW),
-    ]);
-    assert.equal(registered.code, 0, registered.out + registered.err);
+    const { log, key } = registeredLog(dir);
 
     // Inside the renewal window, which opens 60 days before a one-year term expires — 305 days in,
     // so 320 is comfortably inside it and comfortably past the 300-second minimum interval.
@@ -438,25 +480,7 @@ test('update refuses to guess when no entry is named, rather than emptying the n
   // the right verb. It refuses, and names the way to mean it.
   const { dir, done } = scratch();
   try {
-    const key = join(dir, 'key');
-    const log = join(dir, 'log');
-    run(['keygen', '--key', key]);
-    assert.equal(
-      run([
-        'register',
-        '--log',
-        log,
-        '--key',
-        key,
-        '--name',
-        'atlasobservatory.vayu',
-        '--cid',
-        CID_TEXT,
-        '--at',
-        String(NOW),
-      ]).code,
-      0,
-    );
+    const { log, key } = registeredLog(dir);
 
     const bare = run([
       'update',
