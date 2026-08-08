@@ -1045,6 +1045,10 @@ async function cmdServe(args: Args): Promise<number> {
       lookup: (label, tld) => store.lookup(label, tld)?.current.record ?? null,
       hasVerifiedHead: () => true,
     },
+    // The log's length is the registry's generation: every operation that could change an answer
+    // this resolver has cached is an append, so a length that has not moved is a registry whose
+    // answers cannot have changed.
+    generation: () => store.length,
   });
 
   out(`browsing proxy   http://${proxy.address}`);

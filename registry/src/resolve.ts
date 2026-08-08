@@ -32,6 +32,7 @@
 import { isRatifiedTld, labelRejection, parseAlias } from './names.ts';
 import { stateAt, lifecycleOf } from './lifecycle.ts';
 import type { RegistryRecord, RecordEntry } from './record.ts';
+import type { ResolutionCache } from './cache.ts';
 
 /** Numbered errors, exactly as the catalogue in RESOLUTION.md defines them. */
 export const RESOLVE_ERRORS = {
@@ -272,7 +273,12 @@ export function sourceCandidates(record: RegistryRecord): readonly RecordEntry[]
  * and must not fall back across an integrity failure, which signals an attack rather than an
  * availability problem.
  */
-export function resolveName(host: string, ports: ResolverPorts, now: number): Outcome {
+export function resolveName(
+  host: string,
+  ports: ResolverPorts,
+  now: number,
+  cache?: ResolutionCache,
+): Outcome {
   let diagnostics = emptyDiagnostics(host);
   const seen = new Set<string>();
   let current = host;
@@ -309,30 +315,72 @@ export function resolveName(host: string, ports: ResolverPorts, now: number): Ou
     }
     seen.add(key);
 
-    // Step 7: registry lookup, local only.
-    if (!ports.hasVerifiedHead()) {
-      return fail('REGISTRY_UNAVAILABLE', 'no verified log head', diagnostics);
+    // Steps 5 and 6: the caches, in the order the specification puts them and INSIDE the loop, so
+    // an alias hop consults them for the name it lands on. They sat outside `resolveName`
+    // entirely before, which meant a chain ending at a negatively cached name paid for a full
+    // registry lookup that a direct request for the same name would have skipped.
+    const cached = cache?.positive(key, now) ?? null;
+    if (cached === null) {
+      const refused = cache?.negative(key, now) ?? null;
+      if (refused !== null) {
+        // Step 6: "return its stored error". The stored one — not a fixed code chosen because
+        // only one was ever cached, which is what a single-code cache degrades into the moment a
+        // second code joins it.
+        return fail(refused, `${key} answered from the negative cache`, {
+          ...diagnostics,
+          resolvedFrom: 'cache',
+        });
+      }
     }
-    const record = ports.lookup(label, tld);
-    if (record === null) {
-      return fail('NAME_NOT_FOUND', `${key} is not registered`, diagnostics);
-    }
-    diagnostics = { ...diagnostics, seq: record.seq, resolvedFrom: 'registry' };
 
-    // Step 8: validity window. An expired name MUST NOT resolve even when its content is still
-    // held locally — otherwise a lapsed registration keeps serving to whoever never re-queried.
-    const state = stateAt(record, now);
-    if (lifecycleOf(record).revoked && state !== 'FREE') {
-      return fail('NAME_REVOKED', `${key} was revoked at ${record.notBefore}`, diagnostics);
-    }
-    if (state === 'GRACE') {
-      return fail('NAME_EXPIRED', `${key} expired at ${record.notAfter}`, diagnostics);
-    }
-    if (state === 'QUARANTINE') {
-      return fail('NAME_QUARANTINED', `${key} is on hold`, diagnostics);
-    }
-    if (state !== 'LIVE') {
-      return fail('NAME_NOT_FOUND', `${key} is ${state.toLowerCase()}`, diagnostics);
+    /** Record a negative answer under the name it is a fact about, and refuse. */
+    const refuse = (error: ResolveErrorName, detail: string): Outcome => {
+      cache?.putNegative(key, error, now);
+      return fail(error, detail, diagnostics);
+    };
+
+    let record: RegistryRecord;
+    if (cached !== null) {
+      // Step 5: "take its record bundle and go to step 9", which skips the validity window at
+      // step 8. That skip is only safe because a positive entry's TTL is capped at `notAfter`;
+      // see `putPositive`.
+      record = cached;
+      diagnostics = { ...diagnostics, seq: record.seq, resolvedFrom: 'cache' };
+    } else {
+      // Step 7: registry lookup, local only.
+      if (!ports.hasVerifiedHead()) {
+        // Not cached, whatever the table said — this is a statement about this resolver rather
+        // than about the name, and it stops being true without any name changing.
+        return fail('REGISTRY_UNAVAILABLE', 'no verified log head', diagnostics);
+      }
+      const looked = ports.lookup(label, tld);
+      diagnostics = { ...diagnostics, resolvedFrom: 'registry' };
+      if (looked === null) {
+        return refuse('NAME_NOT_FOUND', `${key} is not registered`);
+      }
+      record = looked;
+      diagnostics = { ...diagnostics, seq: record.seq };
+
+      // Step 8: validity window. An expired name MUST NOT resolve even when its content is still
+      // held locally — otherwise a lapsed registration keeps serving to whoever never re-queried.
+      const state = stateAt(record, now);
+      if (lifecycleOf(record).revoked && state !== 'FREE') {
+        return refuse('NAME_REVOKED', `${key} was revoked at ${record.notBefore}`);
+      }
+      if (state === 'GRACE') {
+        return refuse('NAME_EXPIRED', `${key} expired at ${record.notAfter}`);
+      }
+      if (state === 'QUARANTINE') {
+        return refuse('NAME_QUARANTINED', `${key} is on hold`);
+      }
+      if (state !== 'LIVE') {
+        return refuse('NAME_NOT_FOUND', `${key} is ${state.toLowerCase()}`);
+      }
+
+      // Step 14's "populate the caches", for the record half. Here rather than after the content
+      // fetch, because this is where the record was established live and the content layer's
+      // outcome says nothing about the registry.
+      cache?.putPositive(key, record, now);
     }
 
     // Step 9: record selection.

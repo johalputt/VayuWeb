@@ -10,6 +10,66 @@ it.
 
 ## [Unreleased]
 
+### Added — the resolution cache, which covered one of five codes and had no positive half
+
+RESOLUTION.md's caching policy names five cacheable error codes at three TTLs, a positive record
+cache at 300 seconds capped at `notAfter`, and four codes that must never be cached. What existed
+was one code, at one TTL, in a cache that stored a boolean — so a hit answered `NAME_NOT_FOUND`
+whatever had been put in it. The two bugs concealed each other: nothing but `NAME_NOT_FOUND` was
+ever stored, so nothing ever returned the wrong code, and the moment a second code joined it every
+hit would have told a reader that a name they hold is a name nobody has registered.
+`resolvedFrom: 'cache'` was declared in the diagnostics and assigned nowhere, because there was no
+positive cache at all.
+
+`registry/src/cache.ts` is the policy and the two bounded maps it governs. The TTL table is
+**total** — every code in the catalogue is either a number the specification states or a `null` the
+file justifies — and typed so that adding a code to `RESOLVE_ERRORS` fails to compile until this
+one says what caching it means. A policy decided by an absence is the permissive one every time.
+
+The lookups moved **into** the algorithm, at steps 5 and 6 where the specification puts them, so an
+alias hop consults them for the name it lands on. They used to sit in the proxy, outside the loop,
+which meant a chain ending at a negatively cached name paid for a registry lookup that a direct
+request for the same name would have skipped.
+
+**A positive hit skips the validity window at step 8, so the cap at `notAfter` is what makes the
+skip safe rather than merely fast.** Without it, getting a name cached one second before it lapses
+keeps it serving for the rest of the TTL — which step 8 forbids in terms, "even if the old `cid` is
+still held locally", and a cache is a local copy.
+
+And the TTLs are now a bound rather than a promise. Every record that can invalidate a cached
+answer arrives as an append, so a resolver holding its own log knows the moment one does:
+`setGeneration` takes any number that moves when the registry does, and drops everything when it
+moves. RESOLUTION.md accepts in terms that a 300-second record cache means "five minutes bounds how
+long a superseded owner key stays usable" — and on a resolver whose registry is local that is five
+minutes bought for nothing, because the lookup it saves is a map read. A `REVOKE` now takes effect
+on the next request. The clause has been amended to say a local resolver SHOULD do this, and to
+add `NAME_REVOKED` to the negative table, where it was missing because 1412 was added to the
+catalogue after that table was written.
+
+### Fixed — the two shortest TTLs in the caching table were unreachable by construction
+
+Found by writing the test that was supposed to prove they had a writer, and watching it fail.
+`CONTENT_UNAVAILABLE` and `IPNS_UNRESOLVED` are cacheable at ten seconds and were being stored
+under the **name** — where nothing would ever read them, because step 5 takes a fresh positive
+record and continues at step 9, skipping step 6 entirely. An entry keyed by a name is therefore
+unreachable for exactly as long as that name's record is cached, which is every request after the
+first.
+
+They are now keyed by the content source, consulted before the fetch at step 11, and a hit is
+treated as that source failing — so the fallback across sources applies to them unchanged. It is
+also the truer statement: a CID nobody is serving is not being served to any name that points at
+it, and two names sharing a snapshot share the answer. RESOLUTION.md now says so.
+
+`CONTENT_INTEGRITY` remains never cached, and that is the never-cache clause worth the most: keyed
+by CID it would let one bad copy make a site unreachable to everyone behind the resolver for the
+length of a TTL, repeatably.
+
+One more test was green for the wrong reason and a surviving mutation found it. The integrity test
+used a fixture that is not a decodable CID, so `sourceValueOf` refused it, the content port was
+never reached, and the refusal was `NO_USABLE_RECORD` — which shares HTTP 502 with
+`CONTENT_INTEGRITY`. It passed against a resolver deliberately broken to cache integrity failures.
+A status assertion is not a code assertion when two codes map to one status.
+
 ### Added — equivocation is written down and handed on, which REPLICATION.md 6.3 requires
 
 6.3 is one sentence and a MUST: "a peer detecting equivocation MUST record it and SHOULD forward

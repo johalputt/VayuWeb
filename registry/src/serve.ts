@@ -34,13 +34,13 @@ import { chmodSync, mkdirSync, rmSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 import {
-  NegativeCache,
   PROXY_LIMITS,
   handleRequest,
   refusal,
   type ProxyOptions,
   type ProxyRequest,
 } from './proxy.ts';
+import { ResolutionCache } from './cache.ts';
 import {
   TOKEN_BYTES,
   assertSocketAddress,
@@ -403,6 +403,14 @@ export interface ProxyServerOptions {
    * boundary in `cli.ts` is where the real clock is allowed to exist.
    */
   readonly now: () => number;
+  /**
+   * A number that changes whenever the local registry does. `Store.length` is the obvious one.
+   *
+   * Read once per request and handed to the cache, which drops everything when it moves. Optional
+   * because not every embedder has a registry it can count; absent, the cache is exactly what
+   * RESOLUTION.md specifies and no less correct, only staler within its stated TTLs.
+   */
+  readonly generation?: () => number;
 }
 
 /**
@@ -413,7 +421,7 @@ export interface ProxyServerOptions {
  * legitimate reason to want one. A caller wanting that has misunderstood what the proxy is.
  */
 export function serveProxy(options: ProxyServerOptions): Promise<Listener> {
-  const cache = new NegativeCache(PROXY_LIMITS.negativeEntries, PROXY_LIMITS.negativeTtlSeconds);
+  const cache = new ResolutionCache();
   const clock = options.now;
 
   const server = withConnectionCap(
@@ -431,6 +439,17 @@ export function serveProxy(options: ProxyServerOptions): Promise<Listener> {
         // response on this surface without a Content-Security-Policy is a response an attacker
         // would rather have than the page.
         try {
+          // **The generation, applied per request rather than declared and never called.** The
+          // cache's TTLs are a bound on how long a wrong answer may persist; this is what makes
+          // the ordinary case shorter than the bound. A registration, an UPDATE, a RENEW, a
+          // TRANSFER and a REVOKE are all appends, so a log that has not grown is a registry
+          // whose answers cannot have changed — and one that has grown invalidates everything
+          // for the price of an integer comparison.
+          //
+          // Optional because a caller may have no such number, in which case the specification's
+          // TTLs stand alone and the cache behaves exactly as RESOLUTION.md describes.
+          const generation = options.generation?.();
+          if (generation !== undefined) cache.setGeneration(generation);
           return handleRequest(request, options.ports, cache, clock(), options.options ?? {});
         } catch {
           // RESOLUTION.md catalogue entry 1500. The error is discarded rather than reported: an

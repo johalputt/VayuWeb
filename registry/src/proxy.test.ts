@@ -6,7 +6,6 @@ import {
   DEFAULT_CSP,
   DIAGNOSTIC_HEADERS,
   FORBIDDEN_RESPONSE_HEADERS,
-  NegativeCache,
   PROXY_LIMITS,
   SECURITY_HEADERS,
   handleRequest,
@@ -16,6 +15,7 @@ import {
   type ContentPort,
   type ProxyRequest,
 } from './proxy.ts';
+import { ResolutionCache } from './cache.ts';
 import { CID_PARAMETERS, cidBytes, encodeCid, sha256 } from './content.ts';
 import { parseRecord } from './record.ts';
 import { POW_ALGORITHM, POW_NONCE_LENGTH } from './pow.ts';
@@ -63,7 +63,7 @@ test('every response carries the full accompanying header set', () => {
   const response = handleRequest(
     get('/', { host: 'atlas.vayu' }),
     ports(),
-    new NegativeCache(),
+    new ResolutionCache(),
     NOW,
   );
   for (const [name, value] of SECURITY_HEADERS) {
@@ -77,7 +77,7 @@ test('a refusal carries the same security headers as a success', () => {
   const refused = handleRequest(
     get('/', { host: 'evil.example' }),
     ports(),
-    new NegativeCache(),
+    new ResolutionCache(),
     NOW,
   );
   for (const [name, value] of SECURITY_HEADERS) {
@@ -86,7 +86,7 @@ test('a refusal carries the same security headers as a success', () => {
 });
 
 test('no response may carry a header that brands the resolver or widens private access', () => {
-  const cache = new NegativeCache();
+  const cache = new ResolutionCache();
   const responses = [
     handleRequest(get('/', { host: 'atlas.vayu' }), ports(), cache, NOW),
     handleRequest(get('/', { host: 'evil.example' }), ports(), cache, NOW),
@@ -118,7 +118,7 @@ test('I rebind my own hostname to 127.0.0.1 and reach your proxy', () => {
   // because that is the origin it believes it is talking to — changing it would break the very
   // same-origin belief the attack depends on. So the defence is not to inspect the connection, it
   // is to refuse every host that is not a VayuWeb name, before routing.
-  const cache = new NegativeCache();
+  const cache = new ResolutionCache();
   for (const host of [
     'evil.example',
     'localhost',
@@ -147,7 +147,7 @@ test('a reserved label is refused at the proxy, which is where wpad would be fet
   // and runs the JavaScript it finds there to decide where every request goes. That fetch arrives
   // *here*, so this is the surface that has to refuse it — and it does so through the same
   // `labelRejection` the verifier uses, rather than through a second list that could drift.
-  const cache = new NegativeCache();
+  const cache = new ResolutionCache();
   for (const host of [
     'wpad.vayu',
     'pac.vayu',
@@ -202,7 +202,7 @@ test('CONNECT is refused for every destination, including VayuWeb ones', () => {
   // Not implemented at all, so there is no destination policy to get wrong. A proxy that will
   // CONNECT anywhere is an open relay and an SSRF pivot into the reader's own network, and the
   // safest implementation of a dangerous verb is none.
-  const cache = new NegativeCache();
+  const cache = new ResolutionCache();
   for (const destination of [
     'atlas.vayu:443',
     '127.0.0.1:22',
@@ -237,7 +237,7 @@ test('CONNECT is refused for every destination, including VayuWeb ones', () => {
 });
 
 test('methods that could mutate are refused', () => {
-  const cache = new NegativeCache();
+  const cache = new ResolutionCache();
   for (const method of ['POST', 'PUT', 'DELETE', 'PATCH', 'TRACE', 'OPTIONS']) {
     const response = handleRequest(
       { method, target: '/', headers: new Map([['host', 'atlas.vayu']]) },
@@ -264,7 +264,7 @@ test('diagnostic headers are absent by default', () => {
   const response = handleRequest(
     get('/', { host: 'atlas.vayu' }),
     ports(),
-    new NegativeCache(),
+    new ResolutionCache(),
     NOW,
   );
   for (const header of DIAGNOSTIC_HEADERS) {
@@ -276,7 +276,7 @@ test('a refusal body echoes nothing the caller supplied', () => {
   // Two reasons at once: an echoed name is the response-splitting and header-injection vector,
   // and an echoed VayuWeb error code confirms VayuWeb is running.
   const hostile = 'atlas\r\nX-Injected: 1.vayu';
-  const response = handleRequest(get('/', { host: hostile }), ports(), new NegativeCache(), NOW);
+  const response = handleRequest(get('/', { host: hostile }), ports(), new ResolutionCache(), NOW);
   // Byte length, not string equality: a body is bytes now, and empty is the only shape that can
   // echo nothing at all.
   assert.equal(response.body.length, 0);
@@ -323,41 +323,41 @@ test('I fill your memory with names nobody will ever ask for twice', () => {
   // The attack: my page requests an endless stream of distinct names. If negative answers are
   // cached "for process lifetime", every one is a permanent entry keyed by bytes I chose, and I
   // exhaust the resolver's memory from a page.
-  const cache = new NegativeCache(8, 30);
+  const cache = new ResolutionCache({ negativeEntries: 8 });
   for (let i = 0; i < 1_000; i += 1) {
-    cache.put(`name${i}.vayu`, NOW);
+    cache.putNegative(`name${i}.vayu`, 'NAME_NOT_FOUND', NOW);
   }
-  assert.equal(cache.size, 8, 'the negative cache must not grow past its bound');
+  assert.equal(cache.negativeSize, 8, 'the negative cache must not grow past its bound');
 });
 
 test('syntactically invalid names are not cached at all', () => {
   // The grammar check is cheaper than the cache lookup, so caching them buys nothing and hands a
   // page an attacker-keyed insert.
-  const cache = new NegativeCache();
+  const cache = new ResolutionCache();
   for (let i = 0; i < 100; i += 1) {
     handleRequest(get('/', { host: `bad_${i}.vayu` }), ports(), cache, NOW);
   }
-  assert.equal(cache.size, 0);
+  assert.equal(cache.negativeSize, 0);
 });
 
 test('a negative answer expires rather than being trusted forever', () => {
-  const cache = new NegativeCache(8, 30);
-  cache.put('atlas.vayu', NOW);
-  assert.equal(cache.has('atlas.vayu', NOW + 29), true);
-  assert.equal(cache.has('atlas.vayu', NOW + 30), false, 'the TTL must be finite');
+  const cache = new ResolutionCache({ negativeEntries: 8 });
+  cache.putNegative('atlas.vayu', 'NAME_NOT_FOUND', NOW);
+  assert.equal(cache.negative('atlas.vayu', NOW + 29), 'NAME_NOT_FOUND');
+  assert.equal(cache.negative('atlas.vayu', NOW + 30), null, 'the TTL must be finite');
 });
 
 test('eviction is by insertion order, so an attacker cannot pin their own entries', () => {
   // LRU would let an attacker keep their entries alive by touching them. There is nothing here
   // worth protecting from eviction, so insertion order is both simpler and less manipulable.
-  const cache = new NegativeCache(3, 100);
-  cache.put('one.vayu', NOW);
-  cache.put('two.vayu', NOW);
-  cache.put('three.vayu', NOW);
-  assert.equal(cache.has('one.vayu', NOW), true);
-  cache.put('four.vayu', NOW);
-  assert.equal(cache.has('one.vayu', NOW), false, 'the oldest goes, whatever has been read');
-  assert.equal(cache.has('four.vayu', NOW), true);
+  const cache = new ResolutionCache({ negativeEntries: 3 });
+  for (const name of ['one.vayu', 'two.vayu', 'three.vayu']) {
+    cache.putNegative(name, 'NAME_NOT_FOUND', NOW);
+  }
+  assert.equal(cache.negative('one.vayu', NOW), 'NAME_NOT_FOUND');
+  cache.putNegative('four.vayu', 'NAME_NOT_FOUND', NOW);
+  assert.equal(cache.negative('one.vayu', NOW), null, 'the oldest goes, whatever has been read');
+  assert.equal(cache.negative('four.vayu', NOW), 'NAME_NOT_FOUND');
 });
 
 /* -------------------------------------------------------------------------- */
@@ -454,7 +454,7 @@ test('AUDIT: a cid entry reaches the content layer as base32, not as String(Uint
   const response = handleRequest(
     get('/', { host: 'atlas.vayu' }),
     { lookup: () => record, hasVerifiedHead: () => true },
-    new NegativeCache(),
+    new ResolutionCache(),
     NOW,
     { content },
   );
@@ -479,7 +479,7 @@ test('a malformed cid entry addresses nothing rather than something approximate'
   const response = handleRequest(
     get('/', { host: 'atlas.vayu' }),
     { lookup: () => record, hasVerifiedHead: () => true },
-    new NegativeCache(),
+    new ResolutionCache(),
     NOW,
     { content: { fetch: () => assert.fail('the content port must not be reached') } },
   );
@@ -575,7 +575,7 @@ test('AUDIT: a fetched body leaves the handler byte for byte', () => {
     const response = handleRequest(
       get('/', { host: 'atlas.vayu' }),
       { lookup: () => record, hasVerifiedHead: () => true },
-      new NegativeCache(),
+      new ResolutionCache(),
       NOW,
       {
         content: {
@@ -630,7 +630,7 @@ test('AUDIT: a record carrying both ipns and cid falls back to the snapshot', ()
   const response = handleRequest(
     get('/', { host: 'atlas.vayu' }),
     { lookup: () => pointerAndSnapshot(), hasVerifiedHead: () => true },
-    new NegativeCache(),
+    new ResolutionCache(),
     NOW,
     { content, diagnostics: true },
   );
@@ -686,12 +686,92 @@ test('AUDIT: a failing pointer with no snapshot still refuses, and says so once'
       lookup: () => live([cborEntry('ipns', 'k51qzi5uqu5dabcdefghijklmnop')]),
       hasVerifiedHead: () => true,
     },
-    new NegativeCache(),
+    new ResolutionCache(),
     NOW,
     { content },
   );
   assert.equal(response.status, RESOLVE_ERRORS.CONTENT_UNAVAILABLE.http);
   assert.deepEqual(asked, ['ipns'], 'one source, one attempt');
+});
+
+test('AUDIT: a content failure is cached against the content, because the name is unreachable', () => {
+  // Written to prove the two shortest TTLs in RESOLUTION.md's table had a writer, and it failed —
+  // which was the finding. Storing them under the NAME is a writer with no reader: step 5 takes a
+  // positive record from the cache and goes to step 9, skipping step 6, so a negative entry keyed
+  // by `atlas.vayu` is unreachable for exactly as long as `atlas.vayu`'s record is cached. That is
+  // every request after the first, which is every request this cache exists for.
+  //
+  // Keyed by the source, it is reachable — and it is the truer statement anyway. A CID nobody is
+  // serving is not being served to any name that points at it.
+  const asked: string[] = [];
+  const pointer = 'k51qzi5uqu5dabcdefghijklmnop';
+  const content: ContentPort = {
+    fetch: (source) => {
+      asked.push(source.type);
+      return { ok: false, error: 'CONTENT_UNAVAILABLE' };
+    },
+  };
+  const cache = new ResolutionCache();
+  const registry = {
+    lookup: () => live([cborEntry('ipns', pointer)]),
+    hasVerifiedHead: () => true,
+  };
+
+  const first = handleRequest(get('/', { host: 'atlas.vayu' }), registry, cache, NOW, { content });
+  assert.equal(first.status, RESOLVE_ERRORS.CONTENT_UNAVAILABLE.http);
+  assert.equal(cache.negative(`content:ipns:${pointer}`, NOW + 9), 'CONTENT_UNAVAILABLE');
+  assert.equal(
+    cache.negative('atlas.vayu', NOW + 9),
+    null,
+    'and not under the name, where nothing would ever read it',
+  );
+
+  // Within the TTL the content layer is not asked again — which is the whole of what caching a
+  // content failure buys, and what a site being offline should not cost every visitor.
+  const second = handleRequest(get('/', { host: 'atlas.vayu' }), registry, cache, NOW + 9, {
+    content,
+  });
+  assert.equal(second.status, RESOLVE_ERRORS.CONTENT_UNAVAILABLE.http);
+  assert.deepEqual(asked, ['ipns'], 'one fetch for two requests');
+
+  // Ten seconds, not thirty: a site coming back online recovers quickly.
+  handleRequest(get('/', { host: 'atlas.vayu' }), registry, cache, NOW + 10, { content });
+  assert.deepEqual(asked, ['ipns', 'ipns'], 'and after the TTL it is tried again');
+});
+
+test('AUDIT: an integrity failure is never cached, against a name or against a CID', () => {
+  // The never-cache clause, checked at the key that would make breaking it worst. An integrity
+  // failure keyed by CID would let one bad copy take a site down for every reader behind this
+  // resolver — and unlike a name key, a CID key is shared by every name pointing at that snapshot.
+  //
+  // The first version of this test used a 32-byte fixture that is not a decodable CID, so
+  // `sourceValueOf` refused it, the content port was never reached, and the refusal was
+  // `NO_USABLE_RECORD` — which shares HTTP 502 with `CONTENT_INTEGRITY`. It passed against a
+  // deliberately broken resolver. A status assertion is not a code assertion when two codes map to
+  // one status, so this one counts the fetches and reads the code.
+  let fetches = 0;
+  const content: ContentPort = {
+    fetch: () => {
+      fetches += 1;
+      return { ok: false, error: 'CONTENT_INTEGRITY' };
+    },
+  };
+  const cache = new ResolutionCache();
+  const registry = {
+    lookup: () => live([cborEntry('cid', CID_BYTES)]),
+    hasVerifiedHead: () => true,
+  };
+
+  const response = handleRequest(get('/', { host: 'atlas.vayu' }), registry, cache, NOW, {
+    content,
+  });
+  assert.equal(fetches, 1, 'the content layer must actually have been asked');
+  assert.equal(response.status, RESOLVE_ERRORS.CONTENT_INTEGRITY.http);
+  assert.equal(cache.negativeSize, 0, 'nothing about a bad copy may become sticky');
+
+  // And it stays that way: a second request re-attempts rather than replaying a stored refusal.
+  handleRequest(get('/', { host: 'atlas.vayu' }), registry, cache, NOW + 1, { content });
+  assert.equal(fetches, 2, 'one bad copy must not take the site down for the TTL');
 });
 
 test('AUDIT: the resolver does not fall back across a content-integrity failure', () => {
@@ -712,7 +792,7 @@ test('AUDIT: the resolver does not fall back across a content-integrity failure'
   const response = handleRequest(
     get('/', { host: 'atlas.vayu' }),
     { lookup: () => pointerAndSnapshot(), hasVerifiedHead: () => true },
-    new NegativeCache(),
+    new ResolutionCache(),
     NOW,
     { content, diagnostics: true },
   );
@@ -754,7 +834,7 @@ test('AUDIT: every diagnostic header RESOLUTION.md enumerates is one the resolve
   const response = handleRequest(
     get('/', { host: 'atlas.vayu' }),
     { lookup: () => live([cborEntry('cid', CID_BYTES)]), hasVerifiedHead: () => true },
-    new NegativeCache(),
+    new ResolutionCache(),
     NOW,
     { content, diagnostics: true },
   );

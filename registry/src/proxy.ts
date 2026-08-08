@@ -43,6 +43,7 @@ import {
   type SourceType,
 } from './resolve.ts';
 import { cidFromBytes, encodeCid } from './content.ts';
+import { ResolutionCache } from './cache.ts';
 import type { CborValue } from './cbor.ts';
 
 /**
@@ -127,11 +128,11 @@ export const PROXY_LIMITS = {
   hostBytes: MAX_LABEL_LENGTH + 1 + MAX_TLD_LENGTH,
   /** Longest request target accepted before routing. */
   targetBytes: 2_048,
-  /** Negative cache entries. Bounded because the keys are attacker-chosen. */
-  negativeEntries: 512,
-  /** How long a negative answer is trusted, in seconds. Finite for the same reason. */
-  negativeTtlSeconds: 30,
 } as const;
+
+// The cache's own bounds and TTLs live in `cache.ts` with the policy that reads them. They were
+// here, as a single entry count and a single TTL, which is the shape a cache that could only ever
+// hold one error code needs — and exactly the shape that made four other cacheable codes invisible.
 
 /** What arrives. Header keys are lowercased by the caller; HTTP header names are case-insensitive. */
 export interface ProxyRequest {
@@ -235,50 +236,6 @@ export function sourceValueOf(entry: { type: string; value: CborValue }): string
 }
 
 /**
- * A bounded, evicting negative cache with a finite TTL.
- *
- * Both properties are load-bearing and both were specification defects before: caching negative
- * answers "for process lifetime" gave a page an unbounded, attacker-fillable, never-evicted map.
- * Insertion order eviction rather than LRU, deliberately — LRU lets an attacker pin their own
- * entries by touching them, and there is nothing here worth protecting from eviction.
- */
-export class NegativeCache {
-  private readonly entries = new Map<string, number>();
-  private readonly limit: number;
-  private readonly ttl: number;
-
-  constructor(
-    limit: number = PROXY_LIMITS.negativeEntries,
-    ttl: number = PROXY_LIMITS.negativeTtlSeconds,
-  ) {
-    this.limit = limit;
-    this.ttl = ttl;
-  }
-
-  get size(): number {
-    return this.entries.size;
-  }
-
-  has(key: string, now: number): boolean {
-    const expires = this.entries.get(key);
-    if (expires === undefined) return false;
-    if (expires <= now) {
-      this.entries.delete(key);
-      return false;
-    }
-    return true;
-  }
-
-  put(key: string, now: number): void {
-    if (this.entries.size >= this.limit && !this.entries.has(key)) {
-      const oldest = this.entries.keys().next();
-      if (!oldest.done) this.entries.delete(oldest.value);
-    }
-    this.entries.set(key, now + this.ttl);
-  }
-}
-
-/**
  * Extract the host from a request, or null if the shape is not one of the two accepted.
  *
  * LOCAL-SURFACE.md 2.1. Absolute-form takes its host from the target and *ignores* the `Host`
@@ -372,7 +329,7 @@ export function pathOf(target: string): string {
 export function handleRequest(
   request: ProxyRequest,
   ports: ResolverPorts,
-  cache: NegativeCache,
+  cache: ResolutionCache,
   now: number,
   options: ProxyOptions = {},
 ): ProxyResponse {
@@ -401,13 +358,13 @@ export function handleRequest(
   }
 
   const key = `${name.label}.${name.tld}`;
-  if (cache.has(key, now)) return refusal('NAME_NOT_FOUND');
 
-  const outcome = resolveName(key, ports, now);
-  if (!outcome.ok) {
-    if (outcome.error === 'NAME_NOT_FOUND') cache.put(key, now);
-    return refusal(outcome.error);
-  }
+  // The cache checks are steps 5 and 6 of the algorithm, so they happen inside it. They used to
+  // happen here instead, which put them outside the alias loop and hard-wired the one code this
+  // surface knew how to store — a hit answered `NAME_NOT_FOUND` whatever had been cached, and
+  // nothing but `NAME_NOT_FOUND` was ever cached, so the two bugs concealed each other.
+  const outcome = resolveName(key, ports, now, cache);
+  if (!outcome.ok) return refusal(outcome.error);
 
   const headers = new Map<string, string>(SECURITY_HEADERS);
   headers.set('content-type', 'text/plain; charset=utf-8');
@@ -454,6 +411,28 @@ export function handleRequest(
         fallbacks.push(type);
         continue;
       }
+
+      // **Content failures are keyed by the content, not by the name**, and the reason is a defect
+      // in the algorithm's own ordering rather than a preference. Step 5 takes a positive record
+      // from the cache and jumps to step 9, which SKIPS step 6 — so a `CONTENT_UNAVAILABLE` stored
+      // under `atlas.vayu` is unreachable for exactly as long as `atlas.vayu`'s record is cached,
+      // which is every request after the first. The two shortest TTLs in RESOLUTION.md's table
+      // would have been a writer with no reader.
+      //
+      // Keyed by the source it is a fact about, it is reachable and it is also more nearly true:
+      // a CID nobody is serving is not being served to any name that points at it, and two names
+      // sharing a snapshot share the answer. A name key cannot collide with one of these — the
+      // label grammar admits no colon.
+      const contentKey = `content:${type}:${value}`;
+      const known = cache.negative(contentKey, now);
+      if (known !== null) {
+        // No fetch at all. This is the whole of what caching a content failure buys: a site being
+        // offline costs one attempt per TTL rather than one attempt per reader.
+        failure = known;
+        fallbacks.push(type);
+        continue;
+      }
+
       const fetched = options.content.fetch({ type, value }, pathOf(request.target));
       if (fetched.ok) {
         headers.set('content-type', fetched.contentType);
@@ -470,6 +449,11 @@ export function handleRequest(
       // hands an attacker a downgrade: corrupt the source the publisher prefers, and the resolver
       // walks itself to whichever source the attacker can better influence.
       if (fetched.error === 'CONTENT_INTEGRITY') return refusal('CONTENT_INTEGRITY');
+      // Ten seconds, and only for the codes the table names — `CONTENT_INTEGRITY` never reaches
+      // here, and would be refused by the table if it did. That refusal is the one that matters
+      // most: an integrity failure cached against a CID is a way to make a site unreachable to
+      // everyone behind this resolver by getting one bad copy through once.
+      cache.putNegative(`content:${type}:${value}`, fetched.error, now);
       failure = fetched.error;
       fallbacks.push(type);
     }

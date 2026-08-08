@@ -402,7 +402,22 @@ Negative caching:
 
 - `NAME_NOT_FOUND`: 30 seconds — short, because a name may be registered at any
   moment and the log replicates continuously.
-- `NAME_EXPIRED`, `NAME_QUARANTINED`: 60 seconds.
+- `NAME_EXPIRED`, `NAME_QUARANTINED`, `NAME_REVOKED`: 60 seconds.
+
+  1412 `NAME_REVOKED` was absent from this list, and the absence was a gap rather
+  than a decision: the code was added to the catalogue after this table was
+  written, when step 8 stopped answering a revoked name with 1410. It belongs
+  with its neighbours and is the most stable negative answer of the three — a
+  revoked name accepts no further record from anyone until its term ends — so 60
+  seconds is conservative for it.
+
+  A resolver whose registry is local MAY discard any cached answer sooner, and
+  SHOULD do so when it can observe that the registry has changed. Every record
+  that can invalidate a cached answer arrives as an append, so a resolver holding
+  its own log knows the moment one does. This does not relax the ceilings above;
+  it says that reaching them is a bound and not an obligation, which matters most
+  for `REVOKE`, whose whole purpose is to stop content being served from a key
+  its holder has declared compromised.
 - `LABEL_INVALID`, `TLD_UNKNOWN`: **not cached at all.** Both are decided by a
   grammar check that is cheaper than a cache lookup, and caching them for the
   process lifetime — as an earlier draft of this document specified — creates an
@@ -412,6 +427,17 @@ Negative caching:
   [LOCAL-SURFACE.md](LOCAL-SURFACE.md) section 3.3.
 - `CONTENT_UNAVAILABLE`, `IPNS_UNRESOLVED`: 10 seconds, so a site coming back
   online recovers quickly.
+
+  These two are keyed by the **content source** — the CID or the pointer — and
+  not by the name, which the rest of this list is keyed by. Step 5 takes a fresh
+  positive record and continues at step 9, skipping the negative check at step 6
+  entirely, so an entry stored under a name is unreachable for exactly as long as
+  that name's record is cached: every request after the first. Keyed by the
+  source it is a statement about, it is both reachable and truer — a CID nobody
+  is serving is not being served to any name pointing at it, and two names
+  sharing a snapshot share the answer. A resolver MUST consult it before
+  attempting the fetch at step 11 and MUST treat a hit as that source failing,
+  which makes the source fallback below apply to it unchanged.
 - `REGISTRY_UNAVAILABLE`, `CONTENT_INTEGRITY`: never cached.
 
 When the registry is unreachable the resolver MAY serve a record up to 600
