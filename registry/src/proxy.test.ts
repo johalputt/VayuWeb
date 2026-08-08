@@ -496,3 +496,44 @@ test('each entry type is rendered in its own form, and an unknown one in none', 
   assert.equal(sourceValueOf({ type: 'txt', value: 'hello' }), null);
   assert.equal(sourceValueOf({ type: 'dnslink', value: 'example.com' }), null);
 });
+
+test('AUDIT: the per-site Trusted Types policy name is constrained before it reaches a header', () => {
+  // **A publisher-chosen string spliced into a security header, with no grammar anywhere.**
+  //
+  // PUBLISHING.md 2.2 declares `csp.trustedTypes: "<policy-name>"`, taken from the site's own
+  // `.vayu/manifest.json`, and points at CONTENT-SECURITY.md 2.3 as "authoritative for both".
+  // What 2.3 said was one prose row: "Per-site named Trusted Types policy, same scoping and
+  // disclosure." No character set, no length, no forbidden values. `<policy-name>` appeared
+  // exactly once in the entire corpus.
+  //
+  // So the publisher, not the resolver, decided what text landed in the `trusted-types`
+  // directive. Three consequences, each strictly worse than the relaxation 2.3 authorises:
+  //
+  //   "*"                      -> unrestricted policy creation, not one named policy
+  //   "x; script-src 'unsafe-inline'"  -> arbitrary extra directives appended
+  //   "x\r\nSet-Cookie: …"     -> response header splitting outright
+  //
+  // and every one of them is invisible to the reader-facing disclosure, which announces "a named
+  // Trusted Types policy" whatever the name actually did.
+  //
+  // The corpus already had the governing rule for the only other externally-supplied value that
+  // reaches a header — LOCAL-SURFACE.md 3.1, validated "**before** it is echoed, cached, logged,
+  // used to construct any header" — and had never extended it to the manifest. Nothing implements
+  // the relaxation yet, which is exactly when this is cheapest to close.
+  const spec = readFileSync(
+    new URL('../../docs/spec/CONTENT-SECURITY.md', import.meta.url),
+    'utf8',
+  );
+
+  // A grammar, stated where the relaxation is defined rather than left to each implementer.
+  assert.match(spec, /tt-policy-name/);
+  assert.match(spec, /\[A-Za-z0-9\\-#=_\/@\.%\]\{1,64\}/);
+  // The two values that turn "one named policy" into something else.
+  assert.match(spec, /MUST NOT be `\*`/);
+  assert.match(spec, /`'allow-duplicates'`/);
+  // Validated before the header exists, not after — the LOCAL-SURFACE 3.1 discipline.
+  assert.match(spec, /before the header is constructed/);
+  // And refused rather than repaired, which is what LOCAL-SURFACE 3.2 requires of a bad label.
+  assert.match(spec, /trusted-types 'none'/);
+  assert.match(spec, /refused, not repaired/);
+});

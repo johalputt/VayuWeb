@@ -124,6 +124,49 @@ limit is 2.1 MB of hex zeros in the artifact, of which every byte after the firs
 information. The vectors file went from 159 KB to 2.25 MB before this was noticed. A runner builds
 the buffer from the stated length and tests exactly what one reading two million zeros would.
 
+### Fixed — two publisher-controlled values that nothing constrained
+
+Both are the same shape, and it is not a missing idea in either case. It is a rule already written
+down in this corpus, never applied to a third place that needed it.
+
+**A Trusted Types policy name spliced into a security header.** `PUBLISHING.md` 2.2 declares
+`csp.trustedTypes: "<policy-name>"`, taken from the site's own `.vayu/manifest.json`, and points
+at `CONTENT-SECURITY.md` 2.3 as authoritative. What 2.3 said was one prose row — "Per-site named
+Trusted Types policy, same scoping and disclosure" — with no character set, no length and no
+forbidden values. `<policy-name>` appeared **exactly once in the entire corpus**.
+
+So the publisher decided what text landed in the header. `*` yields `trusted-types *`, which is
+unrestricted policy creation rather than one named policy — a materially larger widening than the
+table authorises, obtained without a VWIP. A `;` appends arbitrary directives. A CR or LF splits
+the response header outright. Each defeats "No configuration file … may apply either relaxation
+globally, and that refusal is not tunable" three paragraphs above, and each is invisible to the
+reader-facing disclosure, which announces a named policy whatever the name actually did.
+
+New **2.3.1** pins the value to the CSP `tt-policy-name` production, forbids `*` and
+`'allow-duplicates'`, requires validation **before the header is constructed**, and requires a
+failing manifest to be served under the canonical `trusted-types 'none'` — refused, not repaired.
+
+**A blind SSRF oracle over every reader's LAN.** `ATTESTATION.md` 3.2 verifies an attestation by
+fetching `https://<subject>/.well-known/vayu-attest.json`, and `subject` comes out of the registry
+record — chosen by whoever registered the name. Section 4 constrained it in no way at all: no
+grammar, no IP-literal refusal, no length, no redirect rule, no bound on the fetched document.
+
+Register any name, publish `subject: "169.254.169.254"`, and every reader's client issues that
+request from inside the reader's own network — on first view and again on 4.2's thirty-day
+re-verification schedule, without the reader doing anything. The response never reaches the
+attacker, but **section 5 makes displaying attestation state mandatory**, so success, failure and
+staleness become a rendered oracle. 4.4 disables only *DNS* verification in Private Mode, so the
+https path was live in both.
+
+New **4.6** routes verification through the guarded transport, refuses loopback, link-local,
+multicast and RFC 1918 destinations unconditionally, constrains `subject` to a DNS name with no IP
+literal validated before a URL is built *or displayed*, forbids following redirects, and bounds
+the document at 8 KiB.
+
+The rule 4.6 states was already written for the resolver's other two outbound verbs —
+`LOCAL-SURFACE.md` 2.1.1 and 2.2, "unconditionally", reasoning that forwarding to the reader's own
+network is an SSRF pivot whatever the verb is. Attestation added a third and nobody extended it.
+
 ### Fixed — the reserved suite limits did not follow their own stated derivation
 
 `REGISTRY.md` gives the rule and then tells the reader not to check it: the reserved record limits

@@ -179,6 +179,39 @@ Every relaxation is **per-site, never global**, and **visible to the reader**. A
 reader cannot see is a widening that will be abused. No configuration file, control-API setting or
 command-line flag may apply either relaxation globally, and that refusal is not tunable.
 
+#### 2.3.1 The Trusted Types policy name is a constrained value
+
+The policy name comes out of the site's own `.vayu/manifest.json` and is spliced into the
+`trusted-types` directive of a header the resolver emits. It is therefore publisher-controlled
+input reaching a security header, and it MUST be constrained here rather than left to each
+implementer.
+
+`csp.trustedTypes` MUST match the CSP `tt-policy-name` production —
+`[A-Za-z0-9\-#=_/@.%]{1,64}` — and MUST NOT be `*` and MUST NOT be `'allow-duplicates'`. It MUST
+be validated **before the header is constructed**. A manifest failing the check is served under
+the canonical `trusted-types 'none'`: **refused, not repaired**, matching the discipline
+[LOCAL-SURFACE.md](LOCAL-SURFACE.md) 3.2 applies to a malformed label.
+
+None of this was stated anywhere. The row above said "Per-site named Trusted Types policy, same
+scoping and disclosure" and [PUBLISHING.md](PUBLISHING.md) 2.2 wrote the field as
+`csp.trustedTypes: "<policy-name>"` — a token appearing exactly once in the entire corpus, with
+no character set, no length and no forbidden values. The publisher, not the resolver, decided what
+text landed in the header:
+
+- `*` yields `trusted-types *`, which is unrestricted policy creation rather than one named
+  policy — a materially larger widening than this table authorises, obtained without a VWIP.
+- A value containing `;` appends arbitrary directives to the emitted policy.
+- A value containing CR or LF splits the response header outright.
+
+Each defeats "No configuration file … may apply either relaxation globally, and that refusal is
+not tunable" three paragraphs above, and each is invisible to the reader-facing disclosure, which
+announces a named Trusted Types policy whatever the name actually did.
+
+The corpus already held the governing rule for the only other externally-supplied value that
+reaches a header — LOCAL-SURFACE.md 3.1, validated "**before** it is echoed, cached, logged, used
+to construct any header" — and had simply never extended it to the manifest. That is the whole
+defect: not a missing idea, a missing application of one already written down.
+
 **The list is closed here and nowhere else.** A relaxation not in this table does not exist,
 whichever document proposes it. `PUBLISHING.md` section 2.1 previously defined a third — per-site
 `'sha256-…'` expressions for manifest-declared inline elements — and additionally said the reader

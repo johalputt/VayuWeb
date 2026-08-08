@@ -145,6 +145,32 @@ clearnet DNS query and section 4.3 means nothing is lost by skipping it. `vayu-c
 4.5 An attestation MUST be revocable by its holder at any time by a signed record, taking effect
 immediately.
 
+4.6 **Verification fetches are outbound connections, and are bound like every other one.** A
+client performing `dns-txt` or `https-well-known` verification MUST route it through the single
+guarded transport of [PRIVACY.md](PRIVACY.md) 3.1, and MUST refuse loopback, link-local,
+multicast and RFC 1918 destinations **unconditionally** — exactly as
+[LOCAL-SURFACE.md](LOCAL-SURFACE.md) 2.1.1 and 2.2 require of the resolver's other outbound verbs,
+and for the reason stated there: forwarding to the reader's own network is an SSRF pivot whatever
+the verb is.
+
+`subject` MUST be a valid DNS name of at most 253 bytes with **no IP literal**, no port and no
+userinfo, and it MUST be **validated before it is used to construct a URL**, dialled, or
+displayed — section 5.2 renders it into the identity chrome, so the same value reaches a second
+untrusted surface. **Redirects MUST NOT be followed.** The fetched document MUST be refused above
+**8 KiB**, which is ample for four fields.
+
+Without 4.6, `subject` was chosen by whoever registered the name and constrained nowhere. An
+attacker registers any name, publishes `subject: "169.254.169.254"` with method
+`https-well-known`, and every reader's client issues that request from inside the reader's own
+network — on first view and again on 4.2's thirty-day re-verification schedule, without the reader
+doing anything. The response never reaches the attacker, but section 5 makes displaying
+attestation state mandatory, so success, failure and staleness become a rendered blind-SSRF
+oracle over the reader's LAN, and an unbounded response body is a memory sink any host can fill.
+4.4 disables only DNS verification in Private Mode, so the https path was live in both.
+
+The rule this clause states was not a new idea. It was already written for the resolver's other
+two outbound verbs and simply never extended to the third.
+
 ## 5. Display rules
 
 What a client shows is where this design succeeds or fails, so the rules are normative.

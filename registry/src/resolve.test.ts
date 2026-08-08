@@ -468,3 +468,39 @@ test('AUDIT: a peer entry is never a content source, because nothing can verify 
   assert.match(spec, /`peer` entry is \*?\*?not\*?\*? a content source/);
   assert.match(spec, /transport hint/);
 });
+
+test("AUDIT: attestation verification cannot be aimed at the reader's own network", () => {
+  // **A blind SSRF oracle over every reader's LAN, driven by a field any registrant chooses.**
+  //
+  // ATTESTATION.md 3.2 verifies a `https-well-known` attestation by fetching
+  // `https://<subject>/.well-known/vayu-attest.json`. `subject` comes out of the registry record,
+  // so it is chosen by whoever registered the name, and section 4 — the verification rules —
+  // constrained it in no way at all: no grammar, no IP-literal refusal, no length, no redirect
+  // rule, no bound on the fetched document.
+  //
+  // Register any name, publish `subject: "169.254.169.254"` (or 10.0.0.1, or printer.local), and
+  // every reader's client issues that request from inside the reader's own network — on first
+  // view, and again on 4.2's at-most-30-day re-verification schedule, without the reader doing
+  // anything. The response never reaches the attacker, but section 5 makes displaying attestation
+  // state MANDATORY, so success, failure and staleness become a rendered oracle. 4.4 disables
+  // only DNS verification in Private Mode, so the https path stays on in both.
+  //
+  // The rule was already written for the resolver's other two outbound verbs — LOCAL-SURFACE.md
+  // 2.1.1 and 2.2 refuse "loopback, link-local, multicast and RFC 1918 destinations
+  // **unconditionally**", reasoning that "Forwarding to the reader's own network is an SSRF pivot
+  // whether the verb is `GET` or `CONNECT`". Attestation adds a third outbound verb and nobody
+  // extended it. That is the defect: not a missing idea, a missing application of one.
+  const spec = readFileSync(new URL('../../docs/spec/ATTESTATION.md', import.meta.url), 'utf8');
+
+  // The destination policy, in the section that governs verification.
+  assert.match(spec, /loopback, link-local,\s+multicast and RFC 1918 destinations/);
+  assert.match(spec, /unconditionally/);
+  // `subject` constrained before it is used to build a URL — and before it is displayed, since
+  // section 5 renders it into the identity chrome.
+  assert.match(spec, /MUST be a valid DNS name/);
+  assert.match(spec, /no IP literal/);
+  assert.match(spec, /validated before it is used to construct a\s+URL/);
+  // The two remaining unbounded edges of the same fetch.
+  assert.match(spec, /Redirects MUST NOT be followed/);
+  assert.match(spec, /8 KiB/);
+});
