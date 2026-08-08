@@ -62,11 +62,26 @@ export const BX_LIMITS = {
   blockBytes: 1_048_576,
   /** Identifiers one `BWANT` may name. A syncing peer sends many, not one large one. */
   wantCids: 64,
-  /** Blocks one `BLOCKS` may carry. Matches `wantCids` so an honest reply is never split. */
+  /**
+   * Blocks one `BLOCKS` may carry.
+   *
+   * Matches `wantCids`, but NOT so that "an honest reply is never split" — that claim was
+   * inverted, in this file and in VWIP-0005's own limits table, having already been found and
+   * corrected in the sibling protocol. This bounds ARRAY ITERATION. `messageBytes` bounds volume
+   * and binds first: at the 262,144-byte chunk size, four blocks fit and the fifth does not, so an
+   * honest reply is split as the ordinary case. VWIP-0005 3.6.b, and `blocksReplyFor` below.
+   */
   blocksPerMessage: 64,
   /** REGISTRY.md's `cid` entry bound, checked before decoding an identifier rather than after. */
   cidBytes: 64,
-  /** In-flight `BWANT`s per connection, bounding memory held for requests. */
+  /**
+   * In-flight `BWANT`s per connection, bounding memory held for requests.
+   *
+   * Not enforced by this module — like `unrequestedBlocks` below it is session state, and this
+   * module deliberately holds none. It is stated with the rest of the budget so the whole of it is
+   * auditable in one place, and qualified because the identically-named limit in `replicate.ts`
+   * IS enforced there: an unqualified copy read as though this one were too.
+   */
   outstandingWants: 8,
   /** Unrequested blocks tolerated before a peer is spending the receiver's bandwidth on its own
    *  behalf. Not enforced by this module — it is session state — but stated with the rest of the
@@ -121,17 +136,59 @@ export class BlockExchangeError extends Error {
 /* Encoding                                                                    */
 /* -------------------------------------------------------------------------- */
 
-/** Encode one message, refusing to emit anything a conforming receiver would reject. */
+/**
+ * VWIP-0005 3.6.a: an identifier list MUST NOT name the same identifier twice.
+ *
+ * Applied to `BDONE` as well as `BWANT`. 6.2 requires a lacking peer and a declining peer to emit
+ * the identical message, and a repeat in a refusal is content a receiver can count — so the same
+ * rule that makes a repeat an amplification demand in a request makes it a signal in an answer.
+ */
+function assertDistinct(cids: readonly Uint8Array[]): void {
+  const seen = new Set<string>();
+  for (const cid of cids) {
+    const key = cid.join(',');
+    if (seen.has(key)) {
+      throw new BlockExchangeError('MALFORMED', 'an identifier is named twice; see 3.6.a');
+    }
+    seen.add(key);
+  }
+}
+
+/**
+ * Encode one message, refusing to emit anything a conforming receiver would reject.
+ *
+ * **It used to enforce one of the three sender-side prohibitions and claim all of them.** The size
+ * bound was checked; 3.6.a (a `BWANT` MUST NOT name the same identifier twice) and 3.4.a (a peer
+ * MUST NOT declare a `max` above the block limit) were not, so this function would emit sixty-four
+ * copies of one identifier — a request for one block and a demand for sixty-four, which is the
+ * attack 3.6.a was written to close — and a `BHELLO` declaring 2^53 - 1. The vector generator was
+ * the proof: it built `blockx/bhello-absurd-max` by calling this function with a value the
+ * specification forbids a peer to declare, and got no objection.
+ *
+ * The reasoning that put the size check here applies unchanged to the other two: the peer best
+ * placed to notice is the one that built the message, and a sender that emits something the
+ * receiver must refuse has produced a failure that looks like the receiver's fault.
+ */
 export function encodeBlockMessage(message: BlockMessage): Uint8Array {
   const map: CborMap = new Map<string | Uint8Array, CborValue>();
   map.set('t', message.t);
   switch (message.t) {
     case 'BHELLO':
+      // 3.4.a. A declared maximum may only ever be LOWER than the protocol's — lowering it harms
+      // nobody but the peer that declared it, while raising it would let a stranger raise the
+      // receiver's own limit by asking.
+      if (message.max > BX_LIMITS.blockBytes) {
+        throw new BlockExchangeError(
+          'LIMIT_EXCEEDED',
+          `declared max ${message.max} is above the ${BX_LIMITS.blockBytes}-byte block limit`,
+        );
+      }
       map.set('v', message.v);
       map.set('max', message.max);
       break;
     case 'BWANT':
     case 'BDONE':
+      assertDistinct(message.cids);
       map.set('cids', [...message.cids]);
       break;
     case 'BLOCKS':
@@ -149,6 +206,47 @@ export function encodeBlockMessage(message: BlockMessage): Uint8Array {
     );
   }
   return bytes;
+}
+
+/**
+ * Build the largest `BLOCKS` reply that actually encodes, and say how many blocks it took.
+ *
+ * VWIP-0005 3.6.b. This exists because the limits table read as a matched pair — `BWANT.cids` and
+ * `BLOCKS.blks` are both 64 — and a responder that gathers 64 blocks has built a reply of up to
+ * 64 MiB against a 1,114,112-byte message bound. The identical defect shipped in the sibling
+ * protocol on the commonest request there is: the reply could not be encoded, the throw was
+ * swallowed by the transport, and the connection died with the failure attributed to the peer.
+ *
+ * **It encodes to measure rather than estimating from a per-block size.** An estimate is where the
+ * sibling fix's first attempt went wrong: CBOR's length prefixes change width at 24, 256 and 65,536
+ * bytes, so a per-item constant is right almost everywhere and wrong in narrow bands — and "almost
+ * everywhere" is exactly the shape of a bug that survives a test with one block size in it. The
+ * cost is one encode per candidate prefix, which is bounded by 64 and paid once per reply.
+ *
+ * At least one block is always returned, even if that one block does not fit: a responder cannot
+ * make progress by sending nothing, and a block over the message bound is a block this peer should
+ * never have accepted in the first place. The caller gets the throw from `encodeBlockMessage` and
+ * the error names the size, which is the honest failure.
+ */
+export function blocksReplyFor(blocks: readonly Uint8Array[]): {
+  readonly take: number;
+  readonly encoded: Uint8Array;
+} {
+  const room = Math.min(blocks.length, BX_LIMITS.blocksPerMessage);
+  let best: { take: number; encoded: Uint8Array } | null = null;
+  for (let take = 1; take <= room; take += 1) {
+    let encoded: Uint8Array;
+    try {
+      encoded = encodeBlockMessage({ t: 'BLOCKS', blks: blocks.slice(0, take) });
+    } catch {
+      break;
+    }
+    best = { take, encoded };
+  }
+  if (best !== null) return best;
+  // Nothing fit, which means the first block alone is over the bound. Encode it anyway so the
+  // caller receives the specific refusal rather than an empty reply that says nothing.
+  return { take: 1, encoded: encodeBlockMessage({ t: 'BLOCKS', blks: blocks.slice(0, 1) }) };
 }
 
 /**

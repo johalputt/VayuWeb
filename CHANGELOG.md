@@ -10,6 +10,148 @@ it.
 
 ## [Unreleased]
 
+### Fixed — renewing a name took it down, and the flag check could not have caught it
+
+`records` was hardcoded to `[]` for every successor operation except `UPDATE`. REGISTRY.md says
+`records` "is replaced wholesale; there is no partial update", so an empty array is not "unchanged"
+— it is "deleted". Measured end to end: a name resolved to its CID, `renew` printed
+`accepted RENEW … seq 1`, and the name then resolved to `entries / (none)`. The signed record was
+valid, the log was correct, the exit code was 0, and the site was unreachable until somebody
+noticed and ran `update`. `transfer` did the same thing to the person receiving the name.
+
+Each operation now says what it means by silence. `RENEW` and `TRANSFER` carry the entries forward
+— which is what a renewal means to the person doing it, and REGISTRY.md permits either to change
+them. `UPDATE` exists to replace them, so it refuses to guess: name the entries, or pass `--clear`
+to mean the empty set out loud. `RELINQUISH` and `REVOKE` require an empty `records` by
+specification, so nothing there was ever a choice. Entries are rebuilt including their `ttl`, so an
+entry of a type this build does not recognise survives a renewal rather than being dropped by the
+one operation that was supposed to preserve it.
+
+**The flag enumeration added earlier could not have caught this, and its test pinned the reason.**
+`KNOWN_FLAGS` was one global union checked before the command was even known, so it answered "does
+any command read this flag?" when the question is "does THIS command read it?". `register --site
+./public` — a natural mistake now that `serve --site` exists — was accepted, spent a full Argon2id
+solve, and wrote the same empty 329-byte record the enumeration was added to make impossible. The
+test asserted that `resolve` accepts all fourteen advertised flags, which is the defect stated as a
+requirement. Flags are now per command, checked after dispatch is known, and the help text
+enumerates every one so both directions can be read out of it: everything a usage line advertises
+must be accepted by that command, and every flag it does not advertise must be refused by name.
+
+### Fixed — a response to HEAD carried the whole entity
+
+`handleRequest` admits HEAD alongside GET, and the content block that landed with the serving path
+sits below that admission with no method test between them. While the body was always empty this
+was correct by accident; the moment the proxy could serve a page, every HEAD answer carried it.
+RFC 7230 3.3.3 is unambiguous — a response to HEAD never includes a body, and its `content-length`
+states what a GET would have returned. Applied in the writer, where framing decisions belong, so
+the length and the body cannot disagree.
+
+### Fixed — VWIP-0005 carried the "never split" claim this session had already found inverted
+
+The sentence was found inverted in the replication half and corrected there and only there.
+VWIP-0005's limits table and `blockx.ts` kept the uncorrected copy verbatim, in a protocol that has
+not shipped yet — and the document refutes itself 145 lines later, where section 8 says the two
+bounds interact and "the binding one is the message size, which makes `BLOCKS.blks` a bound on
+array iteration rather than on volume".
+
+Section 5 opens "Every limit below MUST be enforced", so an implementer reading the table builds a
+64-block reply. Measured: at the 262,144-byte chunk size the block limit is derived from, four
+blocks fit and the fifth does not, and the largest uniform block size at which a full 64-entry
+reply still encodes is 17,404 bytes. Splitting is the ordinary case, not a corner case.
+
+- **VWIP-0005 3.6.b** is new and mirrors REPLICATION.md 4.3.a: a responder MUST truncate a `BLOCKS`
+  reply to the message bound counting bytes, MUST NOT emit a message it cannot encode, and a
+  requester MUST NOT read a short reply as evidence the peer holds no more. The requester's half
+  matters more here than in the sibling protocol, because 6.1 and 6.2 make a non-answer legal and
+  indistinguishable from a refusal — so a requester that treats a short reply as terminal stops
+  asking a cooperating peer that holds the rest of the site, and cannot be told why.
+- **3.7 now says its `BDONE` duty does not extend to identifiers omitted for size**, or truncation
+  would be reported through the channel reserved for refusals.
+- **`blocksReplyFor`** builds the largest reply that actually encodes, by encoding to measure
+  rather than estimating from a per-block size — CBOR's length prefixes change width at 24, 256 and
+  65,536 bytes, so a per-item constant is right almost everywhere, and "almost everywhere" is the
+  shape of a bug that survives a test with one block size in it. Its test sweeps a thousand sizes
+  and asserts both that every emitted reply encodes and that one more block would not have.
+
+The check that missed all of this read the row's number and never its justification: the regexp
+captured `([\d,]+)` and stopped. A limits table could state the opposite of the document's own
+security analysis in the column a reader consults for *why*, and stay green.
+
+### Fixed — the encoder enforced one of three sender-side prohibitions and claimed all of them
+
+`encodeBlockMessage`'s docstring said it refuses "to emit anything a conforming receiver would
+reject". It checked the size bound. It would happily emit a `BWANT` naming one identifier
+sixty-four times — VWIP-0005 3.6.a describes that exactly, "a request for one block and a demand
+for sixty-four, inside a message that passes every limit in section 5" — and a `BHELLO` declaring
+2^53 - 1 against a 1,048,576-byte limit 3.4.a forbids a peer to exceed.
+
+**The project's own conformance artifact was the proof, and it published both.** `blockx/
+bhello-absurd-max` was produced by calling the encoder with a value the specification forbids a
+peer to declare. `blockx/bwant-at-the-limit` was sixty-four copies of one identifier with
+`expect: {decode: 'ok'}`, and `conformance/README.md` says of that column: "The verdict every
+conforming implementation must return" — so the artifact made 3.6.a's own recommended mitigation a
+conformance failure. The neighbouring over-limit vector was 65 copies of the same identifier, which
+additionally forbade the natural implementation of 3.6.a — deduplicate, then bound — because after
+dedup it names one identifier and must be accepted. A second implementer following both clauses
+could not have written a conforming receiver.
+
+Both vectors now carry distinct identifiers, the absurd greeting is built by hand as a message only
+a hostile peer emits, and a test walks the published artifact asserting no `BWANT` or `BDONE`
+vector repeats an identifier. The in-repo test that was meant to cover this asserted on the
+document's prose while the artifact beside it did the opposite.
+
+### Fixed — the WANT deadline was evaluated only when the peer chose to speak
+
+REPLICATION.md 4.3.b says a requester reclaims a `WANT` slot when its bound elapses "whether or not
+a reply ever arrives". `expireWants` ran inside `nextWant`, `nextWant` inside `pump`, and `pump`
+only from the inbound message handler — so the deadline depended on the party it defends against. A
+peer that greeted, took all eight slots and went silent froze the sync permanently; measured
+against the old driver, 6,000 seconds passed against a 60-second deadline with nothing reclaimed.
+
+Because a `WANT` is the only message the driver ever re-sends, this was also its only
+retransmission path: anything lost on the wire was never retried, on any connection, while both
+ends saw a healthy socket. The same missing clock left `retryDeferred` with no caller outside its
+own test — the deferral queue's bound was made honest earlier in this cycle, in service of a retry
+that no shipping path performed, so clock skew still cost a loss rather than a retry.
+
+`drivePeer` now keeps a heartbeat of its own at a quarter of the deadline, driving both. Its timers
+are injected, so the regression test advances a pinned clock instead of sleeping for a minute — a
+sixty-second test is a test nobody runs and therefore a clause nobody checks. The regression test
+written with the session-level fix drove `nextWant` directly and passed against the frozen driver;
+this one runs at the level the defect lives at.
+
+### Fixed — three checks that were green while measuring nothing
+
+- **`check-absolute-claims.py` scanned line by line**, and this corpus hard-wraps at about a
+  hundred columns. A forbidden phrase straddling a wrap was invisible — and wrapping is what an
+  editor does by default, so evading a check that gates CI and the release required no intent at
+  all. Measured: the sentence ending "…and it cannot be taken\ndown by anyone." passed, and the
+  identical sentence on one line was caught. Its denial guard also fired on any `not`/`never`/`no`
+  earlier in the sentence, and "no" is this corpus's commonest honest framing — "there is no
+  company to subpoena, so it cannot be taken down" is a violation exempted by a word about
+  something else, which is the natural shape of one here rather than a contrived one. The scan now
+  runs over the flattened document with offsets mapped back to line numbers, and the denial window
+  is cut again at any word that introduces a new assertion. A `--self-test` mode runs the six
+  sentences this checker has got wrong, so its reach is measured rather than described; both
+  defects were introduced by changes that also edited its docstring to say the problem was handled.
+- **`check-headers.py` printed OK having compared zero blocks.** The canonical blocks are the only
+  fenced header blocks in the corpus and they are excluded as the yardstick, so the comparison loop
+  body never executed. Every other checker here guards that state and this one did not. It now also
+  compares the per-directive rationale tables — a second copy of the same decisions, in the column
+  a reader actually consults — which brings it to eighteen real comparisons, and it fails rather
+  than passing if that ever returns to zero.
+- **The acceptance harness read an unobservable process as a compliant one.** `socketInodes`
+  returned an empty set on any failure to read `/proc/<pid>/fd`, and both callers filtered every
+  socket row through that set — so zero peers and zero DNS sockets, reported as PASS. A resolver
+  that crashed mid-navigation would have passed the Article 14 check on the strength of holding no
+  sockets. Observation is now reported separately from findings, and the harness asserts the
+  resolver was still running and its fd table readable before treating an empty result as evidence.
+
+Also corrected: the harness header and `docs/ROADMAP.md` both said Chromium is launched with "no
+flag beyond `--proxy-server`", and the launch passes two. `--proxy-bypass-list=<-loopback>`
+subtracts Chromium's built-in loopback bypass, so the configuration under test was not the
+configuration documented — and the documented one is the weaker claim of the two.
+
 ### Fixed — every image and every non-ASCII byte served was corrupted, under a comment saying it was not
 
 The proxy widened the fetched bytes to a latin-1 JavaScript string

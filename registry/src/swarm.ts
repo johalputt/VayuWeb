@@ -257,16 +257,57 @@ export interface PeerOutcome {
 }
 
 /**
+ * The timers a driver needs, injected so a test can advance them without waiting.
+ *
+ * Deliberately not `typeof setInterval`: the point of the injection is that a test drives the tick
+ * synchronously against a pinned clock, and a real timer would make the regression test for 4.3.b
+ * a sixty-second sleep — which is a test nobody runs and therefore a clause nobody checks.
+ */
+export interface DriverTimers {
+  setInterval(callback: () => void, ms: number): unknown;
+  clearInterval(handle: unknown): void;
+}
+
+const REAL_TIMERS: DriverTimers = {
+  setInterval: (callback, ms) => {
+    const handle = setInterval(callback, ms);
+    // A driver's own heartbeat must not be a reason the process stays alive.
+    handle.unref?.();
+    return handle;
+  },
+  clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
+};
+
+/**
+ * How often the driver checks its own deadlines, in milliseconds.
+ *
+ * A quarter of the deadline, so a slot is reclaimed within 25% of the bound rather than up to a
+ * full period late. Cheaper than it looks: a tick with nothing to expire is one comparison against
+ * the head of a list of at most eight instants.
+ */
+export const DRIVER_TICK_MS = (LIMITS.wantDeadlineSeconds * 1000) / 4;
+
+/**
  * Drive one peer connection.
  *
  * Returns the running totals, which the caller may watch. Exported separately from the swarm so
  * that a different transport -- a Unix socket, a test pipe, a file replayed from disk -- reuses
  * every line of it, which is what makes 2.2's "not normative" true rather than merely stated.
+ *
+ * **It keeps a clock of its own, and the first version did not.** REPLICATION.md 4.3.b requires a
+ * requester to reclaim a `WANT` slot when its deadline elapses "whether or not a reply ever
+ * arrives". `expireWants` runs inside `nextWant`, `nextWant` inside `pump`, and `pump` used to run
+ * only from the inbound message handler — so the deadline was evaluated exactly when the peer
+ * chose to speak, which is the party the clause defends against. A peer that greeted, took all
+ * eight slots and went silent froze the sync permanently, and since a `WANT` is the only message
+ * this driver re-sends, that was also the only retransmission path there was: anything lost on the
+ * wire was never retried, on any connection, while both ends saw a healthy socket.
  */
 export function drivePeer(
   stream: PeerStream,
   sink: ReplicationSink,
   now: () => number,
+  timers: DriverTimers = REAL_TIMERS,
 ): PeerOutcome {
   const session = new ReplicationSession(sink);
   const deframer = new Deframer();
@@ -320,6 +361,20 @@ export function drivePeer(
   };
 
   send(session.open());
+
+  /**
+   * The clock-driven half of the driver. Nothing here reads the peer: that is the point.
+   *
+   * Two things needed elapsed time and neither had it. `pump` reclaims a `WANT` slot whose
+   * deadline has passed (4.3.b); `retryDeferred` re-offers a record that arrived ahead of this
+   * peer's clock, which is the retry the deferral queue exists to make possible and which nothing
+   * outside a test ever performed.
+   */
+  const heartbeat = timers.setInterval(() => {
+    outcome.applied += session.retryDeferred(now());
+    pump();
+  }, DRIVER_TICK_MS);
+  stream.on('close', () => timers.clearInterval(heartbeat));
 
   stream.on('data', (chunk: Uint8Array) => {
     let payloads: Uint8Array[];

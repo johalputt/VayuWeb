@@ -3,8 +3,19 @@
  * Phase 3 acceptance: an UNMODIFIED browser renders a VayuWeb name.
  *
  * docs/ROADMAP.md states Phase 3's acceptance criterion as a browser nobody patched displaying a
- * `.vayu` name, with no extension, no certificate installed and no flag beyond `--proxy-server`.
- * Everything the page needs comes from the resolver. This script is that criterion, executable.
+ * `.vayu` name, with no extension and no certificate installed. Everything the page needs comes
+ * from the resolver. This script is that criterion, executable.
+ *
+ * **Two flags, not one, and the difference is not cosmetic.** The header used to say "no flag
+ * beyond `--proxy-server`" while the launch also passed `--proxy-bypass-list=<-loopback>`. That
+ * second flag is not a no-op: it SUBTRACTS Chromium's built-in loopback bypass, which would
+ * otherwise send `http://atlasobservatory.vayu/` — a name Chromium does not know is not local —
+ * around the proxy for any address it resolves to loopback. So the configuration under test was
+ * not the configuration documented, and the documented one is the weaker claim of the two.
+ *
+ * Neither flag installs anything, grants a permission, or teaches Chromium what a `.vayu` name
+ * is: they point it at a proxy and stop it bypassing that proxy. A browser configured this way is
+ * still a browser nobody modified, which is what Phase 3 asks for.
  *
  * ## Why it is a script and not a test
  *
@@ -72,7 +83,12 @@ function socketInodes(pid) {
   try {
     entries = readdirSync(`/proc/${pid}/fd`);
   } catch {
-    return owned; // The process is gone; it holds nothing.
+    // **Not "it holds nothing".** An unreadable fd table is a failure to OBSERVE, and this used
+    // to be returned as an empty set — which both callers then filtered every socket through,
+    // yielding zero peers and zero DNS sockets, which the harness reported as a PASS. A dead or
+    // unreadable process was evidence of good behaviour. The flag is what lets the caller tell
+    // "nothing happened" from "nothing was looked at".
+    return { inodes: owned, observed: false };
   }
   for (const fd of entries) {
     let target;
@@ -84,7 +100,7 @@ function socketInodes(pid) {
     const match = /^socket:\[(\d+)\]$/.exec(target);
     if (match !== null) owned.add(match[1]);
   }
-  return owned;
+  return { inodes: owned, observed: true };
 }
 
 const isLoopback = (hex) => hex === '0100007F' || /^0{31}1$/.test(hex) || /^0+$/.test(hex);
@@ -100,7 +116,7 @@ const isLoopback = (hex) => hex === '0100007F' || /^0{31}1$/.test(hex) || /^0+$/
  * which is the shape a leak would actually take.
  */
 function outboundPeers(pid) {
-  const owned = socketInodes(pid);
+  const { inodes: owned, observed } = socketInodes(pid);
   const peers = [];
   for (const table of ['tcp', 'tcp6']) {
     let text;
@@ -118,7 +134,7 @@ function outboundPeers(pid) {
       if (!isLoopback((remote.split(':')[0] ?? '').toUpperCase())) peers.push(remote);
     }
   }
-  return peers;
+  return { peers, observed };
 }
 
 /**
@@ -188,8 +204,11 @@ function processTree(root) {
  */
 function resolutionSockets(pids) {
   const seen = [];
+  let observed = 0;
   for (const pid of pids) {
-    const owned = socketInodes(pid);
+    const { inodes: owned, observed: readable } = socketInodes(pid);
+    if (!readable) continue;
+    observed += 1;
     if (owned.size === 0) continue;
     for (const table of ['udp', 'udp6', 'tcp', 'tcp6']) {
       let text;
@@ -210,7 +229,7 @@ function resolutionSockets(pids) {
       }
     }
   }
-  return seen;
+  return { seen, observed };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -414,8 +433,13 @@ try {
   const browserPid = browserProcessPid(PORT);
   if (browserPid === null) throw new Error('could not find the launched browser process');
   const dnsSeen = new Set();
+  // `sampledPids` counts what was actually looked at, not what was found. Zero findings across
+  // zero observations is the shape of a check that cannot fail, which is what this one was.
+  let sampledPids = 0;
   const sampler = setInterval(() => {
-    for (const socket of resolutionSockets(processTree(browserPid))) dnsSeen.add(socket);
+    const { seen, observed } = resolutionSockets(processTree(browserPid));
+    sampledPids += observed;
+    for (const socket of seen) dnsSeen.add(socket);
   }, 20);
 
   const page = await context.newPage();
@@ -486,17 +510,31 @@ try {
 
   clearInterval(sampler);
 
+  // The resolver must still be RUNNING when this is measured. A process that exited holds no
+  // sockets, so "no outbound connection" would be true of a resolver that crashed during the
+  // navigation — an absence of evidence published as evidence of absence.
+  const outbound = outboundPeers(resolver.pid);
+  check(
+    'the resolver was still running when its sockets were counted',
+    resolver.exitCode === null && outbound.observed,
+    `exitCode ${resolver.exitCode}, fd table ${outbound.observed ? 'readable' : 'UNREADABLE'}`,
+  );
   check(
     'the resolver opened no outbound connection (Constitution Art. 14)',
-    outboundPeers(resolver.pid).length === 0,
-    JSON.stringify(outboundPeers(resolver.pid)),
+    outbound.observed && outbound.peers.length === 0,
+    JSON.stringify(outbound.peers),
   );
 
   // The weaker of the two, and labelled so. See `resolutionSockets` for what sampling cannot see;
   // the refusal check above is the load-bearing evidence that no name fell through to DNS.
   check(
+    'the browser tree was actually sampled for DNS sockets',
+    sampledPids > 0,
+    `${sampledPids} process observation(s) across the navigation`,
+  );
+  check(
     'no clearnet DNS query was sampled from the browser (Art. 14, sampled)',
-    dnsSeen.size === 0,
+    sampledPids > 0 && dnsSeen.size === 0,
     JSON.stringify([...dnsSeen]),
   );
 } catch (error) {

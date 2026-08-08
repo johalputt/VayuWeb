@@ -549,3 +549,50 @@ test('AUDIT: every field a runner must act on is explained inside the artifact',
     );
   }
 });
+
+test('AUDIT: no published BWANT vector names the same identifier twice', () => {
+  // **The artifact published the attack VWIP-0005 3.6.a was written to close, marked valid.**
+  //
+  // `blockx/bwant-at-the-limit` was `Array.from({length: 64}, () => cid)` — sixty-four copies of
+  // ONE identifier, which 3.6.a describes in as many words as "a request for one block and a
+  // demand for sixty-four, inside a message that passes every limit in section 5". Its `expect`
+  // was `{decode: 'ok'}`, and `conformance/README.md` says of that column: "The verdict every
+  // conforming implementation must return." So the artifact made 3.6.a's own recommended
+  // mitigation — "A receiver MAY refuse a `BWANT` containing a repeat" — a conformance failure.
+  //
+  // The neighbouring over-limit vector was 65 copies of the same identifier, which additionally
+  // forbade the natural implementation of 3.6.a: deduplicate, then bound. After dedup that message
+  // names one identifier and must be accepted, while the vector demands LIMIT_EXCEEDED. A second
+  // implementer following both could not write a conforming receiver at all.
+  //
+  // The in-repo test that was meant to cover this asserted on the document's prose — `MUST NOT
+  // name the same identifier twice` appears in VWIP-0005 — while the artifact next to it did the
+  // opposite. A vector set that names types rather than values is the recurring shape here.
+  const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')) as {
+    blockExchange: { name: string; message?: string }[];
+  };
+  let checked = 0;
+  for (const vector of artifact.blockExchange) {
+    if (vector.message === undefined) continue;
+    let decoded: unknown;
+    try {
+      decoded = decode(fromHex(vector.message));
+    } catch {
+      continue; // A vector that is deliberately not decodable has nothing to say here.
+    }
+    if (!(decoded instanceof Map)) continue;
+    if (decoded.get('t') !== 'BWANT' && decoded.get('t') !== 'BDONE') continue;
+    const cids = decoded.get('cids');
+    assert.ok(Array.isArray(cids), `${vector.name} must carry an identifier array`);
+    const seen = new Set(cids.map((c) => String(c)));
+    assert.equal(
+      seen.size,
+      cids.length,
+      `${vector.name} names ${cids.length - seen.size} repeated identifier(s), which 3.6.a forbids`,
+    );
+    checked += 1;
+  }
+  // Without this the test passes on an artifact with no identifier list in it at all, which is
+  // the same failure mode as the check it replaces.
+  assert.ok(checked >= 3, `only ${checked} identifier-carrying vectors were examined`);
+});

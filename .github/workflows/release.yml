@@ -140,6 +140,7 @@ jobs:
           python3 scripts/check-headers.py
           python3 scripts/check-counts.py
           python3 scripts/check-status-claims.py
+          python3 scripts/check-absolute-claims.py --self-test
           python3 scripts/check-absolute-claims.py
 
   tag:

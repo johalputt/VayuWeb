@@ -523,3 +523,55 @@ test('AUDIT: a fetched body reaches the wire byte for byte', async () => {
     },
   );
 });
+
+test('AUDIT: a HEAD response carries the length and none of the body', async () => {
+  // **Correct by accident until the content path landed, and wrong the moment it did.**
+  //
+  // `handleRequest` admits HEAD alongside GET, and the block that fetches content sits below that
+  // admission with no method test between them. While the body was always the empty string this
+  // was harmless; now a HEAD answer carries the whole entity. RFC 7230 3.3.3 is unambiguous: a
+  // response to HEAD never includes a body, and its `content-length` states what a GET would have
+  // returned.
+  //
+  // The consequence is not cosmetic. A client that reads exactly `content-length` bytes gets the
+  // body it was promised it would not get, and a client that reads none of them leaves an entity
+  // in the connection buffer. Every response here closes the connection, which bounds the damage
+  // to one exchange rather than to a smuggled second request — but "the next layer happens to
+  // clean up after us" is not a framing rule, and a proxy that answers HEAD with a body is a proxy
+  // whose framing cannot be trusted by anything that has to parse it.
+  const bytes = Uint8Array.from({ length: 256 }, (_, i) => i);
+  await withListener(
+    () =>
+      serveProxy({
+        ports: servingPorts(),
+        port: 0,
+        now: () => SERVE_NOW,
+        options: {
+          content: {
+            fetch: () => ({ ok: true, bytes, contentType: 'application/octet-stream' }),
+          },
+        },
+      }),
+    async (listener) => {
+      const answer = await speakBytes(
+        listener.address,
+        'HEAD / HTTP/1.1\r\nHost: atlas.vayu\r\n\r\n',
+      );
+      const split = answer.indexOf('\r\n\r\n');
+      const head = answer.subarray(0, split).toString('latin1');
+      assert.match(head, /^HTTP\/1\.1 200 /);
+      // The length is the one a GET would have answered with, so a client can size a fetch from a
+      // HEAD. Dropping the header instead of the body would be a different bug with the same shape.
+      assert.match(head, new RegExp(`content-length: ${bytes.length}\r\n`, 'i'));
+      assert.equal(answer.subarray(split + 4).length, 0, 'and not one byte of the entity');
+
+      // The same request as GET still gets the body, or the fix is "answer nothing" wearing a
+      // disguise.
+      const asGet = await speakBytes(
+        listener.address,
+        'GET / HTTP/1.1\r\nHost: atlas.vayu\r\n\r\n',
+      );
+      assert.equal(bodyOf(asGet).length, bytes.length);
+    },
+  );
+});

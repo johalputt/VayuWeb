@@ -87,6 +87,55 @@ def header_name_of(block):
     return None
 
 
+DIRECTIVE_ROW = re.compile(r"^\| `([a-z-]+)` \| `([^`]+)` \|", re.M)
+
+
+def check_directive_tables(canon):
+    """Compare every per-directive table row against the canonical header it documents.
+
+    The rationale tables in CONTENT-SECURITY.md restate each directive's value beside the reason
+    for it, which is a second copy of the same decision and therefore a copy that can drift. A
+    reader consults the table -- that is what it is for -- so a table that disagrees with the
+    header is a document that tells two different stories about what is enforced, and the one the
+    reader believes is the wrong one.
+
+    Returns (rows compared, failures).
+    """
+    compared = 0
+    failures = []
+    for dirpath, dirnames, filenames in os.walk(ROOT):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        for name in filenames:
+            if not name.endswith(".md"):
+                continue
+            path = os.path.join(dirpath, name)
+            rel = os.path.relpath(path, ROOT)
+            text = open(path, encoding="utf-8").read()
+            for key, canonical in canon.items():
+                # The canonical value as a mapping from directive to the value it carries.
+                stated = {}
+                for part in canonical.split(";"):
+                    part = part.strip()
+                    if not part:
+                        continue
+                    head, _, rest = part.partition(" ")
+                    stated[head] = rest.strip() or head
+                if not stated:
+                    continue
+                for match in DIRECTIVE_ROW.finditer(text):
+                    directive, value = match.group(1), match.group(2).strip()
+                    if directive not in stated:
+                        continue
+                    compared += 1
+                    if value != stated[directive]:
+                        line = text[: match.start()].count("\n") + 1
+                        failures.append(
+                            f"{rel}:{line}: '{directive}' is documented as {value} "
+                            f"but {key} carries {stated[directive]}"
+                        )
+    return compared, failures
+
+
 def main():
     canon = load_canonical()
     if canon is None:
@@ -128,13 +177,27 @@ def main():
                         f"      canonical: {canon[key][:160]}"
                     )
 
+    # The per-directive tables are the second copy that actually EXISTS in this corpus, and this
+    # check did not read them. Comparing fenced blocks alone left `compared` at zero -- the
+    # canonical blocks are the only fenced header blocks there are, and they are excluded as the
+    # yardstick -- so the loop body never ran and the script printed OK for having compared
+    # nothing. Every other checker here guards that state and this one did not.
+    directives, table_failures = check_directive_tables(canon)
+    compared += directives
+    failures.extend(table_failures)
+
     if failures:
         print(f"\n{len(failures)} header divergence(s):\n", file=sys.stderr)
         for failure in failures:
             print(f"  {failure}", file=sys.stderr)
         return 1
 
-    print(f"\nOK -- {compared} quoted header block(s) match the canonical values.")
+    if compared == 0:
+        print("::error::no quoted header value was compared with a canonical one -- this check "
+              "is enforcing nothing", file=sys.stderr)
+        return 1
+
+    print(f"\nOK -- {compared} quoted header value(s) match the canonical values.")
     return 0
 
 

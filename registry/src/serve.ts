@@ -174,6 +174,15 @@ function writeHttp(
   status: number,
   headers: ReadonlyMap<string, string>,
   body: Uint8Array,
+  /**
+   * Send the head and none of the entity, which is what a response to HEAD is.
+   *
+   * It belongs here rather than in the handlers because it is a framing rule, not a policy one:
+   * `content-length` still states what a GET would have returned, so the two have to be decided
+   * together and by whoever writes them. Leaving it to the handler would mean returning an empty
+   * body and a length that disagreed with it — the same defect from the other side.
+   */
+  elideBody = false,
 ): void {
   // No decode step. The body arrives as the bytes that are going out; it used to arrive as a
   // latin-1 string and get re-encoded as UTF-8, which doubled every octet above 0x7f.
@@ -185,6 +194,10 @@ function writeHttp(
   // request smuggling, and this proxy has no throughput requirement that would pay for it.
   lines.push('connection: close');
   socket.write(`${lines.join('\r\n')}\r\n\r\n`);
+  if (elideBody) {
+    socket.end();
+    return;
+  }
   socket.end(payload);
 }
 
@@ -266,7 +279,10 @@ function serveConnection(
         return;
       }
       const answer = respond(parsed);
-      writeHttp(socket, answer.status, answer.headers, answer.body);
+      // RFC 7230 3.3.3: a response to HEAD never carries an entity, whatever its status. Applied
+      // here, once, for both surfaces — the handlers decide what the answer IS and this decides
+      // how much of it goes on the wire, which is the split the rest of this file keeps.
+      writeHttp(socket, answer.status, answer.headers, answer.body, parsed.method === 'HEAD');
     });
   });
 

@@ -97,7 +97,14 @@ jobs:
         # a careful author kept missing them: what the words assert to a reader who has read
         # nothing else, "not what a longer passage elsewhere qualifies". Every one sat within a
         # few paragraphs of an honest caveat the author had in mind and the reader does not.
-        run: python3 scripts/check-absolute-claims.py
+        #
+        # The self-test runs first, and it is not ceremony: this checker has twice been
+        # changed in a way that narrowed its reach while its own docstring was edited to say
+        # the opposite. Each case is a sentence it got wrong once -- a violation split across
+        # a hard wrap, and one exempted by a "no" belonging to a different clause.
+        run: |
+          python3 scripts/check-absolute-claims.py --self-test
+          python3 scripts/check-absolute-claims.py
 
       - name: Every VWIP carries the sections VWIP-0000 makes mandatory
         # VWIP-0000 section 3 says "an editor checks their presence, never their merit" -- a

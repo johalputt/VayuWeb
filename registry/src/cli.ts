@@ -22,7 +22,7 @@ import { homedir } from 'node:os';
 import { encode, type CborMap, type CborValue } from './cbor.ts';
 import { signingInput } from './domain.ts';
 import { sign, publicKeyFrom, SECRET_KEY_LENGTH } from './signature.ts';
-import { parseRecordBytes } from './record.ts';
+import { parseRecordBytes, type RecordEntry, type RegistryRecord } from './record.ts';
 import { RATIFIED_TLDS, assertValidName } from './names.ts';
 import { POW_ALGORITHM, POW_NONCE_LENGTH, solvePow, requiredBits } from './pow.ts';
 import { Store } from './store.ts';
@@ -171,41 +171,111 @@ function entriesFrom(args: Args): CborValue[] {
   return entries;
 }
 
+/** The flags that name a record entry. Shared, because three commands read exactly this set. */
+const ENTRY_FLAGS = ['txt', 'cid', 'ipns', 'alias', 'peer'] as const;
+
 /**
- * Every flag any command understands.
+ * The entries a successor record carries.
+ *
+ * **`records` used to be hardcoded to `[]` for every operation but `UPDATE`, and that took names
+ * down.** REGISTRY.md says `records` "is replaced wholesale; there is no partial update", so an
+ * empty array is not "leave them alone" — it is "delete them". Renewing a name therefore emptied
+ * it: the tool printed `accepted RENEW … seq 1`, the record was valid, the log was correct, and
+ * the site stopped resolving until somebody noticed and ran `update`. Transferring a name did the
+ * same to its new owner.
+ *
+ * So each operation now says what it means by silence:
+ *
+ * - `RENEW` and `TRANSFER` change the term and the owner. Entries are carried forward unchanged,
+ *   which is what a renewal means to the person doing it, and either may still change them —
+ *   REGISTRY.md permits it explicitly for `RENEW`, and constrains neither.
+ * - `UPDATE` exists to replace the entries, so it refuses to guess: name them, or pass `--clear`
+ *   to mean the empty set out loud.
+ * - `RELINQUISH` and `REVOKE` require an empty `records` by specification, so there is nothing to
+ *   decide.
+ *
+ * Entries are rebuilt rather than re-encoded, `ttl` included, so an entry of a type this build
+ * does not recognise survives a renewal — `parseEntry` keeps those deliberately, and dropping
+ * them here would undo that one operation later.
+ */
+function entriesForSuccessor(op: string, args: Args, prev: RegistryRecord): CborValue[] {
+  if (op === 'RELINQUISH' || op === 'REVOKE') return [];
+  const named = ENTRY_FLAGS.some((flag) => args.flags.get(flag) !== undefined);
+  if (named) return entriesFrom(args);
+  if (args.flags.get('clear') !== undefined) return [];
+  if (op === 'UPDATE') {
+    throw new UsageError(
+      'update replaces every entry wholesale, so it will not guess: name the entries you want ' +
+        '(--cid, --ipns, --txt, --alias, --peer) or pass --clear to remove them all',
+    );
+  }
+  return prev.entries.map(
+    (e: RecordEntry) =>
+      new Map<string | Uint8Array, CborValue>([
+        ['type', e.type],
+        ['value', e.value],
+        ['ttl', e.ttl],
+      ]),
+  );
+}
+
+/**
+ * The flags each command understands, per command.
  *
  * Enumerated so an unrecognised one can be REFUSED rather than dropped. `--cid` was accepted and
  * silently ignored for as long as `entriesFrom` did not read it, and the tool answered
  * "accepted REGISTER … 329 bytes" for a record with no entries at all. A tool that discards
  * something you typed and then reports success is a tool that lies about what it did, and the
  * cost of finding out is a name on a real log that resolves to nothing.
+ *
+ * **Per command, and the first version was not.** One global union answers "does any command read
+ * this flag?" when the question is "does THIS command read it?", so a flag belonging to another
+ * verb was accepted and dropped by exactly the mechanism the enumeration was added to close.
+ * `register --site ./public` — a natural mistake now that `serve --site` exists — spent a real
+ * proof-of-work solve and wrote a record with no entries in it, and the fix as first written could
+ * not tell that from a correct invocation.
  */
-const KNOWN_FLAGS = new Set([
-  'log',
-  'key',
-  'name',
-  'seed',
-  'force',
-  'at',
-  'bits',
-  'record',
-  'txt',
-  'cid',
-  'ipns',
-  'alias',
-  'peer',
-  'to',
-  'cosign',
-  'port',
-  'socket',
-  'site',
+const FLAGS_FOR: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['keygen', new Set(['key', 'seed', 'force'])],
+  ['register', new Set(['log', 'key', 'name', 'bits', 'at', ...ENTRY_FLAGS])],
+  ['update', new Set(['log', 'key', 'name', 'at', 'clear', ...ENTRY_FLAGS])],
+  ['renew', new Set(['log', 'key', 'name', 'bits', 'at', 'clear', ...ENTRY_FLAGS])],
+  ['transfer', new Set(['log', 'key', 'name', 'to', 'cosign', 'at', 'clear', ...ENTRY_FLAGS])],
+  ['release', new Set(['log', 'key', 'name', 'at'])],
+  ['revoke', new Set(['log', 'key', 'name', 'at'])],
+  ['resolve', new Set(['log', 'name', 'at'])],
+  ['list', new Set(['log', 'at'])],
+  ['difficulty', new Set(['log', 'name', 'at'])],
+  ['verify', new Set(['log', 'record', 'at'])],
+  ['vectors', new Set<string>()],
+  ['serve', new Set(['log', 'port', 'socket', 'site'])],
 ]);
 
-/** Refuse a flag nothing reads, naming the nearest thing it might have meant. */
-function assertKnownFlags(args: Args): void {
+/** Every flag some command understands, for the "did you mean" hint only. */
+const ALL_FLAGS: ReadonlySet<string> = new Set([...FLAGS_FOR.values()].flatMap((s) => [...s]));
+
+/**
+ * Refuse a flag this command does not read, naming the nearest thing it might have meant.
+ *
+ * The hint is drawn from every flag the tool knows, not only this command's, because a flag typed
+ * at the wrong verb is a likelier mistake than a flag misspelled — and being told "`--site` is not
+ * a flag of `register`" is more use than being told nothing resembles it.
+ */
+function assertKnownFlags(command: string, args: Args): void {
+  const known = FLAGS_FOR.get(command);
+  if (known === undefined) return; // An unknown command is refused by the dispatch below.
   for (const flag of args.flags.keys()) {
-    if (KNOWN_FLAGS.has(flag)) continue;
-    const near = [...KNOWN_FLAGS].filter((k) => k.startsWith(flag.slice(0, 2))).sort();
+    if (known.has(flag)) continue;
+    if (ALL_FLAGS.has(flag)) {
+      const reads = [...FLAGS_FOR]
+        .filter(([, set]) => set.has(flag))
+        .map(([verb]) => verb)
+        .sort();
+      throw new UsageError(
+        `--${flag} is not a flag of ${command}; it belongs to ${reads.join(', ')}`,
+      );
+    }
+    const near = [...known].filter((k) => k.startsWith(flag.slice(0, 2))).sort();
     const hint = near.length > 0 ? `; did you mean ${near.map((k) => `--${k}`).join(', ')}?` : '';
     throw new UsageError(`unknown flag --${flag}${hint}`);
   }
@@ -340,7 +410,7 @@ function cmdSuccessor(op: string, args: Args): number {
       ['seq', prev.seq + 1],
       ['notBefore', now],
       ['notAfter', notAfter],
-      ['records', op === 'UPDATE' ? entriesFrom(args) : []],
+      ['records', entriesForSuccessor(op, args, prev)],
       ['powProof', proof],
       ['prevHash', held.current.hash],
     ]);
@@ -805,17 +875,27 @@ const USAGE = `vayuweb-registry — local name registry (Phase 1: no network)
   keygen     --key <file> [--seed <hex>] [--force]
   register   --log <file> --key <file> --name <label.tld> [--cid <root>] [--ipns <key>]
              [--txt <s>] [--alias <n.tld>] [--peer <hex>] [--bits <n>] [--at <unix>]
-  update     --log <file> --key <file> --name <label.tld> [--txt <s>] ...
-  renew      --log <file> --key <file> --name <label.tld> [--bits <n>]
+  update     --log <file> --key <file> --name <label.tld> [--cid <root>] [--ipns <key>]
+             [--txt <s>] [--alias <n.tld>] [--peer <hex>] [--clear <y>] [--at <unix>]
+  renew      --log <file> --key <file> --name <label.tld> [--cid <root>] [--ipns <key>]
+             [--txt <s>] [--alias <n.tld>] [--peer <hex>] [--clear <y>] [--bits <n>]
+             [--at <unix>]
   transfer   --log <file> --key <file> --name <label.tld> --to <hex> --cosign <file>
-  release    --log <file> --key <file> --name <label.tld>
-  revoke     --log <file> --key <file> --name <label.tld>
+             [--cid <root>] [--ipns <key>] [--txt <s>] [--alias <n.tld>] [--peer <hex>]
+             [--clear <y>] [--at <unix>]
+  release    --log <file> --key <file> --name <label.tld> [--at <unix>]
+  revoke     --log <file> --key <file> --name <label.tld> [--at <unix>]
   resolve    --log <file> --name <label.tld> [--at <unix>]
   list       --log <file> [--at <unix>]
-  difficulty --log <file> --name <label.tld>
-  verify     --log <file> --record <file containing hex>
+  difficulty --log <file> --name <label.tld> [--at <unix>]
+  verify     --log <file> --record <file containing hex> [--at <unix>]
   vectors
   serve      --log <file> [--port <n>] [--socket <path>] [--site <dir>]
+
+Flags are checked against the command that was typed, not against the tool as a whole, so
+'register --site ./public' is refused rather than accepted and dropped. 'renew' and 'transfer'
+carry the name's existing entries forward; naming any entry flag replaces them wholesale, and
+'--clear y' empties them. 'update' always replaces, so it refuses to run with neither.
 
 Exit codes: 0 accepted, 1 rejected or error, 2 deferred (clock skew), 3 not live.
 
@@ -838,7 +918,7 @@ export function main(argv: readonly string[]): number | Promise<number> {
 
   try {
     const args = parseArgs(rest);
-    assertKnownFlags(args);
+    assertKnownFlags(command, args);
     switch (command) {
       case 'keygen':
         return cmdKeygen(args);

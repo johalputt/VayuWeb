@@ -474,3 +474,142 @@ test('an oversized batch is refused at decode rather than iterated', () => {
   assert.equal(outcome.applied, 0);
   assert.equal(outcome.rejected, 1, 'counted as one refused message, not 257 refused records');
 });
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT: the deadline that only ran when the peer chose to speak              */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: a peer that greets and then goes silent has its slots reclaimed', () => {
+  // **REPLICATION.md 4.3.b says a slot is reclaimed "whether or not a reply ever arrives", and
+  // the shipping requester reclaimed one only when something else arrived.**
+  //
+  // `expireWants` was private and called from one place, `nextWant`; `nextWant` from one place,
+  // `pump()`; and `pump()` from one place, `record()`, which runs inside the inbound `data`
+  // handler. So the deadline was evaluated only when the peer sent something — which is precisely
+  // the party the clause exists to defend against. A peer greets, takes all eight slots, and stops.
+  // Measured against the old driver: 6,000 seconds against a 60-second deadline, not one slot
+  // reclaimed and not one `WANT` retransmitted.
+  //
+  // Because a `WANT` is the only message this driver ever re-sends, this was also its only
+  // retransmission path: a `WANT` or a `RECORDS` lost on the wire was never retried on any
+  // connection, and the peer stayed silently under-synced while the connection looked healthy from
+  // both ends.
+  //
+  // The regression test written with the session-level fix drove `session.nextWant` directly, so
+  // it passed against the frozen driver. This one runs at the level the defect lives at.
+  const stream = fakeStream();
+  const clock = { at: NOW };
+  const ticks: (() => void)[] = [];
+  drivePeer(stream, emptySink(), () => clock.at, {
+    setInterval: (fn: () => void) => {
+      ticks.push(fn);
+      return ticks.length;
+    },
+    clearInterval: () => undefined,
+  });
+
+  // The peer greets, declaring a log far ahead of ours, and then says nothing ever again.
+  stream.feed(
+    frame(
+      encodeMessage({
+        t: 'HELLO',
+        v: PROTOCOL_VERSION,
+        len: 10_000,
+        root: new Uint8Array(32),
+      }),
+    ),
+  );
+  const afterGreeting = stream.written.length;
+  assert.ok(afterGreeting > 1, 'the greeting must have drawn out some WANTs');
+
+  // Nothing arrives. Every slot is spoken for and the connection is, from our side, finished.
+  const saturated = stream.written.length;
+  clock.at += 10 * LIMITS.wantDeadlineSeconds;
+  assert.equal(stream.written.length, saturated, 'time alone sends nothing without a tick');
+
+  // The driver's own clock fires. This is the whole fix: something other than the peer decides
+  // that the deadline has passed.
+  assert.ok(ticks.length > 0, 'drivePeer must schedule a tick of its own');
+  for (const tick of ticks) tick();
+
+  assert.ok(
+    stream.written.length > saturated,
+    `no WANT was re-issued after ${10 * LIMITS.wantDeadlineSeconds}s against a ` +
+      `${LIMITS.wantDeadlineSeconds}s deadline`,
+  );
+
+  // And it keeps working, rather than reclaiming once and freezing again.
+  const afterFirst = stream.written.length;
+  clock.at += 10 * LIMITS.wantDeadlineSeconds;
+  for (const tick of ticks) tick();
+  assert.ok(stream.written.length > afterFirst, 'the tick must keep reclaiming, not fire once');
+});
+
+test('the driver stops its own clock when the connection closes', () => {
+  // A timer per connection that outlives the connection is a leak proportional to how many peers
+  // have ever connected — and it would keep a reference to the session, so the memory the deadline
+  // was added to bound would be held by the mechanism that bounds it.
+  const stream = fakeStream();
+  let cleared = 0;
+  drivePeer(stream, emptySink(), () => NOW, {
+    setInterval: () => 'handle',
+    clearInterval: () => {
+      cleared += 1;
+    },
+  });
+  assert.equal(cleared, 0, 'nothing is cleared while the connection is open');
+  stream.destroy();
+  assert.equal(cleared, 1, 'and the timer goes when the connection does');
+});
+
+test('AUDIT: a deferred record is actually retried, not merely held', () => {
+  // **`retryDeferred` had no caller anywhere outside its own test.** The deferral fix that landed
+  // earlier bounds the queue honestly — deduplicated by record hash, so one postdated record
+  // resent a thousand times can no longer evict everybody else's — and the property that bound is
+  // in service of is stated in the code: "skew costs a retry instead of a loss". No shipping path
+  // performed the retry. `drivePeer` never called it, the swarm never called it, nothing on a
+  // clock called it, so a record deferred for clock skew stayed deferred until the connection
+  // ended and was then lost.
+  //
+  // This is the same missing clock as the WANT deadline above, in a second place, which is what
+  // made it worth looking for: the driver had no notion of elapsed time at all.
+  const stream = fakeStream();
+  const clock = { at: NOW };
+  const ticks: (() => void)[] = [];
+  let appended = 0;
+  let deferUntil = NOW + 100;
+  const sink = {
+    append: (_bytes: Uint8Array, at: number) => {
+      appended += 1;
+      return at < deferUntil
+        ? ({ outcome: 'defer', code: 'CLOCK_SKEW', detail: 'early' } as never)
+        : ({ outcome: 'accept' } as never);
+    },
+    length: () => 0,
+    encodingAt: () => null,
+    treeRoot: () => new Uint8Array(32),
+  };
+  drivePeer(stream, sink, () => clock.at, {
+    setInterval: (fn: () => void) => {
+      ticks.push(fn);
+      return ticks.length;
+    },
+    clearInterval: () => undefined,
+  });
+
+  stream.feed(
+    frame(encodeMessage({ t: 'HELLO', v: PROTOCOL_VERSION, len: 1, root: new Uint8Array(32) })),
+  );
+  stream.feed(frame(encodeMessage({ t: 'RECORDS', from: 0, recs: [new Uint8Array([1, 2, 3])] })));
+  const afterArrival = appended;
+  assert.ok(afterArrival > 0, 'the record must have been offered to the sink once');
+
+  // The skew passes. Nothing else arrives — that is the case the queue exists for.
+  clock.at = deferUntil + 1;
+  deferUntil = NOW; // it would be accepted now
+  for (const tick of ticks) tick();
+  assert.ok(
+    appended > afterArrival,
+    'the deferred record was never re-offered, so the skew cost a loss rather than a retry',
+  );
+});

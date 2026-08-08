@@ -1668,6 +1668,23 @@ export function buildBlockExchangeVectors(): BlockExchangeVector[] {
   const cid = cidBytes({ version: 1, codec: CID_PARAMETERS.codecRaw, digest });
   const emptyLeaf = new Uint8Array(0);
 
+  /**
+   * `n` identifiers that differ from each other.
+   *
+   * Written as a helper because the alternative — `Array.from({length: n}, () => cid)` — reads
+   * identically at a glance and publishes an amplification demand instead of a request. Each is a
+   * real CIDv1 over a distinct preimage, so a receiver that verifies identifiers before decoding
+   * them sees what it would see from an honest peer.
+   */
+  const distinctCids = (n: number): Uint8Array[] =>
+    Array.from({ length: n }, (_, i) =>
+      cidBytes({
+        version: 1,
+        codec: CID_PARAMETERS.codecRaw,
+        digest: sha256(new TextEncoder().encode(`atlas observatory ${i}`)),
+      }),
+    );
+
   const overLimit = (key: string, entries: CborValue[], t: string): Uint8Array =>
     encode(
       new Map<string | Uint8Array, CborValue>([
@@ -1692,10 +1709,23 @@ export function buildBlockExchangeVectors(): BlockExchangeVector[] {
     {
       // Decodes fine and must cost nothing. The defect this pins is not a decode failure; it is a
       // receiver that sizes a buffer from a number a stranger asserted.
+      //
+      // Built with `encode` rather than `encodeBlockMessage`, because 3.4.a forbids a PEER to
+      // declare a `max` above the block limit and the encoder now enforces that. This vector used
+      // to be produced by calling the encoder with a value the specification forbids — which was
+      // the proof that the encoder was not checking, published as though it were a valid message
+      // an honest peer might send. It is neither: it is a message only a hostile peer emits, and
+      // the receiver's obligation is to cost nothing for it rather than to reject it.
       name: 'blockx/bhello-absurd-max',
-      rule: 'VWIP-0005 5.1: BHELLO.max is a claim, not a measurement — a peer declaring 2^53 costs the receiver nothing beyond the message',
+      rule: 'VWIP-0005 5.1: BHELLO.max is a claim, not a measurement — a peer declaring 2^53 costs the receiver nothing beyond the message. 3.4.a forbids an honest peer to declare it at all.',
       message: toHex(
-        encodeBlockMessage({ t: 'BHELLO', v: BLOCK_EXCHANGE_VERSION, max: 2 ** 53 - 1 }),
+        encode(
+          new Map<string | Uint8Array, CborValue>([
+            ['t', 'BHELLO'],
+            ['v', BLOCK_EXCHANGE_VERSION],
+            ['max', 2 ** 53 - 1],
+          ]),
+        ),
       ),
       expect: { decode: 'ok', type: 'BHELLO' },
     },
@@ -1706,26 +1736,30 @@ export function buildBlockExchangeVectors(): BlockExchangeVector[] {
       expect: { decode: 'ok', type: 'BWANT' },
     },
     {
+      // **Sixty-four DISTINCT identifiers, and the distinctness is the point.** This vector was
+      // sixty-four copies of one identifier — which is 3.6.a's own description of an attack, "a
+      // request for one block and a demand for sixty-four, inside a message that passes every
+      // limit in section 5" — published with `expect: {decode: 'ok'}` in an artifact whose README
+      // calls that column "the verdict every conforming implementation must return". It made the
+      // specification's own recommended mitigation a conformance failure.
       name: 'blockx/bwant-at-the-limit',
-      rule: 'VWIP-0005 5: BWANT.cids is bounded at 64, and 64 is accepted',
+      rule: 'VWIP-0005 5: BWANT.cids is bounded at 64, and 64 distinct identifiers are accepted',
       message: toHex(
         encodeBlockMessage({
           t: 'BWANT',
-          cids: Array.from({ length: BX_LIMITS.wantCids }, () => cid),
+          cids: distinctCids(BX_LIMITS.wantCids),
         }),
       ),
       expect: { decode: 'ok', type: 'BWANT' },
     },
     {
+      // Distinct for a second reason. As 65 copies of one identifier this vector forbade the
+      // natural implementation of 3.6.a — deduplicate, then bound — because after dedup it names
+      // one identifier and must be ACCEPTED, while the vector demands LIMIT_EXCEEDED. A second
+      // implementer following both clauses could not write a conforming receiver at all.
       name: 'blockx/bwant-over-the-limit',
-      rule: 'VWIP-0005 5: an array over the limit is refused at decode, without iterating it',
-      message: toHex(
-        overLimit(
-          'cids',
-          Array.from({ length: BX_LIMITS.wantCids + 1 }, () => cid),
-          'BWANT',
-        ),
-      ),
+      rule: 'VWIP-0005 5: an array over the limit is refused at decode, without iterating it — and refused for its length, not for a repeat',
+      message: toHex(overLimit('cids', distinctCids(BX_LIMITS.wantCids + 1), 'BWANT')),
       expect: { decode: 'reject', code: 'LIMIT_EXCEEDED' },
     },
     {

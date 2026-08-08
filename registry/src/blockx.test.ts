@@ -16,11 +16,13 @@ import {
   BX_LIMITS,
   BlockExchangeError,
   blockDoneFor,
+  blocksReplyFor,
   decodeBlockMessage,
   encodeBlockMessage,
   type BlockWant,
 } from './blockx.ts';
 import { encode, type CborValue } from './cbor.ts';
+import { CID_PARAMETERS } from './content.ts';
 
 const CID = Uint8Array.from([0x01, 0x55, 0x12, 0x20, ...new Uint8Array(32).fill(0xab)]);
 
@@ -249,8 +251,20 @@ test('AUDIT: an absurd BHELLO.max decodes and allocates nothing', () => {
   // the defect is a receiver that sizes a buffer from a number a stranger asserted, which is not
   // expressible as a rejection. What is assertable is that the decoder itself does not grow with
   // the claim, so the cost of the absurd message is compared against the cost of the honest one.
-  const absurd = encodeBlockMessage({ t: 'BHELLO', v: 1, max: Number.MAX_SAFE_INTEGER });
-  const modest = encodeBlockMessage({ t: 'BHELLO', v: 1, max: 1 });
+  // Encoded directly, NOT through `encodeBlockMessage`: 3.4.a forbids a peer to declare a `max`
+  // above the block limit, and the encoder now refuses to build one. Reaching for the encoder here
+  // was itself the finding — this test was manufacturing a forbidden message with the tool that is
+  // supposed to prevent it, and its silence was read as the message being legal.
+  const hello = (max: number): Uint8Array =>
+    encode(
+      new Map<string | Uint8Array, CborValue>([
+        ['t', 'BHELLO'],
+        ['v', 1],
+        ['max', max],
+      ]),
+    );
+  const absurd = hello(Number.MAX_SAFE_INTEGER);
+  const modest = hello(1);
   assert.ok(absurd.length < 32, 'the absurd claim is a handful of bytes on the wire');
 
   const before = process.memoryUsage().heapUsed;
@@ -394,7 +408,17 @@ test('AUDIT: a declared maximum can never raise the receiver`s own bound', () =>
   // The implementation cannot get this wrong, and the reason is structural rather than careful:
   // `decodeBlockMessage` holds no session state, so there is nowhere for a declared maximum to be
   // remembered. Asserted by decoding an absurd BHELLO and then an over-limit block.
-  decodeBlockMessage(encodeBlockMessage({ t: 'BHELLO', v: 1, max: Number.MAX_SAFE_INTEGER }));
+  //
+  // The absurd greeting is built by hand, because `encodeBlockMessage` now refuses to declare a
+  // `max` the specification forbids — 3.4.a binds the sender as well as the receiver, and this
+  // test used to obtain its fixture from the function that should have said no.
+  decodeBlockMessage(
+    raw([
+      ['t', 'BHELLO'],
+      ['v', 1],
+      ['max', Number.MAX_SAFE_INTEGER],
+    ]),
+  );
   const over = raw([
     ['t', 'BLOCKS'],
     ['blks', [new Uint8Array(BX_LIMITS.blockBytes + 1)]],
@@ -567,4 +591,124 @@ test('the BDONE builder derives its order from the request, not from local state
   // An identifier that was never requested cannot be smuggled into the answer: that would be a
   // channel of its own, and it is not something a truthful peer ever needs.
   assert.throws(() => blockDoneFor(want, [new Uint8Array(36).fill(9)]), /not in the request/);
+});
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT: a claim already found inverted, carried into the new protocol        */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: VWIP-0005 does not repeat the "never split" claim already found inverted', () => {
+  // **The same sentence was found inverted in the replication half of this session and corrected
+  // there and only there.** `replicate.ts` now reads "Matches `wantCount`, but NOT so that 'an
+  // honest reply is never split' — that claim was inverted"; VWIP-0005 section 5 and blockx.ts
+  // kept the uncorrected copy verbatim, in a protocol that has not shipped yet.
+  //
+  // The document refutes itself 145 lines later — section 8 says the two bounds interact and "the
+  // binding one is the message size, which makes `BLOCKS.blks` a bound on array iteration rather
+  // than on volume" — so this is not a matter of opinion about the wording. Section 5 opens "Every
+  // limit below MUST be enforced", so an implementer reading the table builds a 64-block reply,
+  // and at the chunk size the block limit is derived from, only four of them fit.
+  //
+  // The check that missed it read the row's NUMBER and never its justification: the regexp
+  // captured `([\d,]+)` and stopped. A limits table can therefore state the opposite of the
+  // document's own security analysis in the column a reader consults for *why*, and stay green.
+  const flat = SPEC_FLAT();
+  assert.doesNotMatch(flat, /an honest reply is never split/, 'the inverted claim is back');
+
+  // What the row must say instead: that the message bound is what binds.
+  const row = /\| `BLOCKS\.blks` length \| 64 \| ([^|]+)\|/.exec(flat);
+  assert.ok(row, 'section 5 must carry the BLOCKS.blks row');
+  assert.match(
+    row[1]!,
+    /array iteration|message bound|binds first/,
+    `the justification column still explains the wrong thing: ${row[1]!.trim()}`,
+  );
+
+  // And the counterpart REPLICATION.md gained must exist here too. Without it, size-driven
+  // truncation is routed through 3.7's BDONE duty — the channel 6.2 reserves for refusals — so a
+  // requester reads "I split this for size" as "I will not serve these".
+  // Bold markers are tolerated everywhere a normative keyword appears: three assertions in this
+  // file have already failed on formatting rather than on meaning, which is a test reporting a
+  // defect that is not there — the same class of wrongness as one reporting none that is.
+  const must = (phrase: string): RegExp => new RegExp(phrase.replace(/ /g, '\\*{0,2} \\*{0,2}'));
+  assert.match(flat, must('MUST truncate a `BLOCKS` reply'));
+  assert.match(flat, must('counting bytes rather than blocks'));
+  assert.match(flat, must('MUST NOT emit a message it cannot encode'));
+  assert.match(flat, must('MUST NOT treat a short `BLOCKS`'));
+});
+
+test('AUDIT: only four chunks fit a BLOCKS message, and the builder counts bytes', () => {
+  // The measurement the table's old justification contradicted. At VWIP-0005's own 262,144-byte
+  // chunk size the fifth block is already over the message bound, so an honest reply is split
+  // routinely — this is the ordinary case for any site, not a corner case.
+  const chunk = () => new Uint8Array(CID_PARAMETERS.chunkBytes);
+  let fits = 0;
+  for (let n = 1; n <= BX_LIMITS.blocksPerMessage; n += 1) {
+    try {
+      encodeBlockMessage({ t: 'BLOCKS', blks: Array.from({ length: n }, chunk) });
+      fits = n;
+    } catch {
+      break;
+    }
+  }
+  assert.equal(fits, 4, `expected four default chunks to fit, measured ${fits}`);
+  assert.ok(
+    fits < BX_LIMITS.blocksPerMessage,
+    'if a full-length reply ever encodes, the message bound has been raised',
+  );
+
+  // So a responder needs a byte-budgeted builder, exactly as the replication half needed one.
+  // Sweeping the sizes rather than picking one: the defect that fix was written for lived in the
+  // narrow band where a per-item estimate and the real encoding disagree, and a single size walks
+  // straight past it.
+  for (let size = 1; size <= 40_000; size += 37) {
+    const blocks = Array.from({ length: BX_LIMITS.blocksPerMessage }, () => new Uint8Array(size));
+    const { take, encoded } = blocksReplyFor(blocks);
+    assert.ok(take >= 1, `a reply must carry at least one block at ${size} bytes`);
+    assert.ok(
+      encoded.length <= BX_LIMITS.messageBytes,
+      `the builder emitted ${encoded.length} bytes at block size ${size}`,
+    );
+    // And it is not merely safe — it must be tight, or a responder that trusts it drips one block
+    // per message and the sync never finishes.
+    if (take < blocks.length) {
+      assert.throws(
+        () => encodeBlockMessage({ t: 'BLOCKS', blks: blocks.slice(0, take + 1) }),
+        /over the/,
+        `one more block would have fit at block size ${size}`,
+      );
+    }
+  }
+});
+
+test('AUDIT: the encoder refuses the two MUST NOTs it claimed to enforce', () => {
+  // `encodeBlockMessage`'s docstring says it refuses "to emit anything a conforming receiver would
+  // reject", and it checked exactly one of the specification's three sender-side prohibitions.
+  // The project's own vector generator was the proof: `blockx/bhello-absurd-max` was produced by
+  // calling this function with a value 3.4.a forbids a peer to declare, and it did not object.
+  //
+  // 3.6.a — a BWANT MUST NOT name the same identifier twice.
+  const cid = new Uint8Array(36).fill(9);
+  assert.throws(
+    () => encodeBlockMessage({ t: 'BWANT', cids: [cid, new Uint8Array(36).fill(1), cid] }),
+    /twice|repeat|duplicate/i,
+  );
+  // 3.4.a — a peer MUST NOT declare a `max` above the block limit.
+  assert.throws(
+    () => encodeBlockMessage({ t: 'BHELLO', v: BLOCK_EXCHANGE_VERSION, max: 2 ** 53 - 1 }),
+    /max/i,
+  );
+  assert.throws(
+    () =>
+      encodeBlockMessage({
+        t: 'BHELLO',
+        v: BLOCK_EXCHANGE_VERSION,
+        max: BX_LIMITS.blockBytes + 1,
+      }),
+    /max/i,
+  );
+  // A declared maximum LOWER than the protocol's harms nobody but its declarer, so it stays legal.
+  assert.doesNotThrow(() =>
+    encodeBlockMessage({ t: 'BHELLO', v: BLOCK_EXCHANGE_VERSION, max: 4096 }),
+  );
 });

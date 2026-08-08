@@ -218,8 +218,10 @@ what arrives.
 
 **The browser integration is done and the acceptance criterion is executable.**
 `registry/scripts/acceptance-browser.mjs` publishes a site, registers a name against the root CID
-the importer produced, serves it, and drives stock Chromium through the proxy with no extension,
-no certificate and no flag beyond `--proxy-server`. It carries the **Article 14
+the importer produced, serves it, and drives stock Chromium through the proxy with no extension
+and no certificate, using two flags: `--proxy-server` and `--proxy-bypass-list=<-loopback>`, the
+second of which subtracts Chromium's built-in loopback bypass so the proxy is actually used.
+Neither installs anything or teaches the browser what a `.vayu` name is. It carries the **Article 14
 outbound-connection test** too, measured rather than asserted: it joins the resolver's own socket
 inodes from `/proc/<pid>/fd` against the TCP tables, because `/proc/<pid>/net/tcp` read directly
 is per network namespace and reports the whole machine's traffic as though it were the

@@ -195,29 +195,81 @@ test('AUDIT: an unrecognised flag is refused, never silently dropped', () => {
   }
 });
 
-test('every flag the help text advertises is one the tool will accept', () => {
-  // The two lists drift in opposite directions and both directions are bugs: a flag in the help
-  // and not in the allow list is refused with "unknown flag" after being documented, and one in
-  // the allow list and not in the help is undiscoverable. Read the help the tool prints rather
-  // than a copy of it.
+/** The flags each command's own usage line advertises, read out of the help the tool prints. */
+function advertisedPerCommand(help: string): Map<string, Set<string>> {
+  const lines = help.split('\n');
+  const perCommand = new Map<string, Set<string>>();
+  let current: Set<string> | null = null;
+  for (const line of lines) {
+    const start = /^ {2}([a-z]+)(?: |$)/.exec(line);
+    if (start !== null) {
+      current = new Set<string>();
+      perCommand.set(start[1]!, current);
+    } else if (!/^ {6,}\S/.test(line)) {
+      // Anything that is neither a command line nor an indented continuation ends the block, so
+      // the prose below the table cannot leak flags into the last command's set.
+      current = null;
+      continue;
+    }
+    if (current === null) continue;
+    for (const match of line.matchAll(/--([a-z][a-z0-9-]*)/g)) current.add(match[1]!);
+  }
+  return perCommand;
+}
+
+test('AUDIT: each command accepts exactly the flags its own usage line advertises', () => {
+  // **The first version of this test pinned the defect it was written to prevent.**
+  //
+  // `KNOWN_FLAGS` was one global union checked before the command was even known, so it answered
+  // "does any command read this?" when the question is "does THIS command read it?" — and the test
+  // fed all fourteen advertised flags to `resolve` and asserted none was refused, which is the
+  // buggy behaviour stated as a requirement.
+  //
+  // The cost is not hypothetical. `register --site ./public`, a natural mistake now that
+  // `serve --site` exists, was accepted, spent a full Argon2id solve, and wrote a record with no
+  // entries in it — the same 329-byte empty record the enumeration was added to make impossible.
+  //
+  // So the test now runs in both directions, per command: everything a usage line advertises must
+  // be accepted by that command, and every flag it does not advertise must be refused by name.
   const help = run(['--help']);
   assert.equal(help.code, 0);
-  const advertised = new Set(
-    [...help.out.matchAll(/--([a-z][a-z0-9-]*)/g)].map((m) => m[1]!).filter((f) => f !== 'help'),
-  );
-  assert.ok(advertised.size > 5, 'the help text must actually advertise flags');
+  const perCommand = advertisedPerCommand(help.out);
+  assert.ok(perCommand.size >= 13, `the help must list the commands; found ${perCommand.size}`);
+
+  const everyFlag = new Set([...perCommand.values()].flatMap((s) => [...s]));
+  assert.ok(everyFlag.size > 10, 'the help text must actually advertise flags');
 
   const { dir, done } = scratch();
   try {
     const key = join(dir, 'key');
     run(['keygen', '--key', key]);
-    for (const flag of advertised) {
-      const result = run(['resolve', '--log', join(dir, 'log'), `--${flag}`, 'x']);
-      assert.doesNotMatch(
-        result.err,
-        /unknown flag/,
-        `--${flag} is in the help text but not in KNOWN_FLAGS`,
-      );
+    // Every value points inside the scratch directory, so a run that gets past the flag check
+    // and reaches a command cannot write anything outside it.
+    const value = join(dir, 'x');
+    for (const [command, advertised] of perCommand) {
+      // `serve` is the one command that would BIND rather than return, so it is exercised only in
+      // the refusing direction — which is safe, because the flag check runs before the dispatch.
+      if (command !== 'serve') {
+        for (const flag of advertised) {
+          const accepted = run([command, `--${flag}`, value]);
+          assert.doesNotMatch(
+            accepted.err,
+            /unknown flag|is not a flag of/,
+            `${command} advertises --${flag} and refuses it`,
+          );
+        }
+      }
+      // And the other direction, which is the half that was missing. `keygen` and `vectors` touch
+      // no log, so a flag from another verb reaching them is the same silent drop.
+      for (const flag of everyFlag) {
+        if (advertised.has(flag)) continue;
+        const refused = run([command, `--${flag}`, value]);
+        assert.match(
+          refused.err,
+          new RegExp(`--${flag} is not a flag of ${command}`),
+          `${command} accepts --${flag}, which it does not read`,
+        );
+      }
     }
   } finally {
     done();
@@ -289,6 +341,158 @@ test('a symbolic link refuses the publish rather than vanishing from it', () => 
     assert.throws(() => siteFilesFor(site), /linked\.txt is a symbolic link/);
     // And the refusal explains itself, because "refused" without a reason is a bug report.
     assert.throws(() => siteFilesFor(site), /private key into a public CID/);
+  } finally {
+    done();
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/* What a successor record does to the entries you already had                 */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: renewing a name does not take it down', () => {
+  // **Measured before the fix: a live name resolved to its CID, `renew` reported
+  // `accepted RENEW … seq 1`, and the name then resolved to nothing.**
+  //
+  // `records` was hardcoded to `[]` for every operation but `UPDATE`. REGISTRY.md is explicit that
+  // `records` "is replaced wholesale; there is no partial update", so an empty array is not
+  // "unchanged" — it is "deleted". The signed record was valid, the log was correct, the exit code
+  // was 0, and the site was unreachable until somebody noticed and ran `update`. `transfer` did
+  // the same thing to the person receiving the name.
+  //
+  // Nothing was wrong at any single layer, which is why this test drives the tool rather than
+  // `cmdSuccessor`: the record builder did what it was told and what it was told was the defect.
+  const { dir, done } = scratch();
+  try {
+    const key = join(dir, 'key');
+    const log = join(dir, 'log');
+    assert.equal(run(['keygen', '--key', key]).code, 0);
+
+    const registered = run([
+      'register',
+      '--log',
+      log,
+      '--key',
+      key,
+      '--name',
+      'atlasobservatory.vayu',
+      '--cid',
+      CID_TEXT,
+      '--at',
+      String(NOW),
+    ]);
+    assert.equal(registered.code, 0, registered.out + registered.err);
+
+    // Inside the renewal window, which opens 60 days before a one-year term expires — 305 days in,
+    // so 320 is comfortably inside it and comfortably past the 300-second minimum interval.
+    // Nothing about the entries is mentioned, because a person renewing a name is not saying
+    // anything about its contents.
+    const later = NOW + 320 * 24 * 3600;
+    const renewed = run([
+      'renew',
+      '--log',
+      log,
+      '--key',
+      key,
+      '--name',
+      'atlasobservatory.vayu',
+      '--at',
+      String(later),
+    ]);
+    assert.equal(renewed.code, 0, renewed.out + renewed.err);
+
+    const store = Store.open(log, later);
+    const held = store.lookup('atlasobservatory', 'vayu');
+    assert.ok(held, 'the name must still be in the log');
+    assert.equal(held.current.record.op, 'RENEW');
+    const entries = held.current.record.entries;
+    assert.equal(entries.length, 1, 'the renewal must not have emptied the name');
+    assert.equal(entries[0]!.type, 'cid');
+    assert.deepEqual(
+      entries[0]!.value,
+      cidBytes({ version: 1, codec: CID_PARAMETERS.codecDagPb, digest: DIGEST }),
+    );
+
+    // And the name still answers, which is the thing the owner actually cares about.
+    const resolved = run([
+      'resolve',
+      '--log',
+      log,
+      '--name',
+      'atlasobservatory.vayu',
+      '--at',
+      String(later),
+    ]);
+    assert.equal(resolved.code, 0);
+    assert.match(resolved.out, new RegExp(`cid\\s+${CID_TEXT}`));
+    assert.doesNotMatch(resolved.out, /\(none\)/, 'a renewed name must not resolve to nothing');
+  } finally {
+    done();
+  }
+});
+
+test('update refuses to guess when no entry is named, rather than emptying the name', () => {
+  // `update` genuinely does replace wholesale, so it is the one command where an empty flag set is
+  // ambiguous between "I forgot" and "remove them all". Carrying entries forward here would make
+  // the command unable to express the second; emptying them silently is the defect above wearing
+  // the right verb. It refuses, and names the way to mean it.
+  const { dir, done } = scratch();
+  try {
+    const key = join(dir, 'key');
+    const log = join(dir, 'log');
+    run(['keygen', '--key', key]);
+    assert.equal(
+      run([
+        'register',
+        '--log',
+        log,
+        '--key',
+        key,
+        '--name',
+        'atlasobservatory.vayu',
+        '--cid',
+        CID_TEXT,
+        '--at',
+        String(NOW),
+      ]).code,
+      0,
+    );
+
+    const bare = run([
+      'update',
+      '--log',
+      log,
+      '--key',
+      key,
+      '--name',
+      'atlasobservatory.vayu',
+      '--at',
+      String(NOW + 400),
+    ]);
+    assert.equal(bare.code, 1);
+    assert.match(bare.err, /--clear/, 'the refusal must name the way to mean the empty set');
+
+    // The entries are untouched by a refusal, or "refuses" is doing the damage it refused to do.
+    const afterRefusal = Store.open(log, NOW + 400).lookup('atlasobservatory', 'vayu');
+    assert.equal(afterRefusal?.current.record.entries.length, 1);
+
+    // And --clear still empties them, said out loud.
+    const cleared = run([
+      'update',
+      '--log',
+      log,
+      '--key',
+      key,
+      '--name',
+      'atlasobservatory.vayu',
+      '--clear',
+      'y',
+      '--at',
+      String(NOW + 400),
+    ]);
+    assert.equal(cleared.code, 0, cleared.out + cleared.err);
+    const held = Store.open(log, NOW + 400).lookup('atlasobservatory', 'vayu');
+    assert.equal(held?.current.record.entries.length, 0);
   } finally {
     done();
   }
