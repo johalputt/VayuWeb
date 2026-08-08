@@ -277,7 +277,9 @@ test('a refusal body echoes nothing the caller supplied', () => {
   // and an echoed VayuWeb error code confirms VayuWeb is running.
   const hostile = 'atlas\r\nX-Injected: 1.vayu';
   const response = handleRequest(get('/', { host: hostile }), ports(), new NegativeCache(), NOW);
-  assert.equal(response.body, '');
+  // Byte length, not string equality: a body is bytes now, and empty is the only shape that can
+  // echo nothing at all.
+  assert.equal(response.body.length, 0);
   for (const [, value] of response.headers) {
     assert.equal(value.includes('X-Injected'), false);
     assert.equal(/[\r\n]/.test(value), false, 'no header value may carry CR or LF');
@@ -458,7 +460,8 @@ test('AUDIT: a cid entry reaches the content layer as base32, not as String(Uint
   );
   assert.equal(response.status, 200);
   assert.deepEqual(seen, [{ type: 'cid', value: CID_TEXT }]);
-  assert.equal(response.body, 'served');
+  // The fetched bytes are handed on unchanged — not re-encoded, not decoded and re-encoded.
+  assert.deepEqual(response.body, new TextEncoder().encode('served'));
 });
 
 test('a malformed cid entry addresses nothing rather than something approximate', () => {
@@ -536,4 +539,55 @@ test('AUDIT: the per-site Trusted Types policy name is constrained before it rea
   // And refused rather than repaired, which is what LOCAL-SURFACE 3.2 requires of a bad label.
   assert.match(spec, /trusted-types 'none'/);
   assert.match(spec, /refused, not repaired/);
+});
+
+test('AUDIT: a fetched body leaves the handler byte for byte', () => {
+  // **Every image and every non-ASCII character served through this proxy was corrupted, and the
+  // comment beside the line said the opposite.**
+  //
+  // `handleRequest` widened the fetched bytes to a latin-1 JS string —
+  // `Buffer.from(bytes).toString('binary')` — under a comment reading "the body is a byte string
+  // all the way to the socket, and decoding it as text would corrupt every image and every
+  // multi-byte character". It is not a byte string all the way to the socket: `writeHttp` in
+  // serve.ts narrowed it again with `Buffer.from(body, 'utf8')`. Latin-1 out, UTF-8 back in, so
+  // every octet above 0x7f became two. Measured with the fixture below: the 10-byte PNG prefix
+  // arrived as 13 bytes, the 19-byte string arrived as 28, and all 256 byte values arrived as 384.
+  //
+  // The comment was right about the danger and wrong about whether the code avoided it, which is
+  // the most expensive kind of comment to have.
+  //
+  // The browser acceptance test did not catch it because its fixture is pure ASCII — a test that
+  // passes for a reason unrelated to what it is testing.
+  //
+  // This covers the HANDLER half only, and is named for that. The first version of it claimed the
+  // socket and never opened one, so re-breaking `writeHttp` alone left it green; the wire half is
+  // `AUDIT: a fetched body reaches the wire byte for byte` in serve.test.ts, which binds a
+  // listener. Two halves, two tests, each named for the half it actually holds.
+  const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xd8]);
+  const utf8 = new TextEncoder().encode('café — ünïcode');
+
+  for (const [what, bytes] of [
+    ['a PNG header', png],
+    ['UTF-8 text', utf8],
+    ['every byte value', Uint8Array.from({ length: 256 }, (_, i) => i)],
+  ] as const) {
+    const record = live([cborEntry('cid', CID_BYTES)]);
+    const response = handleRequest(
+      get('/', { host: 'atlas.vayu' }),
+      { lookup: () => record, hasVerifiedHead: () => true },
+      new NegativeCache(),
+      NOW,
+      {
+        content: {
+          fetch: () => ({ ok: true, bytes, contentType: 'application/octet-stream' }),
+        },
+      },
+    );
+    assert.equal(response.status, 200, what);
+    assert.deepEqual(
+      Uint8Array.from(response.body),
+      bytes,
+      `${what} must survive the proxy unchanged`,
+    );
+  }
 });

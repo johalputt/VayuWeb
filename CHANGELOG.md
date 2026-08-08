@@ -10,6 +10,41 @@ it.
 
 ## [Unreleased]
 
+### Fixed — every image and every non-ASCII byte served was corrupted, under a comment saying it was not
+
+The proxy widened the fetched bytes to a latin-1 JavaScript string
+(`Buffer.from(bytes).toString('binary')`) and the socket writer narrowed them again as UTF-8
+(`Buffer.from(body, 'utf8')`). Latin-1 out, UTF-8 in: every octet above `0x7f` became two. Measured
+before the fix, a ten-byte PNG prefix arrived as thirteen bytes, `café — ünïcode` arrived as
+`cafÃ© â Ã¼nÃ¯code`, and all 256 byte values arrived as 384. A site with one image or one accented character was unservable, and the
+resolver reported 200.
+
+The comment beside the widening line read "the body is a byte string all the way to the socket, and
+decoding it as text would corrupt every image and every multi-byte character". It was right about
+the danger and wrong about whether the code avoided it — the most expensive kind of comment to have,
+because it answers the question a reader came to ask.
+
+The body is now `Uint8Array` from the content port to `socket.end`, with no encode or decode step in
+between. The two places that legitimately have text — the short diagnostic codes this layer invents,
+and the control API's JSON — encode it at the point that knows it is text, rather than leaving the
+writer to guess.
+
+**Two checks were green throughout, each for a reason unrelated to what it was testing.** The
+browser acceptance run passed because its fixture is pure ASCII, where the round trip is the
+identity. The audit test named "reaches the socket byte for byte" passed because it stops at
+`handleRequest` and never opens a socket — established by mutation: re-breaking the writer alone
+left all 44 tests passing while every served image was still destroyed. The test was the defect
+there, not the fix, so `serve.test.ts` grows one that binds the listener, sends all 256 byte values
+through it, and reads the answer as buffers rather than as a UTF-8 stream — reading it as text would
+damage the body a second time, and the two damages do not cancel.
+
+`scripts/acceptance-browser.mjs` now publishes a headline carrying characters above U+007F and a
+real PNG, and checks the image twice over: the bytes the browser received against the bytes that
+were published, and whether the browser's own decoder will read them. Both were mutation-tested by
+re-breaking the writer and re-running the whole harness through Chromium — the headline came back
+`Atlas Observatory â cafÃ© Ã¼nÃ¯code â`, the 70-byte image came back as 84 bytes, `naturalWidth`
+came back `-1`, and the harness exited 1. That is the run the earlier fixture could not produce.
+
 ### Fixed — the resolver could not serve a page, and nothing said so
 
 Phase 3's acceptance criterion is a browser nobody modified rendering a VayuWeb name. Running it

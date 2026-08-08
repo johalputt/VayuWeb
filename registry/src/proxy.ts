@@ -141,7 +141,19 @@ export interface ProxyRequest {
 export interface ProxyResponse {
   readonly status: number;
   readonly headers: ReadonlyMap<string, string>;
-  readonly body: string;
+  /**
+   * The body as BYTES.
+   *
+   * It was a JS string, and that silently corrupted every image and every multi-byte character:
+   * the content path widened the fetched octets to latin-1 and `writeHttp` narrowed them back
+   * through UTF-8, so every byte above 0x7f became two. A 12-byte PNG prefix arrived as 17. The
+   * comment beside the conversion asserted the opposite and was believed for exactly as long as
+   * nobody served a non-ASCII byte.
+   *
+   * Bytes end to end removes the question rather than answering it. A refusal page is UTF-8 text
+   * encoded once, here, where its encoding is obvious.
+   */
+  readonly body: Uint8Array;
 }
 
 export interface ProxyOptions {
@@ -161,6 +173,9 @@ export interface ProxyOptions {
    */
   readonly content?: ContentPort;
 }
+
+/** A response with nothing in it, shared so that no caller invents its own empty body. */
+const EMPTY_BODY = new Uint8Array(0);
 
 /** What the proxy needs to turn a resolved content source into a response body. */
 export interface ContentPort {
@@ -330,7 +345,7 @@ function refusal(error: ResolveErrorName): ProxyResponse {
   // numeric VayuWeb code and no name the caller supplied — echoing the request back is both the
   // fingerprint and the injection vector. The code stays available to the control API, which is
   // where a diagnosis belongs, because that surface is not reachable from a page.
-  return { status: spec.http, headers, body: '' };
+  return { status: spec.http, headers, body: EMPTY_BODY };
 }
 
 /**
@@ -399,7 +414,7 @@ export function handleRequest(
   // rather than a pretend page. What arrives from the port has already been VERIFIED --
   // `fetch.ts` checks every block against the CID that referred it -- so these are bytes that
   // hashed correctly, not bytes a peer sent.
-  let body = '';
+  let body: Uint8Array = EMPTY_BODY;
   if (options.content !== undefined) {
     const value = sourceValueOf(outcome.entry);
     if (value === null) return refusal('NO_USABLE_RECORD');
@@ -409,10 +424,9 @@ export function handleRequest(
     );
     if (!fetched.ok) return refusal(fetched.error);
     headers.set('content-type', fetched.contentType);
-    // Latin-1 rather than UTF-8: the body is a byte string all the way to the socket, and
-    // decoding it as text would corrupt every image and every multi-byte character before the
-    // serialiser could write it back out.
-    body = Buffer.from(fetched.bytes).toString('binary');
+    // Handed on unchanged. There is no encoding step here any more, which is the point: the two
+    // that used to exist did not agree with each other.
+    body = fetched.bytes;
   }
 
   if (options.diagnostics === true) {

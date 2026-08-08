@@ -217,6 +217,17 @@ function resolutionSockets(pids) {
 /* Fixture                                                                     */
 /* -------------------------------------------------------------------------- */
 
+// **The fixture is deliberately not ASCII.**
+//
+// It used to be, and that is why this harness reported success for a resolver that corrupted every
+// image and every accented character it served: the body was decoded as latin-1 on the way out of
+// the handler and re-encoded as UTF-8 on the way to the socket, and on pure ASCII that round trip
+// is the identity. A check whose fixture cannot express the failure is not evidence about it.
+//
+// So the headline carries characters above U+007F, and the site carries a real binary file whose
+// bytes the page compares against the ones that were published.
+const HEADLINE = 'Atlas Observatory — café ünïcode ✓';
+
 const INDEX = `<!doctype html>
 <html lang="en">
   <head>
@@ -225,7 +236,7 @@ const INDEX = `<!doctype html>
     <link rel="stylesheet" href="/assets/style.css" />
   </head>
   <body>
-    <h1 id="headline">Atlas Observatory</h1>
+    <h1 id="headline">${HEADLINE}</h1>
     <p id="proof">Served over VayuWeb from a verified content root.</p>
   </body>
 </html>
@@ -233,6 +244,17 @@ const INDEX = `<!doctype html>
 const STYLE = `body { background: #0b0f14; color: #e6edf3; font-family: system-ui, sans-serif; }
 h1 { color: #7ee787; }
 `;
+
+/**
+ * A real PNG: an 8-byte signature, an IHDR for a 1x1 image, and an IEND. Every byte of it above
+ * 0x7f is one the broken path would have doubled, and a browser refuses to decode it if any of them
+ * is wrong — so `naturalWidth` is an assertion about the bytes, made by the same decoder a reader's
+ * browser would use, rather than about a length this script computed itself.
+ */
+const PIXEL = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
 
 function cli(args, options = {}) {
   return new Promise((resolve) => {
@@ -306,6 +328,7 @@ try {
   mkdirSync(join(site, 'assets'), { recursive: true });
   writeFileSync(join(site, 'index.html'), INDEX);
   writeFileSync(join(site, 'assets', 'style.css'), STYLE);
+  writeFileSync(join(site, 'assets', 'pixel.png'), PIXEL);
 
   // The root CID comes out of the same importer the resolver uses, so the name is registered
   // against the address the content actually has rather than one asserted alongside it.
@@ -313,6 +336,7 @@ try {
   const root = importSite([
     { path: 'index.html', content: Buffer.from(INDEX) },
     { path: 'assets/style.css', content: Buffer.from(STYLE) },
+    { path: 'assets/pixel.png', content: PIXEL },
   ]).root;
 
   const key = join(dir, 'key');
@@ -405,8 +429,8 @@ try {
 
   const headline = await page.textContent('#headline');
   check(
-    'the page rendered from verified content',
-    headline === 'Atlas Observatory',
+    'the page rendered from verified content, non-ASCII intact',
+    headline === HEADLINE,
     JSON.stringify(headline),
   );
 
@@ -414,6 +438,30 @@ try {
   // nothing else renders an unstyled page that still passes a text assertion.
   const colour = await page.evaluate(() => getComputedStyle(document.querySelector('h1')).color);
   check('the stylesheet was fetched and applied', colour === 'rgb(126, 231, 135)', colour);
+
+  // The binary half, checked twice over: the bytes the browser received compared against the bytes
+  // that were published, and the browser's own PNG decoder asked whether it can read them. Either
+  // one alone would have caught the corruption; the pair distinguishes "wrong bytes" from "right
+  // bytes the decoder rejects", which are different bugs with the same symptom.
+  const fetched = await page.evaluate(async () => {
+    const r = await fetch('/assets/pixel.png');
+    return Array.from(new Uint8Array(await r.arrayBuffer()));
+  });
+  check(
+    'a binary asset arrived byte for byte',
+    fetched.length === PIXEL.length && PIXEL.every((b, i) => b === fetched[i]),
+    `${fetched.length} bytes received, ${PIXEL.length} published`,
+  );
+  const decoded = await page.evaluate(
+    () =>
+      new Promise((done) => {
+        const image = new Image();
+        image.onload = () => done(image.naturalWidth);
+        image.onerror = () => done(-1);
+        image.src = '/assets/pixel.png';
+      }),
+  );
+  check("the browser's own decoder accepted it", decoded === 1, `naturalWidth ${decoded}`);
 
   const csp = response?.headers()['content-security-policy'] ?? '';
   check("the CSP reached the browser with default-src 'none'", csp.includes("default-src 'none'"));

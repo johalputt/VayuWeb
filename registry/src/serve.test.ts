@@ -17,6 +17,10 @@ import {
 } from './serve.ts';
 import type { ResolverPorts } from './resolve.ts';
 import type { ControlPorts } from './control.ts';
+import { CID_PARAMETERS, cidBytes, sha256 } from './content.ts';
+import { parseRecord } from './record.ts';
+import { POW_ALGORITHM, POW_NONCE_LENGTH } from './pow.ts';
+import type { CborValue } from './cbor.ts';
 
 /** The code a parse refuses with, or 'accepted'. */
 function refusal(run: () => unknown): string {
@@ -398,6 +402,124 @@ test('the control API does not disclose a secret it was handed', async () => {
       assert.match(answer, /^HTTP\/1\.1 200 /, 'the disclosure check needs a real response');
       assert.doesNotMatch(answer, /secret-value-that-must-not-appear/);
       assert.match(answer, /REDACTED|\*{3}/i, 'and the key is present but redacted, not dropped');
+    },
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT: the body between the handler and the socket                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Speak to a listener and keep the answer as BYTES.
+ *
+ * `speak` above sets the socket encoding to utf8, which is exactly the transformation the test
+ * below exists to detect — a body corrupted on the way out would be corrupted a second time on the
+ * way in, and the two damages do not cancel. Reading the response as buffers is not a stylistic
+ * difference here; it is the only way this assertion can be about the wire.
+ */
+function speakBytes(address: string, request: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(Number(address.split(':')[1]), '127.0.0.1');
+    const chunks: Buffer[] = [];
+    socket.on('connect', () => socket.write(request));
+    socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+    socket.on('close', () => resolve(Buffer.concat(chunks)));
+    socket.on('error', reject);
+  });
+}
+
+/** The bytes after the head terminator — what a browser would actually save to a file. */
+function bodyOf(answer: Buffer): Buffer {
+  const split = answer.indexOf('\r\n\r\n');
+  assert.notEqual(split, -1, 'a response must have a head terminator');
+  return answer.subarray(split + 4);
+}
+
+const SERVE_NOW = 1_782_518_400;
+
+const SERVED_DIGEST = sha256(new TextEncoder().encode('atlas observatory'));
+const SERVED_CID = cidBytes({
+  version: 1,
+  codec: CID_PARAMETERS.codecDagPb,
+  digest: SERVED_DIGEST,
+});
+
+/** A resolver holding one live name pointing at one CID. */
+function servingPorts(): ResolverPorts {
+  const record = parseRecord(
+    new Map<string | Uint8Array, CborValue>([
+      ['version', 1],
+      ['suite', 1],
+      ['op', 'REGISTER'],
+      ['name', 'atlas'],
+      ['tld', 'vayu'],
+      ['ownerKey', new Uint8Array(32).fill(0x11)],
+      ['seq', 0],
+      ['notBefore', SERVE_NOW - 10],
+      ['notAfter', SERVE_NOW + 31_536_000],
+      [
+        'records',
+        [
+          new Map<string | Uint8Array, CborValue>([
+            ['type', 'cid'],
+            ['value', SERVED_CID],
+          ]),
+        ],
+      ],
+      [
+        'powProof',
+        new Map<string | Uint8Array, CborValue>([
+          ['alg', POW_ALGORITHM],
+          ['nonce', new Uint8Array(POW_NONCE_LENGTH).fill(7)],
+          ['bits', 10],
+        ]),
+      ],
+      ['prevHash', new Uint8Array(32)],
+      ['sig', new Uint8Array(64).fill(0xaa)],
+    ]),
+  );
+  return { lookup: () => record, hasVerifiedHead: () => true };
+}
+
+test('AUDIT: a fetched body reaches the wire byte for byte', async () => {
+  // **This test exists because a mutation survived the one that was supposed to cover it.**
+  //
+  // The corruption was a PAIR: `proxy.ts` widened the fetched bytes to a latin-1 string and
+  // `writeHttp` narrowed them again as UTF-8, so every octet above 0x7f became two. The audit test
+  // in `proxy.test.ts` pins the first half — and only the first half, because it stops at
+  // `handleRequest`. Re-encoding the payload inside `writeHttp` afterwards left all 44 tests green
+  // while every image served through the real listener was still destroyed.
+  //
+  // A test named "reaches the socket" that never opens a socket is the same class of defect as the
+  // comment that claimed the body was bytes all the way down. This one binds the listener.
+  const bytes = Uint8Array.from({ length: 256 }, (_, i) => i);
+  await withListener(
+    () =>
+      serveProxy({
+        ports: servingPorts(),
+        port: 0,
+        now: () => SERVE_NOW,
+        options: {
+          content: {
+            fetch: () => ({ ok: true, bytes, contentType: 'application/octet-stream' }),
+          },
+        },
+      }),
+    async (listener) => {
+      const answer = await speakBytes(
+        listener.address,
+        'GET / HTTP/1.1\r\nHost: atlas.vayu\r\n\r\n',
+      );
+      assert.match(answer.subarray(0, 15).toString('latin1'), /^HTTP\/1\.1 200 /);
+      const body = bodyOf(answer);
+      // Length first: a doubled octet shows here as a size, which is the failure a reader can act
+      // on without diffing 256 numbers.
+      assert.equal(body.length, bytes.length, 'the body must not grow on the way out');
+      assert.deepEqual(Uint8Array.from(body), bytes);
+      // And content-length agrees with what was actually written, or a browser truncates or hangs.
+      const head = answer.subarray(0, answer.indexOf('\r\n\r\n')).toString('latin1');
+      assert.match(head, new RegExp(`content-length: ${bytes.length}\r\n`, 'i'));
     },
   );
 });

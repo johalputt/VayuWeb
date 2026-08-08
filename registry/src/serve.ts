@@ -160,13 +160,24 @@ export function parseHead(text: string): RequestHead {
 }
 
 /** Serialise a response head and body. */
+/**
+ * A short diagnostic code as a body.
+ *
+ * These are the only bodies this module invents, and every one is ASCII. Encoding them here rather
+ * than inside `writeHttp` keeps that function free of any encoding decision at all — which is what
+ * the previous arrangement got wrong, by making one at each end and making two different ones.
+ */
+const asciiBody = (code: string): Uint8Array => Buffer.from(code, 'utf8');
+
 function writeHttp(
   socket: Socket,
   status: number,
   headers: ReadonlyMap<string, string>,
-  body: string,
+  body: Uint8Array,
 ): void {
-  const payload = Buffer.from(body, 'utf8');
+  // No decode step. The body arrives as the bytes that are going out; it used to arrive as a
+  // latin-1 string and get re-encoded as UTF-8, which doubled every octet above 0x7f.
+  const payload = Buffer.from(body);
   const lines = [`HTTP/1.1 ${status} ${reason(status)}`];
   for (const [name, value] of headers) lines.push(`${name}: ${value}`);
   lines.push(`content-length: ${payload.length}`);
@@ -212,7 +223,7 @@ function serveConnection(
   respond: (head: RequestHead) => {
     status: number;
     headers: ReadonlyMap<string, string>;
-    body: string;
+    body: Uint8Array;
   },
 ): void {
   let buffer = '';
@@ -221,7 +232,7 @@ function serveConnection(
   const timer = setTimeout(() => {
     if (done) return;
     done = true;
-    writeHttp(socket, 400, new Map(), 'HEAD_TIMEOUT');
+    writeHttp(socket, 400, new Map(), asciiBody('HEAD_TIMEOUT'));
   }, SERVE_LIMITS.headTimeoutMs);
   // An unref'd timer does not hold the process open, so a listener with an idle connection can
   // still shut down cleanly.
@@ -239,7 +250,7 @@ function serveConnection(
     if (done) return;
     buffer += chunk;
     if (buffer.length > SERVE_LIMITS.headBytes) {
-      finish(() => writeHttp(socket, 431, new Map(), 'HEAD_TOO_LARGE'));
+      finish(() => writeHttp(socket, 431, new Map(), asciiBody('HEAD_TOO_LARGE')));
       return;
     }
     const end = buffer.indexOf('\r\n\r\n');
@@ -251,7 +262,7 @@ function serveConnection(
         parsed = parseHead(head);
       } catch (error) {
         const code = error instanceof ServeError ? error.code : 'MALFORMED_REQUEST';
-        writeHttp(socket, statusFor(code), new Map(), code);
+        writeHttp(socket, statusFor(code), new Map(), asciiBody(code));
         return;
       }
       const answer = respond(parsed);
@@ -321,7 +332,7 @@ function withConnectionCap(server: Server, cap: number = SERVE_LIMITS.connection
       // Refused with a status rather than a silent close, so an operator watching the surface can
       // tell exhaustion apart from a network fault. No slot was taken, so nothing has to be given
       // back — which is the property the inline version got wrong.
-      writeHttp(socket, 503, new Map(), 'TOO_MANY_CONNECTIONS');
+      writeHttp(socket, 503, new Map(), asciiBody('TOO_MANY_CONNECTIONS'));
       return;
     }
     socket.on('close', () => counter.release());
@@ -464,7 +475,12 @@ export function serveControl(options: ControlServerOptions): Promise<Listener> {
         return {
           status: response.status,
           headers: response.headers,
-          body: response.body === undefined ? '' : JSON.stringify(response.body),
+          // The control API answers JSON, so the encoding is decided here — at the one place that
+          // knows the body is text — rather than being left for the writer to guess at.
+          body:
+            response.body === undefined
+              ? new Uint8Array(0)
+              : Buffer.from(JSON.stringify(response.body), 'utf8'),
         };
       });
     }),
