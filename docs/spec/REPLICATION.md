@@ -109,6 +109,34 @@ split falls on a byte total the requester has not seen. A requester MUST NOT tre
 evidence of anything, and in particular MUST NOT infer that the responder holds no more — 4.2's
 "fewer than requested" is the normal case at scale, not the exception.
 
+4.3.b **A requester MUST bound how long a `WANT` stays outstanding** and MUST reclaim the slot
+when that bound elapses, whether or not a reply ever arrives.
+
+This clause exists because the three rules around it are each correct and combine into a free
+stall. Section 5 bounds in-flight requests at eight, so memory is bounded. 4.3 makes declining
+both legal and *silent*, deliberately — serving is voluntary and Article 28 states duties without
+a custodian precisely so nobody can be said to have failed one. And nothing required a requester
+ever to give up. A peer that greets and then answers nothing therefore takes all eight slots and
+keeps them for the life of the connection, while breaking no rule at all: from the outside it is
+indistinguishable from a slow honest peer, which is what makes it cheap to do and hard to see.
+
+The absence of a duty on one side has to be paid for by a bound on the other. The length of the
+bound is the requester's to choose; having one is not. Reclaiming a slot is a local decision to
+stop waiting — it records nothing about the peer and accuses nobody, which 4.5 requires.
+
+Note also that a reply cannot be matched to the `WANT` that prompted it: no message in section 3
+carries a request identifier. A requester therefore releases the **oldest** outstanding slot on a
+reply, because the oldest is the most likely to have been abandoned.
+
+That choice does not make the budget exact, and the imprecision is worth stating rather than
+implying. If a request's deadline elapses and its reply then arrives, one slot has already been
+reclaimed by the deadline and a second is reclaimed by the reply, so a requester may briefly hold
+one more request in flight than section 5 allows. No ordering rule fixes this; only a request
+identifier would, and the wire format has none. The excess is bounded by the number of late
+replies — each costs the responder a message — and it does not accumulate, because the deadline is
+re-evaluated on every request. An implementation MAY carry a request identifier as a private
+extension; it MUST NOT require one of a peer.
+
 4.4 On receiving `RECORDS`, a peer MUST, for each record independently:
 
 ```text
@@ -144,7 +172,7 @@ the only attack a hostile peer retains, and an unbounded field is an invitation.
 | `WANT.count` | 256 | Bounds the work one message can ask for. A syncing peer sends many `WANT`s rather than one large one. |
 | `RECORDS.recs` length | 256 | Matches `WANT.count`. It bounds array iteration, not volume — see 4.3a. |
 | Each record encoding | 4,096 bytes | The record limit from REGISTRY.md, restated so a receiver checks it before parsing rather than after. |
-| Outstanding `WANT`s per connection | 8 | Bounds memory held for in-flight requests. |
+| Outstanding `WANT`s per connection | 8 | Bounds memory held for in-flight requests. Reclaimed on a deadline as well as by a reply — see 4.3.b. |
 | Deferred (`CLOCK_SKEW`) records held | 1,024 | Bounded because a deferred record is memory an attacker can allocate by dating records into the near future. Oldest evicted first. |
 
 5.1 A peer MUST NOT allocate memory proportional to a value a remote peer asserted. In particular

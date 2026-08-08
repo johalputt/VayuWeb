@@ -124,6 +124,44 @@ limit is 2.1 MB of hex zeros in the artifact, of which every byte after the firs
 information. The vectors file went from 159 KB to 2.25 MB before this was noticed. A runner builds
 the buffer from the stated length and tests exactly what one reading two million zeros would.
 
+### Fixed — a silent peer could freeze a sync forever, and the fix exposed a second defect
+
+**The same hole VWIP-0005 4.5.a closes for block exchange, still open in the older protocol that
+actually ships.** Three clauses combine, each individually right:
+
+- section 5 bounds in-flight `WANT`s at eight, so memory is bounded;
+- 4.3 makes declining both legal and *silent* — "**Declining is not an error condition**" — because
+  serving is voluntary and Article 28 states duties without a custodian precisely so nobody can be
+  said to have failed one;
+- and nothing required a requester ever to give up.
+
+`this.outstanding` was decremented in exactly one place: `onRecords`. A peer that greeted and then
+answered nothing took all eight slots and kept them for the life of the connection, while breaking
+no rule at all. From the outside it is indistinguishable from a slow honest peer, which is what
+makes it cheap to do and hard to see. `nextWant` now takes a clock and reclaims a slot whose
+deadline has passed; **4.3.b** requires it.
+
+**Then the mutation run found a second defect, by surviving.** Swapping `shift()` for `pop()` in
+the reply path failed nothing — and the project's rule is to distrust that. Chasing it showed the
+inadequate thing was the comment beside the line, which claimed releasing the oldest slot "cannot
+release the same slot twice". It can, and so can any other choice.
+
+No message carries a request identifier, so a reply cannot be matched to its own `WANT`. If a
+deadline elapses and the reply then arrives, the deadline has already reclaimed one slot and the
+reply reclaims a second — for one completed request. Measured: **nine issuable against a budget of
+eight.**
+
+It is bounded rather than closed, and closing it would need a request identifier the wire format
+does not have. So the residual is now *stated* in both the code and REPLICATION.md rather than
+claimed away, and a test pins the bound: N late replies permit at most N extra, and the window
+closes as soon as they stop. A mutation that makes the overshoot unbounded fails it; the
+`shift`/`pop` mutation still survives, which is now the documented correct answer rather than a
+gap.
+
+The lesson is the one the rule exists for. A surviving mutation is not a fix that needs no test —
+it is a question that has not been answered yet, and this one was hiding a false claim in a
+comment nobody would have re-derived.
+
 ### Fixed — COST.md promised a mechanism VWIP-0005 forbids, and hid a risk in a table cell
 
 **A contradiction created by this session's own work, which makes it the more instructive kind.**

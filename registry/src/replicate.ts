@@ -77,6 +77,15 @@ export const LIMITS = {
   recordBytes: 4_096,
   /** In-flight WANTs per connection, bounding memory held for requests. */
   outstandingWants: 8,
+  /**
+   * How long a WANT may stay outstanding before its slot is reclaimed.
+   *
+   * Section 4.3 makes declining legal and silent, so a slot released only by a reply is a slot a
+   * peer can keep by doing nothing. Sixty seconds is far longer than an honest reply takes and far
+   * shorter than a connection lives, so it costs a healthy peer nothing and costs a silent one
+   * every slot it is sitting on.
+   */
+  wantDeadlineSeconds: 60,
   /** Records held awaiting a clock-skew window. Bounded: an attacker allocates these by dating
    *  records into the near future. Oldest evicted first. */
   deferred: 1_024,
@@ -419,7 +428,13 @@ export class ReplicationSession {
   private helloSent = false;
   private helloReceived = false;
   private remoteLength = 0;
-  private outstanding = 0;
+  /**
+   * When each in-flight WANT was issued, in issue order.
+   *
+   * A list of instants rather than a counter, because a counter can only be decremented by
+   * something happening and the whole defect was that nothing had to happen.
+   */
+  private outstanding: number[] = [];
   private readonly deferredQueue: Array<{ bytes: Uint8Array; at: number }> = [];
 
   constructor(sink: ReplicationSink) {
@@ -578,7 +593,24 @@ export class ReplicationSession {
       } else rejected += 1;
     }
 
-    if (this.outstanding > 0) this.outstanding -= 1;
+    // A reply releases the OLDEST outstanding request. The protocol carries no request identifier
+    // (REPLICATION.md section 3), so a reply cannot be matched to the `WANT` that prompted it, and
+    // "oldest" is chosen because the oldest is the most likely to have been abandoned — releasing
+    // it keeps the freshest requests alive.
+    //
+    // **The residual, stated because an earlier comment here claimed it away.** That comment said
+    // releasing the oldest "cannot release the same slot twice". It can, and so can any other
+    // choice: if a request's deadline expires and its reply then arrives late, `expireWants` has
+    // already reclaimed one slot and this line reclaims a second — for one completed request.
+    // Measured, that permits a ninth request against a budget of eight. The mutation that swapped
+    // `shift` for `pop` survived precisely because the two are equivalent here, which is what
+    // exposed the claim as false.
+    //
+    // It is bounded rather than closed, and closing it would need a request identifier the wire
+    // format does not have: each overshoot costs the peer one late message, so the excess is at
+    // most the number of late replies and never accumulates beyond them. `nextWant` re-expires on
+    // every call, so the window closes as soon as the late replies stop.
+    this.outstanding.shift();
     return { ...EMPTY, applied, rejected, deferred, duplicates };
   }
 
@@ -630,13 +662,38 @@ export class ReplicationSession {
    * Bounded by {@link LIMITS.wantCount} per request and by {@link LIMITS.outstandingWants} in
    * flight. `remoteLength` is a claim, so this only ever produces a request for the next bounded
    * window — a peer claiming 2^53 records gets asked for 256 of them, not 2^53.
+   *
+   * **`now` is why this takes a clock at all.** Section 4.3 makes declining legal and silent, and
+   * nothing obliges a peer to answer — correctly, since a duty that can be failed is a duty that
+   * can be enforced. But the slot was only ever released by a reply arriving, so a peer that
+   * greeted and then said nothing took all eight and kept them: `nextWant` returned null for the
+   * rest of the connection while the peer broke no rule. The absence of a duty on one side has to
+   * be paid for by a bound on the other, and this is that bound.
    */
-  nextWant(haveThrough: number): Want | null {
+  nextWant(haveThrough: number, now: number): Want | null {
     if (!this.helloReceived) return null;
-    if (this.outstanding >= LIMITS.outstandingWants) return null;
+    this.expireWants(now);
+    if (this.outstanding.length >= LIMITS.outstandingWants) return null;
     if (haveThrough >= this.remoteLength) return null;
     const count = Math.min(LIMITS.wantCount, this.remoteLength - haveThrough);
-    this.outstanding += 1;
+    this.outstanding.push(now);
     return { t: 'WANT', from: haveThrough, count };
+  }
+
+  /**
+   * Drop requests whose deadline has passed.
+   *
+   * Oldest first, because `outstanding` is append-only and therefore already in issue order, and
+   * because the oldest is the one most likely to have been abandoned. The requester accuses
+   * nobody and records nothing about the peer: 4.5 keeps a non-answer legal, so this is a local
+   * decision to stop waiting, not a finding about anyone.
+   */
+  private expireWants(now: number): void {
+    while (
+      this.outstanding.length > 0 &&
+      now - this.outstanding[0]! >= LIMITS.wantDeadlineSeconds
+    ) {
+      this.outstanding.shift();
+    }
   }
 }

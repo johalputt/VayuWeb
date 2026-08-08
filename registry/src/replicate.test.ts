@@ -21,7 +21,7 @@ import { encode, compareBytes, type CborMap, type CborValue } from './cbor.ts';
 import { signingInput, recordHashFromBytes } from './domain.ts';
 import { sign, publicKeyFrom } from './signature.ts';
 import { POW_ALGORITHM, POW_NONCE_LENGTH, solvePow, requiredBits } from './pow.ts';
-import { TERM_SECONDS } from './verify.ts';
+import { TERM_SECONDS, type Verdict } from './verify.ts';
 
 const NOW = 1_782_518_400;
 
@@ -335,8 +335,8 @@ test('8.2 two peers fed disjoint sets converge once they exchange', () => {
   left.session.receive(rightHello, NOW);
   right.session.receive(leftHello, NOW);
 
-  const wantFromLeft = left.session.nextWant(0);
-  const wantFromRight = right.session.nextWant(0);
+  const wantFromLeft = left.session.nextWant(0, NOW);
+  const wantFromRight = right.session.nextWant(0, NOW);
   assert.ok(wantFromLeft && wantFromRight, 'each peer must want what the other announced');
 
   const toLeft = right.session.receive(wantFromLeft, NOW).replies;
@@ -590,7 +590,7 @@ test('8.4 an enormous claimed length costs one bounded request, not an allocatio
   );
   assert.equal(p.session.remoteClaimedLength, Number.MAX_SAFE_INTEGER);
 
-  const want = p.session.nextWant(0);
+  const want = p.session.nextWant(0, NOW);
   assert.ok(want);
   assert.equal(want.count, LIMITS.wantCount, 'we ask for a bounded window, not what they claimed');
 });
@@ -604,7 +604,7 @@ test('8.4 outstanding requests are capped', () => {
 
   let issued = 0;
   for (let i = 0; i < LIMITS.outstandingWants + 5; i += 1) {
-    if (p.session.nextWant(i * LIMITS.wantCount) !== null) issued += 1;
+    if (p.session.nextWant(i * LIMITS.wantCount, NOW) !== null) issued += 1;
   }
   assert.equal(issued, LIMITS.outstandingWants, 'no more than the cap may be in flight');
 });
@@ -629,7 +629,7 @@ test('8.4 nothing is accepted before the remote has introduced itself', () => {
   );
   assert.equal(outcome.applied, 0, 'records before HELLO are ignored');
   assert.equal(stateOf(p.store).length, 0);
-  assert.equal(p.session.nextWant(0), null, 'and there is nothing to want yet');
+  assert.equal(p.session.nextWant(0, NOW), null, 'and there is nothing to want yet');
 });
 
 test('8.4 a second HELLO is ignored, so a peer cannot rewind mid-session', () => {
@@ -646,7 +646,7 @@ test('8.4 a peer speaking another protocol version is not engaged with', () => {
     NOW,
   );
   assert.equal(p.session.ready, false);
-  assert.equal(p.session.nextWant(0), null);
+  assert.equal(p.session.nextWant(0, NOW), null);
 });
 
 test('8.4 deferred records are bounded, oldest evicted first', () => {
@@ -902,7 +902,7 @@ test('AUDIT: an honest reply to the commonest WANT can actually be encoded', () 
   );
 
   // Exactly what a peer starting from nothing sends.
-  const want = session.nextWant(0);
+  const want = session.nextWant(0, NOW);
   assert.ok(want, 'a peer behind by a full batch must ask for one');
   assert.equal(want.count, LIMITS.wantCount);
 
@@ -954,7 +954,7 @@ test('a truncated reply still makes progress, and the next want resumes where it
     NOW,
   );
 
-  const first = session.receive(session.nextWant(0)!, NOW).replies[0] as Records;
+  const first = session.receive(session.nextWant(0, NOW)!, NOW).replies[0] as Records;
   assert.ok(first.recs.length > 0 && first.recs.length < LIMITS.wantCount, 'the reply is short');
   assert.doesNotThrow(() => encodeMessage(first));
 
@@ -962,7 +962,7 @@ test('a truncated reply still makes progress, and the next want resumes where it
   // fix that made progress but never terminated would fail here rather than pass.
   let have = first.recs.length;
   for (let round = 0; round < 32 && have < encodings.length; round += 1) {
-    const want = session.nextWant(have);
+    const want = session.nextWant(have, NOW);
     assert.ok(want, `a peer at ${have} of ${encodings.length} must still ask`);
     const reply = session.receive(want, NOW).replies[0] as Records;
     assert.equal(reply.from, have, 'the reply resumes where the requester stopped');
@@ -1001,7 +1001,7 @@ test('AUDIT: a reply encodes at every record size, not just the one a test happe
       { t: 'HELLO', v: PROTOCOL_VERSION, len: encodings.length, root: new Uint8Array(32) },
       NOW,
     );
-    const reply = session.receive(session.nextWant(0)!, NOW).replies[0];
+    const reply = session.receive(session.nextWant(0, NOW)!, NOW).replies[0];
     if (reply === undefined) {
       failures.push(`size ${size}: a peer holding records answered with none`);
       continue;
@@ -1016,4 +1016,143 @@ test('AUDIT: a reply encodes at every record size, not just the one a test happe
     }
   }
   assert.deepEqual(failures.slice(0, 5), []);
+});
+
+test('AUDIT: a peer that greets and then declines everything does not freeze the sync forever', () => {
+  // **The same hole VWIP-0005 4.5.a closes for block exchange, still open in the older protocol
+  // that actually ships.** Three clauses combine and each is individually right:
+  //
+  //   5. eight outstanding WANTs per connection, so memory is bounded;
+  //   4.3 "It MAY reply with fewer records than requested, and MAY decline entirely.
+  //       **Declining is not an error condition**" -- serving is voluntary, deliberately;
+  //   and nothing anywhere requires a requester to give up on a WANT it sent.
+  //
+  // `this.outstanding` is decremented in exactly one place: `onRecords`. A peer that greets and
+  // then answers nothing takes all eight slots and never returns them, so `nextWant` returns null
+  // for the rest of the connection's life while breaking no rule at all. The absence of a duty on
+  // one side has to be paid for by a bound on the other, and it was not.
+  //
+  // Cheap to cause, invisible when caused: from the outside it is a peer that connects and then
+  // sits there, which is exactly what a slow honest peer looks like.
+  const sink: ReplicationSink = {
+    append: () => {
+      throw new Error('this test never appends');
+    },
+    encodingAt: () => null,
+    length: () => 0,
+    treeRoot: () => new Uint8Array(32),
+  };
+  const session = new ReplicationSession(sink);
+  session.open();
+  session.receive({ t: 'HELLO', v: PROTOCOL_VERSION, len: 100_000, root: new Uint8Array(32) }, NOW);
+
+  // Fill every slot. The peer declines each one, which 4.3 permits and which produces no message.
+  for (let i = 0; i < LIMITS.outstandingWants; i += 1) {
+    assert.ok(session.nextWant(0, NOW), `slot ${i} must be available`);
+  }
+  assert.equal(session.nextWant(0, NOW), null, 'the budget is exhausted, which is correct');
+
+  // A year later, still asking for a log of a hundred thousand records it has none of.
+  const later = NOW + 365 * 86_400;
+  assert.ok(
+    session.nextWant(0, later),
+    'a requester must release a slot the remote was never obliged to answer',
+  );
+});
+
+test('a slot is released by a reply as well as by the deadline, and is not released twice', () => {
+  // The deadline must not become the only path, or an honest fast peer pays a timeout for every
+  // batch. And releasing on both paths is where a naive fix double-counts: a reply that arrives
+  // just after its own deadline would return two slots for one request, and the budget quietly
+  // stops being a budget.
+  const encodings = [new Uint8Array(300)];
+  const sink: ReplicationSink = {
+    append: (): Verdict => ({
+      outcome: 'reject',
+      code: 'NOT_A_MAP',
+      detail: 'this test never supplies a real record',
+    }),
+    encodingAt: (i) => encodings[i] ?? null,
+    length: () => encodings.length,
+    treeRoot: () => new Uint8Array(32),
+  };
+  const session = new ReplicationSession(sink);
+  session.open();
+  session.receive({ t: 'HELLO', v: PROTOCOL_VERSION, len: 10, root: new Uint8Array(32) }, NOW);
+
+  const want = session.nextWant(0, NOW);
+  assert.ok(want);
+  // The reply arrives promptly: the slot comes back without any deadline being involved.
+  session.receive({ t: 'RECORDS', from: 0, recs: [new Uint8Array(10)] }, NOW);
+
+  // Now exhaust the budget and confirm it is still exactly the stated size — not one larger
+  // because the reply and a later expiry both released the same request.
+  let issued = 0;
+  while (session.nextWant(0, NOW) !== null) {
+    issued += 1;
+    assert.ok(issued <= LIMITS.outstandingWants, 'the budget must not exceed its stated size');
+  }
+  assert.equal(issued, LIMITS.outstandingWants);
+});
+
+test('the WANT deadline is required by the specification, not only by this implementation', () => {
+  const spec = readFileSync(new URL('../../docs/spec/REPLICATION.md', import.meta.url), 'utf8');
+  assert.match(spec, /MUST bound how long a `WANT` stays outstanding/);
+  assert.match(spec, /whether or not a reply ever arrives/);
+  // And the reason the oldest slot is the one released, which is what keeps the budget a budget.
+  assert.match(spec, /releases the \*\*oldest\*\* outstanding slot/);
+});
+
+test('AUDIT: a late reply may overshoot the budget by one, and never by more', () => {
+  // Found by a mutation that SURVIVED. Swapping `shift` for `pop` in the reply path changed
+  // nothing, which the project's rule says means the test was inadequate — and chasing it showed
+  // the comment beside that line was the inadequate thing: it claimed releasing the oldest slot
+  // "cannot release the same slot twice". It can, and so can any other choice.
+  //
+  // No message carries a request identifier, so a reply cannot be matched to its own WANT. If a
+  // deadline elapses and the reply then arrives, the deadline has already reclaimed one slot and
+  // the reply reclaims a second, for one completed request. Measured: nine issuable against a
+  // budget of eight.
+  //
+  // It is bounded rather than closed, and this pins the bound. Each overshoot costs the peer one
+  // late message, so N late replies permit at most N extra — never an unbounded drift, which is
+  // the failure that would matter.
+  const sink: ReplicationSink = {
+    append: () => {
+      throw new Error('this test never appends');
+    },
+    encodingAt: () => null,
+    length: () => 0,
+    treeRoot: () => new Uint8Array(32),
+  };
+  const session = new ReplicationSession(sink);
+  session.open();
+  session.receive(
+    { t: 'HELLO', v: PROTOCOL_VERSION, len: 1_000_000, root: new Uint8Array(32) },
+    NOW,
+  );
+
+  let issued = 0;
+  while (session.nextWant(0, NOW) !== null) issued += 1;
+  assert.equal(issued, LIMITS.outstandingWants);
+
+  // Every deadline elapses, then three late replies arrive for requests already reclaimed.
+  const late = NOW + LIMITS.wantDeadlineSeconds + 1;
+  const lateReplies = 3;
+  let extra = 0;
+  while (session.nextWant(0, late) !== null) extra += 1;
+  assert.equal(extra, LIMITS.outstandingWants, 'expiry returns the whole budget and no more');
+
+  for (let i = 0; i < lateReplies; i += 1) {
+    session.receive({ t: 'RECORDS', from: 0, recs: [] }, late);
+  }
+  let afterLate = 0;
+  while (session.nextWant(0, late) !== null) afterLate += 1;
+  assert.equal(afterLate, lateReplies, 'the overshoot is exactly one slot per late reply');
+
+  // And it does not accumulate: with no further late replies the budget is the stated size again.
+  const later = late + LIMITS.wantDeadlineSeconds + 1;
+  let settled = 0;
+  while (session.nextWant(0, later) !== null) settled += 1;
+  assert.equal(settled, LIMITS.outstandingWants, 'the window closes when the late replies stop');
 });

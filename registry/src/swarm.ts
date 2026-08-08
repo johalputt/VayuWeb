@@ -303,7 +303,7 @@ export function drivePeer(
   const pump = (): void => {
     if (!session.ready) return;
     for (;;) {
-      const want = session.nextWant(sink.length());
+      const want = session.nextWant(sink.length(), now());
       if (want === null) break;
       send(want);
     }
