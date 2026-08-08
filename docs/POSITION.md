@@ -11,9 +11,17 @@ choice, not a shortfall, and this document exists so nobody has to infer it.
 
 ## The one-sentence position
 
-> VayuWeb is not a place to hide. It is a place that cannot be taken away from you.
+> VayuWeb is not a place to hide. It is a place with nobody to petition to take it away.
 
 Everything below follows from that sentence.
+
+The earlier wording promised that the place could never be taken from you, which Article 21.4.f
+forbids in those or equivalent words. The correction is not cosmetic: what the design removes is the
+*addressable party* — the registrar, the certificate authority, the host — so there is no longer
+anyone a court order or a business decision can be served on. It does not remove a state's ability
+to seize your device, compel your key, or block the network you reach peers over, and a reader who
+sees only the pull-quote should not come away believing otherwise. Article 21.5 makes that reader
+the test.
 
 ## What VayuWeb removes
 

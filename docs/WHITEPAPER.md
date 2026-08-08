@@ -184,13 +184,18 @@ The resolution path, end to end:
   browser renders the site
 ```
 
-No step in that path contacts a party that could refuse to serve this particular
-name. See [docs/spec/RESOLUTION.md](spec/RESOLUTION.md).
+No step up to and including record selection contacts a party that could refuse to serve this
+particular name: there is no registrar, certificate authority or resolver operator in it. The
+**content layer is different**, and the diagram shows why — step 5 reaches IPFS peers, the owner's
+pin and volunteer pins, every one of which can decline to serve a CID or simply not hold it. What
+the design removes is a party with the standing to refuse *the name*; it does not and cannot
+guarantee that somebody is holding the bytes. See [docs/spec/RESOLUTION.md](spec/RESOLUTION.md).
 
 ## 4. Why an append-only signed log rather than a blockchain
 
 The functional requirement is narrow: prove that a name belongs to a key, in a way
-anybody can check, and make it impossible to rewrite that history quietly. That is a
+anybody can check, and make any rewrite of that history provable to anyone holding the earlier
+encoding — detection with a witness, not prevention. That is a
 job for an authenticated append-only log with a Merkle structure. It is not a job for
 a blockchain, because a blockchain buys one additional property — global agreement on
 the total order of unrelated events — at a price VayuWeb declines to pay.

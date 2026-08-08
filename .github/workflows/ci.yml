@@ -89,6 +89,16 @@ jobs:
         # adding the code is what fails the check.
         run: python3 scripts/check-status-claims.py
 
+      - name: No document makes a claim Article 21.4 forbids
+        # Article 21.4 is a MUST NOT -- "anonymous", "uncensorable", "cannot be taken down",
+        # "100% private" and any unqualified absolute of the same kind -- and nothing checked it.
+        # Seven violations were live when this was first run, including POSITION.md's own thesis
+        # pull-quote and two sentences in the FAQ. Article 21.5 supplies the test and explains why
+        # a careful author kept missing them: what the words assert to a reader who has read
+        # nothing else, "not what a longer passage elsewhere qualifies". Every one sat within a
+        # few paragraphs of an honest caveat the author had in mind and the reader does not.
+        run: python3 scripts/check-absolute-claims.py
+
       - name: Every VWIP carries the sections VWIP-0000 makes mandatory
         # VWIP-0000 section 3 says "an editor checks their presence, never their merit" -- a
         # mechanical check described in prose and performed by nobody. VWIP-0000 is itself Final

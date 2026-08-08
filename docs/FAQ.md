@@ -172,11 +172,19 @@ want a website nobody can switch off. An optional layer can be added later; late
 the start cannot be removed.
 
 **So what does VayuWeb actually protect?**
-Two things, and both are concrete. First, nobody can take your name or switch off your site,
-because there is no registrar, certificate authority, host or content network in the path to
-petition. Second, **nobody learns what you looked up** — resolution runs against your local copy
-of the registry, so the query never leaves your machine. A clearnet DNS lookup tells a resolver
-operator every name you visit; a VayuWeb lookup tells nobody anything.
+Two things, and both are concrete — and both are narrower than they first sound, so they are
+stated at their real size.
+
+First, **there is nobody to petition** to take your name or switch off your site: no registrar,
+certificate authority, host or content network sits in the path. That removes the party an order
+gets served on. It does not stop a state seizing your device, compelling your key, or blocking the
+network you reach peers over, and it does not keep your site reachable if nobody holds a copy.
+
+Second, **a name lookup does not leave your machine**, because resolution runs against your local
+replica of the registry. A clearnet DNS lookup tells a resolver operator every name you visit; a
+VayuWeb lookup tells nobody *which name you resolved*. It is not silence: fetching the content
+afterwards contacts peers, and that traffic reveals which site you are reading. The property is
+about the lookup, not about the session.
 
 **What should I use if I need anonymity?**
 Tor, and understand its limits too. VayuWeb composes with it rather than replacing it, and

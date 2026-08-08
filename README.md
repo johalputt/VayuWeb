@@ -147,10 +147,12 @@ running alongside, reachable from the same browser, owned by nobody.
   against amendment — so unlike a pricing promise, this one cannot be revised by whoever is
   running things in ten years.
 
-- **Nobody learns what you looked up.** Resolution happens against your local replica of the
-  registry, so a lookup never leaves your machine. A clearnet DNS query tells a resolver operator
-  every name you visit; a VayuWeb lookup tells nobody anything. It is the cheapest privacy in the
-  design, because it comes from not sending the query at all.
+- **A name lookup does not leave your machine.** Resolution happens against your local replica of
+  the registry, so nobody learns *which name you resolved*. A clearnet DNS query tells a resolver
+  operator every name you visit; a VayuWeb lookup tells them nothing. It is the cheapest privacy
+  in the design, because it comes from not sending the query at all — and it is only about the
+  lookup: fetching the content afterwards contacts peers, and that traffic reveals which site you
+  are reading.
 
 - **Cryptographic ownership.** Ed25519 keypairs. Registration, update, transfer and release are
   signed operations. The registry answers exactly two questions — *is this signature valid*

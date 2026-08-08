@@ -124,6 +124,52 @@ limit is 2.1 MB of hex zeros in the artifact, of which every byte after the firs
 information. The vectors file went from 159 KB to 2.25 MB before this was noticed. A runner builds
 the buffer from the stated length and tests exactly what one reading two million zeros would.
 
+### Added — Article 21.4 is now enforced, and it was being broken in seven places
+
+Constitution Article 21.4 is a **MUST NOT**: "anonymous", "untraceable", "uncensorable",
+"permanent", "unstoppable", "cannot be taken down", "your data is safe forever", "100% private",
+and 21.4.i, "any unqualified absolute of the same kind". Nothing had ever checked it.
+
+Seven violations were live, including **POSITION.md's own thesis pull-quote** — the sentence set
+apart at the top of the document and followed by "Everything below follows from that sentence" —
+and two in the FAQ's answer to "So what does VayuWeb actually protect?".
+
+Article 21.5 supplies the test and also explains why careful authors kept missing them:
+
+> The test is what the words assert to a reader who has read nothing else, not what the author
+> intended and **not what a longer passage elsewhere qualifies.**
+
+Every violation sat within a few paragraphs of an honest caveat. The author had the caveat in
+mind; a reader arriving at the pull-quote does not.
+
+What changed, in each case narrowing the claim to what the design actually delivers:
+
+- **POSITION.md** — the thesis now says there is nobody to petition to take it away, which is what
+  the design removes: the *addressable party*. It does not remove a state's ability to seize a
+  device, compel a key, or block the network.
+- **FAQ.md and README.md** — "nobody learns what you looked up … a VayuWeb lookup tells nobody
+  anything" is now about the *lookup*, with the rest said plainly: fetching the content afterwards
+  contacts peers, and that traffic reveals which site is being read.
+- **WHITEPAPER.md** — "No step in that path contacts a party that could refuse" was contradicted
+  by the path's own step 5 in the same diagram, where IPFS peers and volunteer pins can each
+  decline. And "impossible to rewrite that history quietly" became detection-with-a-witness, which
+  is what a Merkle log actually buys.
+
+`scripts/check-absolute-claims.py` reads the forbidden list **out of the Constitution** rather than
+restating it, so amending 21.4 changes the check in the same commit. It runs in `ci.yml` and in
+the release preconditions. Eleven checkers now.
+
+**Two things it deliberately does not do, because the first version did them badly.** It does not
+scan single words: "permanent" and "anonymous" produced fifty-nine hits and every one was innocent
+— "a permanent archive", "it does *not* make you anonymous", a heading reading "**Untraceable
+publishing.**" introducing the paragraph saying VayuWeb does not provide it. A regex cannot tell an
+assertion from a denial, and a checker with sixty false positives is one somebody switches off,
+taking the seven real findings with it. And its denial guard stops at the previous sentence
+boundary: a first version looked back a flat sixty characters and **silently swallowed the
+POSITION.md thesis**, because "VayuWeb is *not* a place to hide" sits in the sentence before. A
+guard that hides the most prominent violation in the corpus while the count still reads like a
+result is worse than no guard. Both were caught by mutation.
+
 ### Fixed — two publisher-controlled values that nothing constrained
 
 Both are the same shape, and it is not a missing idea in either case. It is a rule already written
