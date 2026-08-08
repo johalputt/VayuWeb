@@ -151,6 +151,42 @@ export function encodeBlockMessage(message: BlockMessage): Uint8Array {
   return bytes;
 }
 
+/**
+ * Build the one `BDONE` that answers a `BWANT`, in the request's own order.
+ *
+ * VWIP-0005 6.2 requires a peer that lacks a block and a peer that declines to send one to emit
+ * the identical message. The obligation is on the sender (6.2.a) because only the sender can
+ * comply — and it is easy to discharge only the visible half of it.
+ *
+ * **What a receiver observes is content, count, order and timing.** Byte-identical messages leak
+ * anyway if a peer sends one `BDONE` per identifier it lacks and one combined `BDONE` for the ones
+ * it refuses, or if it lists the refused ones last. This function closes count and order by
+ * construction: exactly one message, and the identifiers in the order the *requester* wrote them,
+ * which is a permutation the peer did not choose and which therefore says nothing about what it
+ * holds.
+ *
+ * Timing is left to the caller and stated rather than pretended away — 6.2.c requires the answer
+ * to be decided in full before any of it is sent, which is a rule about control flow that no
+ * function signature can enforce.
+ */
+export function blockDoneFor(want: BlockWant, unanswered: readonly Uint8Array[]): BlockDone {
+  const key = (cid: Uint8Array): string => cid.join(',');
+  const wanted = new Map(want.cids.map((cid, index) => [key(cid), index]));
+  for (const cid of unanswered) {
+    if (!wanted.has(key(cid))) {
+      throw new BlockExchangeError(
+        'MALFORMED',
+        'a BDONE identifier is not in the request it answers',
+      );
+    }
+  }
+  // Sorted by the identifier's position in the REQUEST. Sorting by the bytes themselves would be
+  // deterministic too, but it would be a permutation of the peer's choosing rather than of the
+  // requester's, and the point is that no choice is being made.
+  const seen = new Set(unanswered.map(key));
+  return { t: 'BDONE', cids: want.cids.filter((cid) => seen.has(key(cid))) };
+}
+
 /* -------------------------------------------------------------------------- */
 /* Decoding                                                                    */
 /* -------------------------------------------------------------------------- */

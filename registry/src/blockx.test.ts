@@ -15,8 +15,10 @@ import {
   BLOCK_EXCHANGE_VERSION,
   BX_LIMITS,
   BlockExchangeError,
+  blockDoneFor,
   decodeBlockMessage,
   encodeBlockMessage,
+  type BlockWant,
 } from './blockx.ts';
 import { encode, type CborValue } from './cbor.ts';
 
@@ -329,6 +331,16 @@ test('AUDIT: the message set is exactly the four VWIP-0005 declares', () => {
 const SPEC = (): string =>
   readFileSync(new URL('../../docs/spec/VWIP-0005.md', import.meta.url), 'utf8');
 
+/**
+ * The specification with every run of whitespace collapsed to one space.
+ *
+ * Three assertions in this file have now failed because a normative phrase happened to wrap across
+ * a line — the rule was present and correct and the test said it was missing. A test that fails on
+ * the reflow of a paragraph is a test that trains people to edit the test, which is how a real
+ * regression eventually gets waved through. Structure-sensitive assertions still read `SPEC()`.
+ */
+const SPEC_FLAT = (): string => SPEC().replace(/\s+/g, ' ');
+
 test('AUDIT: the published amplification figure is computed the way amplification is', () => {
   // This figure has now been wrong twice, in the same direction, for two different reasons.
   //
@@ -500,4 +512,59 @@ test("AUDIT: the cost table's renewal row compares a risk with a risk", () => {
   const row = /\| \*\*Renewal risk\*\* \|([^|]*)\|([^|]*)\|/.exec(cost);
   assert.ok(row, 'COST.md must carry a Renewal risk row');
   assert.match(row[2]!, /lapse|expire/i, 'the VayuWeb cell must state the risk, not only the fix');
+});
+
+test('AUDIT: the no-duplicates rule covers the connection, not just one message', () => {
+  // 3.6.a said a `BWANT` MUST NOT name the same identifier twice, and stopped at the message
+  // boundary. Section 5 permits **eight outstanding `BWANT`s per connection**, and nothing forbade
+  // a second one naming an identifier already outstanding in the first — so the exact attack the
+  // clause closes works again by sending eight messages instead of one array. Smaller (8x rather
+  // than 64x) and just as free.
+  //
+  // Fixing the stated case rather than the actual one is the failure mode here: the clause was
+  // written from the example that prompted it.
+  assert.match(
+    SPEC_FLAT(),
+    /MUST NOT have the same identifier outstanding in more than one `BWANT`/,
+  );
+});
+
+test('AUDIT: BDONE is constrained in count and order, not only in content', () => {
+  // 6.2 requires the identical *message*, and 6.2.a deliberately moved the duty onto the sender
+  // because only the sender can comply. Then it constrained one of four observables.
+  //
+  // What a receiver actually sees is content, COUNT, ORDER and TIMING. A peer that sends one
+  // `BDONE` per identifier it lacks and one combined `BDONE` for the ones it declines has emitted
+  // byte-identical messages and still answered the question. So has one that lists the identifiers
+  // it holds-but-refuses last. Constraining the bytes and calling the duty discharged is the same
+  // defect as putting the duty on the receiver — it names the rule and misses the channel.
+  const spec = SPEC_FLAT();
+  assert.match(spec, /exactly one `BDONE`/);
+  assert.match(spec, /same order as the `BWANT`/);
+  assert.match(spec, /MUST NOT be emitted incrementally/);
+});
+
+test('the BDONE builder derives its order from the request, not from local state', () => {
+  // The ordering half of 6.2 is a wire property, so it belongs in the wire layer rather than in
+  // each implementer's judgement. `blockDoneFor` takes the request and the set of identifiers not
+  // being answered, and emits them in REQUEST order — a permutation that carries no information
+  // about which the peer holds, because it is a function of the message the peer received.
+  const a = new Uint8Array(36).fill(1);
+  const b = new Uint8Array(36).fill(2);
+  const c = new Uint8Array(36).fill(3);
+  const want: BlockWant = { t: 'BWANT', cids: [a, b, c] };
+
+  // Two peers with opposite reasons for the same answer must emit the same bytes. The Set is
+  // deliberately built in a different insertion order in each case: iteration order of the
+  // caller's own collection must not reach the wire.
+  const lacks = blockDoneFor(want, [c, a]);
+  const declines = blockDoneFor(want, [a, c]);
+  assert.deepEqual(lacks, declines);
+  assert.deepEqual(encodeBlockMessage(lacks), encodeBlockMessage(declines));
+  // And the order is the request's, not the caller's.
+  assert.deepEqual([...lacks.cids], [a, c]);
+
+  // An identifier that was never requested cannot be smuggled into the answer: that would be a
+  // channel of its own, and it is not something a truthful peer ever needs.
+  assert.throws(() => blockDoneFor(want, [new Uint8Array(36).fill(9)]), /not in the request/);
 });

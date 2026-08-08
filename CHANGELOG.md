@@ -124,6 +124,39 @@ limit is 2.1 MB of hex zeros in the artifact, of which every byte after the firs
 information. The vectors file went from 159 KB to 2.25 MB before this was noticed. A runner builds
 the buffer from the stated length and tests exactly what one reading two million zeros would.
 
+### Fixed — two clauses written today that closed the example instead of the property
+
+Both are in VWIP-0005, both were added in this session's audit, and both are the same mistake:
+fixing the case that prompted the finding rather than the thing the clause was protecting.
+
+**3.6.a stopped at the message boundary.** It said a `BWANT` MUST NOT name the same identifier
+twice — closing the sixty-four-copies-in-one-array attack that was found. Section 5 permits
+**eight outstanding `BWANT`s per connection**, and nothing forbade a second one naming an
+identifier already outstanding in the first, so the same attack ran again across eight messages.
+Eight times rather than sixty-four, and equally free. Now scoped to the connection.
+
+**6.2 constrained one of four observables.** It required the identical *message*, and 6.2.a had
+deliberately moved the duty onto the sender because only the sender can comply. But what a
+receiver sees is content, **count**, **order** and **timing** — and each is enough alone. A peer
+that emits one `BDONE` per identifier it lacks and one combined `BDONE` for the ones it refuses
+has sent byte-identical messages and answered the question anyway. So has one that lists the
+refused identifiers last.
+
+New **6.2.c** requires exactly one `BDONE` per `BWANT`, the identifiers in the **request's** order,
+and the answer decided in full before any of it is sent. The ordering rule matters more than it
+looks: sorting by the identifier bytes would also be deterministic, and would be a permutation of
+the *peer's* choosing — **deterministic is not the same as uninformative.** Request order is a
+permutation the requester chose, so it carries nothing.
+
+`blockDoneFor` closes count and order by construction and refuses an identifier that was not in the
+request. Timing is a rule about control flow that no signature can enforce, and 6.2.c says so
+rather than implying otherwise.
+
+Also: a `SPEC_FLAT` helper, after three assertions in this file failed because a normative phrase
+happened to **wrap across a line** — the rule present and correct, the test reporting it missing. A
+test that fails on the reflow of a paragraph trains people to edit the test, which is how a real
+regression eventually gets waved through.
+
 ### Fixed — a silent peer could freeze a sync forever, and the fix exposed a second defect
 
 **The same hole VWIP-0005 4.5.a closes for block exchange, still open in the older protocol that
