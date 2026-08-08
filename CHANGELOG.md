@@ -124,6 +124,37 @@ limit is 2.1 MB of hex zeros in the artifact, of which every byte after the firs
 information. The vectors file went from 159 KB to 2.25 MB before this was noticed. A runner builds
 the buffer from the stated length and tests exactly what one reading two million zeros would.
 
+### Fixed — COST.md promised a mechanism VWIP-0005 forbids, and hid a risk in a table cell
+
+**A contradiction created by this session's own work, which makes it the more instructive kind.**
+COST.md 3.3 described peers trading storage tit-for-tat, in the tradition of the classic swarm
+protocols, under the heading "Redundancy is earned, not bought". VWIP-0005 6.3 — written today —
+says *"No ledger, no debt ratio, no reputation. A peer's history MUST NOT affect whether it is
+served."* Tit-for-tat **is** a history-based debt ratio. Adding a normative refusal to one document
+silently falsified a sentence in another, and nothing compared them.
+
+It was also the **only** reciprocity mechanism anywhere in the corpus, so the paragraph promised
+something no specification defined. 6.3 stands, and the honest replacement is weaker than what it
+replaces: redundancy is **neither earned nor bought**. A peer holds what it chooses to hold, and
+contributing capacity buys no claim on anyone else's disk.
+
+**And the cost table's renewal row answered a different question than its own heading.** The row
+is headed *Renewal risk*. The clearnet cell stated a risk — "Lapse, chargeback, or registrar policy
+loses the name" — and the VayuWeb cell stated a *mechanism*: "Renewal is a signature plus fresh
+proof-of-work". A reader comparing the columns concludes VayuWeb has no renewal risk.
+
+It has one, and it is the same one. `lifecycle.ts` is unambiguous: LIVE → GRACE (30 days,
+owner-only renewal) → QUARANTINE (30 days, nobody) → **FREE, open pool**. Forget to renew and the
+name is gone after sixty days, exactly as on the clearnet. What VayuWeb removes is two of the three
+causes — chargeback and registrar policy — not the lapse.
+
+A comparison table is the densest form a claim takes, and a cell that answers beside its own row
+heading is the easiest place in a document to overstate something without writing a false sentence.
+
+Three mutations, all caught — including withdrawing 6.3 itself, which fails the test rather than
+satisfying it, so a future decision to permit reciprocity has to be made deliberately instead of
+by deletion.
+
 ### Added — Article 21.4 is now enforced, and it was being broken in seven places
 
 Constitution Article 21.4 is a **MUST NOT**: "anonymous", "untraceable", "uncensorable",

@@ -33,10 +33,18 @@ A modest personal or small-organisation site, run properly, for one year.
 | Content network | Free tier to 240+/yr | Peers serve peers |
 | DNS | Bundled or 5–60/yr | Does not exist; resolution is local |
 | **Money per year** | **~75–200, indefinitely** | **Zero, at every step** |
-| **Renewal risk** | Lapse, chargeback, or registrar policy loses the name | Renewal is a signature plus fresh proof-of-work |
+| **Renewal risk** | Lapse, chargeback, or registrar policy loses the name | Lapse still loses the name — 30 days of grace, then 30 of quarantine, then the open pool. Chargeback and registrar policy do not exist; renewal is a signature plus fresh proof-of-work |
 
 The claim is narrow and worth stating precisely: **VayuWeb costs no money.** It does not cost no
 resources. Section 5 is the honest counterpart.
+
+The renewal row is worth reading twice, because it was the one cell in this table that answered a
+different question than its own heading. The row is headed *Renewal risk*; the clearnet cell stated
+a risk and the VayuWeb cell stated a mechanism, so a reader comparing the columns concluded there
+was no renewal risk here. There is, and it is the same one: forget to renew and the name is gone
+after sixty days. What VayuWeb removes is two of the three causes, not the lapse. A comparison
+table is the densest form a claim takes, and answering beside the question is the easiest way to
+overstate something without writing a false sentence.
 
 ## 2. Registration cost
 
@@ -86,14 +94,27 @@ font, or an image store and transfer it once across the entire network, with no 
 no configuration. On the clearnet, the same file behind a thousand domains is stored a thousand
 times and paid for a thousand times.
 
-### 3.3 Redundancy is earned, not bought
+### 3.3 Redundancy is given, not traded
 
-Peers hold each other's content reciprocally — capacity for capacity, in the tradition of
-BitTorrent's choking algorithm and Tahoe-LAFS. No payment rail, no accounting, no settlement.
-A participant contributing storage receives storage.
+Redundancy is **neither earned nor bought**. A peer holds what it chooses to hold, and no payment
+rail, accounting, settlement or reciprocal obligation exists to change that. A participant
+contributing storage acquires no claim on anyone else's.
 
-This keeps the system free at the point of use, and it is honest about what it cannot do: a
-publisher who contributes nothing and knows nobody has no claim on anyone's disk. See section 5.
+This paragraph previously described the opposite: peers trading storage with each other on a
+tit-for-tat basis, in the tradition of the classic swarm protocols. [VWIP-0005](VWIP-0005.md) 6.3
+forbids exactly that — *"No ledger, no debt ratio, no reputation. A peer's history MUST NOT affect
+whether it is served."* Tit-for-tat **is** a history-based debt ratio, so the two could not both
+stand. It was also the only reciprocity mechanism anywhere in this corpus, which meant the
+paragraph promised something no specification defined.
+
+6.3 is the one that stands, and the reason is worth repeating here rather than only there: a
+ledger is a standing, a standing can be denied, and a mechanism that can deny standing is a
+mechanism worth capturing. Free-riding is the accepted cost, stated rather than hidden.
+
+So the honest version of this section is weaker than the one it replaces. It keeps the system free
+at the point of use, and it cannot promise anyone durability: a publisher who contributes nothing
+and knows nobody is relying on strangers' choices, and there is no mechanism by which contributing
+changes that. See section 5.
 
 ## 4. Resolution costs nothing, and buys privacy for free
 
@@ -124,8 +145,8 @@ a future VWIP and not a launch commitment.
 Required by Constitution Article 21.
 
 **Someone's disk and bandwidth.** "No money" is not "no resources". Content lives because a
-participant chose to hold it. A publisher who contributes no capacity and has no reciprocal
-relationships is relying on strangers' goodwill, and goodwill is not a durability guarantee.
+participant chose to hold it. Every publisher is relying on strangers' choices — 3.3 explains why
+contributing capacity buys no claim on anyone else's — and a choice is not a durability guarantee.
 
 **The erasure-coding arithmetic assumes a population that does not yet exist.** RS(16, 27) needs
 27 independent nodes willing to hold shards in the relevant neighbourhood. At launch there will

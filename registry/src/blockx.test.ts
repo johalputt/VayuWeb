@@ -449,3 +449,55 @@ test('AUDIT: the impossibility claim does not overstate what 6.1 and 6.2 close',
   assert.match(spec, /one request is enough to answer it/);
   assert.match(spec, /bulk enumeration/);
 });
+
+test('AUDIT: no document promises a reciprocity mechanism VWIP-0005 6.3 forbids', () => {
+  // 6.3 is normative: "No ledger, no debt ratio, no reputation. A peer's history MUST NOT affect
+  // whether it is served." COST.md 3.3 described the opposite as settled design — "Peers hold each
+  // other's content reciprocally — capacity for capacity, in the tradition of BitTorrent's choking
+  // algorithm" — under the heading "Redundancy is earned, not bought".
+  //
+  // BitTorrent's choking algorithm *is* a history-based debt ratio, which is the exact thing 6.3
+  // refuses. And COST.md was the only place in the corpus specifying any reciprocity at all, so it
+  // promised a mechanism that exists in no specification and is now forbidden by one.
+  //
+  // The contradiction was created by writing 6.3 rather than by COST.md drifting, which makes it
+  // the more instructive kind: adding a normative refusal to one document silently falsified a
+  // sentence in another, and nothing compared them. This test is that comparison.
+  const root = new URL('../../docs/', import.meta.url);
+  const forbidden = [
+    /in the tradition of\s+BitTorrent's choking algorithm/,
+    /capacity for capacity/,
+    /Redundancy is earned, not bought/,
+  ];
+  const cost = readFileSync(new URL('spec/COST.md', root), 'utf8');
+  for (const pattern of forbidden) {
+    assert.doesNotMatch(cost, pattern, 'COST.md still promises a mechanism 6.3 forbids');
+  }
+  // And it must say what actually produces redundancy, rather than leaving a gap where the
+  // mechanism was. Under 6.3 redundancy is neither earned nor bought — it is given.
+  assert.match(cost, /neither earned nor bought/);
+
+  // 6.3 itself must still say what this test is checking against; if the refusal is ever
+  // withdrawn, this test should be reconsidered rather than silently satisfied.
+  assert.match(SPEC(), /No ledger, no debt ratio, no reputation/);
+});
+
+test("AUDIT: the cost table's renewal row compares a risk with a risk", () => {
+  // The row is headed **Renewal risk**. The clearnet cell states a risk — "Lapse, chargeback, or
+  // registrar policy loses the name". The VayuWeb cell stated a *mechanism*: "Renewal is a
+  // signature plus fresh proof-of-work". A reader comparing the columns concludes VayuWeb has no
+  // renewal risk.
+  //
+  // It has one, and it is the same risk. `lifecycle.ts` is unambiguous: LIVE -> GRACE (30 days,
+  // owner-only renewal) -> QUARANTINE (30 days, nobody) -> **FREE, open pool**. Forget to renew
+  // and the name is gone after sixty days, exactly as on the clearnet. What VayuWeb removes is the
+  // chargeback and the registrar policy — two of the three causes — not the lapse.
+  //
+  // A comparison table is the densest form a claim takes, and a cell that answers a different
+  // question than its row heading is the easiest place in a document to overstate something
+  // without writing a false sentence.
+  const cost = readFileSync(new URL('../../docs/spec/COST.md', import.meta.url), 'utf8');
+  const row = /\| \*\*Renewal risk\*\* \|([^|]*)\|([^|]*)\|/.exec(cost);
+  assert.ok(row, 'COST.md must carry a Renewal risk row');
+  assert.match(row[2]!, /lapse|expire/i, 'the VayuWeb cell must state the risk, not only the fix');
+});
