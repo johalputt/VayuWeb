@@ -1,0 +1,823 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VayuWeb — decentralised, parallel, web</title>
+<meta name="description" content="VayuWeb is a peer-to-peer naming and hosting protocol: a parallel web with no registrar, no certificate authority and no landlord. Specification complete; implementation at Phase 3.">
+<meta name="theme-color" content="#05030e">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="/media/6c12d71fcd83f6fab53ba74c27d8a593.png" type="image/png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="VayuWeb — decentralised, parallel, web">
+<meta property="og:description" content="A peer-to-peer naming and hosting protocol. Names in a signed append-only log every participant verifies. Content addressed, not located.">
+<meta property="og:url" content="https://vayuweb.vayupress.com/">
+<meta name="twitter:card" content="summary_large_image">
+
+<!-- Every asset below is same-origin. This install serves under
+     default-src 'self'; font-src 'self'; style-src 'self'; script-src 'self',
+     so Tailwind, Alpine and the typefaces come from the install's own
+     first-party routes rather than from a font or script host that the policy
+     would refuse without saying so. -->
+<link rel="preload" href="/static/fonts/space-grotesk-latin-700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/inter-latin-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/vayuweb/tailwind.css">
+<link rel="stylesheet" href="/assets/brand.css">
+<link rel="stylesheet" href="/assets/site.css">
+<!-- Order is load-bearing: deferred scripts run in document order. namespace.js
+     defines the data site.js reads, and site.js must have registered its
+     alpine:init listener before Alpine boots and fires it. -->
+<script src="/assets/namespace.js" defer></script>
+<script src="/assets/claims.js" defer></script>
+<script src="/assets/site.js" defer></script>
+<script src="/static/vayuweb/alpine-csp.min.js" defer></script>
+</head>
+
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<div class="app" x-data="site">
+
+  <div class="backdrop" aria-hidden="true">
+    <div class="backdrop__nebula"></div>
+    <div class="backdrop__web"></div>
+    <div class="backdrop__mark"></div>
+    <div class="backdrop__grain"></div>
+  </div>
+
+  <!-- ══ header ══ -->
+  <header class="masthead reveal-down">
+    <div class="masthead__in">
+      <div class="masthead__left">
+        <a class="brand" href="#top">
+          <span class="brand__mark" role="img" aria-label="VayuWeb"></span>
+          <span class="brand__text">
+            <span class="brand__name">VayuWeb</span>
+            <span class="brand__sub">Decentralised · Parallel · Web</span>
+          </span>
+        </a>
+        <nav class="nav" aria-label="Sections">
+          <a class="nav__link" href="#protocol">Protocol</a>
+          <a class="nav__link" href="#namespace">Namespace</a>
+          <a class="nav__link" href="#charter">Charter</a>
+          <a class="nav__link" href="#status">Status</a>
+        </nav>
+      </div>
+
+      <div class="masthead__right">
+        <a class="quiet-link" href="https://github.com/johalputt/VayuWeb/blob/main/docs/WHITEPAPER.md">Whitepaper</a>
+        <div class="btn-ring">
+          <a class="btn btn--dark" href="https://github.com/johalputt/VayuWeb">
+            <span>Read the source</span>
+          </a>
+        </div>
+        <button class="burger" type="button" x-on:click="toggle" x-bind:aria-expanded="expanded" aria-controls="mobile-nav" aria-label="Menu">
+          <span></span><span></span>
+        </button>
+      </div>
+    </div>
+
+    <nav class="mobile-nav" id="mobile-nav" x-show="open" x-cloak aria-label="Sections">
+      <a href="#protocol" x-on:click="close">Protocol</a>
+      <a href="#namespace" x-on:click="close">Namespace</a>
+      <a href="#charter" x-on:click="close">Charter</a>
+      <a href="#status" x-on:click="close">Status</a>
+      <a href="https://github.com/johalputt/VayuWeb">Source</a>
+    </nav>
+  </header>
+
+  <main id="main">
+
+    <!-- ══ hero ══ -->
+    <section class="hero" id="top">
+      <div class="hero__left reveal-up">
+        <p class="eyebrow">
+          <span class="eyebrow__dot"></span>
+          Specification complete · implementation at Phase&nbsp;3
+        </p>
+
+        <!-- The sentence is written here once, in full. site.js reads it out of
+             these two spans and types it back in; with JavaScript off the
+             headline is simply already there, and a screen reader gets the same
+             text either way. Reserving the height from the real, rendered
+             sentence is also the only way to stop the column shunting downwards
+             line by line as it types — a magic min-height would be wrong at some
+             breakpoint. -->
+        <h1 class="headline" id="headline">
+          <span class="headline__a">A web with no registrar, no certificate authority and no landlord.</span><span class="headline__b"> Resolved on your own machine.</span><span class="caret" aria-hidden="true"></span>
+        </h1>
+
+        <p class="lede">
+          A peer-to-peer naming and hosting protocol. Names live in a signed, append-only log
+          that every participant replicates and verifies without trusting anyone. Content is
+          addressed by its hash rather than by where it happens to sit.
+        </p>
+
+        <div class="hero__actions">
+          <div class="btn-ring">
+            <a class="btn btn--primary" href="https://github.com/johalputt/VayuWeb/blob/main/constitution/CONSTITUTION.md">
+              <span>Read the Constitution</span>
+              <svg class="btn__chev" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </a>
+          </div>
+          <a class="btn btn--ghost" href="#status">See how far it has got</a>
+        </div>
+
+        <div class="pointer-chip">
+          <svg class="pointer-chip__cursor" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 2.5l13.2 8.1-5.9 1.2 3.1 6.4-2.7 1.3-3.1-6.4-4.6 3.9z" fill="#a068ff"/>
+          </svg>
+          <span class="pointer-chip__addr">vayu://ghazal.zine</span>
+          <span class="pointer-chip__tag">verified against its hash</span>
+        </div>
+      </div>
+
+      <!-- the registry, drawn: rings of peers around a closed, enumerated namespace -->
+      <div class="hero__right reveal-scale" aria-hidden="true">
+        <div class="orbits">
+          <div class="orbit orbit--4">
+            <span class="node n-6"><span class="node__in"><span class="chip chip--violet">.allodial</span></span></span>
+            <span class="node n-7"><span class="node__in"><span class="chip chip--amber">.ghazal</span></span></span>
+            <span class="node n-8"><span class="node__in"><span class="chip chip--pink">.p2p</span></span></span>
+            <span class="node n-9"><span class="node__in"><span class="chip chip--violet">.commons</span></span></span>
+          </div>
+          <div class="orbit orbit--3">
+            <span class="node n-5"><span class="node__in"><span class="chip chip--teal">.chai</span></span></span>
+          </div>
+          <div class="orbit orbit--2">
+            <span class="node n-2"><span class="node__in"><span class="chip chip--amber">.zine</span></span></span>
+            <span class="node n-3"><span class="node__in"><span class="chip chip--pink">.dissent</span></span></span>
+            <span class="node n-4"><span class="node__in"><span class="chip chip--blue">.folio</span></span></span>
+          </div>
+          <div class="orbit orbit--1">
+            <span class="node n-1"><span class="node__in"><span class="chip chip--violet chip--lead">.vayu</span></span></span>
+            <span class="core">
+              <span class="core__num" id="core-count">0</span>
+              <span class="core__label">ratified extensions</span>
+              <span class="core__sub">closed set · 34 categories</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ ticker ══ -->
+    <div class="ticker reveal-up reveal-late" aria-hidden="true">
+      <div class="ticker__rail" id="ticker-rail"></div>
+    </div>
+
+    <!-- ══ status ══ -->
+    <section class="band" id="status">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="kicker">Status</p>
+          <h2 class="h2">It does not work yet, and this page will not pretend otherwise.</h2>
+          <p class="sub">
+            There is no binary to download, no network to join and no name to register.
+            Implementation began only after the charter, the specifications and the threat model
+            were written, because a naming system inherits whatever politics it was built with.
+          </p>
+        </div>
+
+        <div class="stat-row">
+          <div class="stat">
+            <span class="stat__n" data-count="60">0</span>
+            <span class="stat__l">Articles of the charter</span>
+            <span class="stat__h">Six Titles. Drafted and governing this work — not yet in force.</span>
+          </div>
+          <div class="stat">
+            <span class="stat__n" data-count="1270">0</span>
+            <span class="stat__l">Ratified extensions</span>
+            <span class="stat__h">A closed, enumerated namespace. Ratified is not registrable.</span>
+          </div>
+          <div class="stat">
+            <span class="stat__n" data-count="267">0</span>
+            <span class="stat__l">Registry tests</span>
+            <span class="stat__h">Record format, proof-of-work, lifecycle, convergence, resolution.</span>
+          </div>
+          <div class="stat stat--warn">
+            <span class="stat__n" data-count="7">0</span>
+            <span class="stat__l">Conformance suites</span>
+            <span class="stat__h">The interoperability contract. One of the seven is still moving.</span>
+          </div>
+        </div>
+
+        <div class="truth-grid">
+          <article class="truth truth--yes">
+            <h3>What exists</h3>
+            <ul>
+              <li>The Constitution, the specifications and a published threat model.</li>
+              <li>A registry core: record format, verification, memory-hard proof-of-work, lifecycle, merkle tree, convergence and the resolution algorithm.</li>
+              <li>A command-line tool that registers a name into a local log and resolves it back.</li>
+              <li>Phase 3's acceptance test passing — on one machine.</li>
+            </ul>
+          </article>
+          <article class="truth truth--no">
+            <h3>What does not</h3>
+            <ul>
+              <li>A network. The registry runs on one machine and talks to nobody.</li>
+              <li>A desktop client, and a proxy anyone else can point a browser at.</li>
+              <li>Registration. No extension accepts one until the protocol exists.</li>
+              <li>The charter itself: Article 60.3 conditions commencement on an anchor that has not been published.</li>
+            </ul>
+          </article>
+          <article class="truth truth--note">
+            <h3>Why say so this loudly</h3>
+            <p>
+              Building against the specifications keeps finding consensus-critical defects
+              <em>in</em> them — proof-of-work parameters an attacker could choose for themselves,
+              a founding extension that violated its own grammar, a registration term the charter
+              states two incompatible ways.
+            </p>
+            <p>
+              Each would have produced a silent fork rather than a visible error. All of them are
+              in the changelog, and the ones still unresolved are recorded as unresolved.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ chokepoints ══ -->
+    <section class="band band--alt" id="protocol">
+      <div class="wrap" x-data="chokepoints">
+        <div class="section-head">
+          <p class="kicker">The design</p>
+          <h2 class="h2">Five parties can end a website. VayuWeb removes the position they occupy.</h2>
+          <p class="sub">
+            Not visibility — chokepoints. The clearnet works until somebody with leverage decides
+            it should not work for you, and in practice a handful of organisations hold all five
+            levers at once.
+          </p>
+        </div>
+
+        <div class="toggle" role="group" aria-label="Compare">
+          <button type="button" class="toggle__b" x-bind:class="clearClass" x-on:click="showClear">Clearnet</button>
+          <button type="button" class="toggle__b" x-bind:class="vayuClass" x-on:click="showVayu">VayuWeb</button>
+        </div>
+
+        <ul class="levers">
+          <li class="lever">
+            <span class="lever__who">Registrar</span>
+            <span class="lever__then" x-show="clear" x-cloak>Suspends or transfers your domain.</span>
+            <span class="lever__now" x-show="vayu" x-cloak>Does not exist. Ownership is an Ed25519 keypair.</span>
+          </li>
+          <li class="lever">
+            <span class="lever__who">DNS resolver</span>
+            <span class="lever__then" x-show="clear" x-cloak>Refuses to answer for your name.</span>
+            <span class="lever__now" x-show="vayu" x-cloak>Does not exist. Resolution happens on your own machine.</span>
+          </li>
+          <li class="lever">
+            <span class="lever__who">Certificate authority</span>
+            <span class="lever__then" x-show="clear" x-cloak>Revokes your certificate.</span>
+            <span class="lever__now" x-show="vayu" x-cloak>Does not exist. Integrity comes from the content hash.</span>
+          </li>
+          <li class="lever">
+            <span class="lever__who">Host</span>
+            <span class="lever__then" x-show="clear" x-cloak>Deletes your account and your files.</span>
+            <span class="lever__now" x-show="vayu" x-cloak>Does not exist. Content is addressed, not located.</span>
+          </li>
+          <li class="lever">
+            <span class="lever__who">Content network</span>
+            <span class="lever__then" x-show="clear" x-cloak>Decides your traffic is not worth carrying.</span>
+            <span class="lever__now" x-show="vayu" x-cloak>Does not exist. Peers serve peers.</span>
+          </li>
+        </ul>
+
+        <p class="pull">
+          VayuWeb is not a place to hide. It is a place with nobody to petition to take it away.
+        </p>
+        <p class="pull__foot">
+          What the design removes is the <em>addressable party</em> — the one a court order or a
+          business decision can be served on. It does not remove a state's ability to seize a
+          device, compel a person, or block the network you reach peers over.
+        </p>
+      </div>
+    </section>
+
+    <!-- ══ commitments ══ -->
+    <section class="band">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="kicker">Four commitments</p>
+          <h2 class="h2">What the specifications are organised around.</h2>
+        </div>
+
+        <div class="cards">
+          <article class="card">
+            <span class="card__i card__i--violet">01</span>
+            <h3>Secure by subtraction</h3>
+            <p>
+              The strongest property here is structural: there is no server. A site is a signed
+              pointer to content-addressed bytes, so whole categories of compromise are deleted
+              rather than mitigated.
+            </p>
+            <ul class="ticks">
+              <li>No SQL injection — no database behind the page.</li>
+              <li>No remote code execution at the origin — no origin process.</li>
+              <li>No stolen hosting credentials — no hosting account.</li>
+              <li>No certificate mis-issuance or expiry outage.</li>
+            </ul>
+            <p class="card__foot">
+              What remains is the reader's browser, held under a deny-by-default profile with the
+              privileged control surface on a socket a browser cannot address.
+            </p>
+          </article>
+
+          <article class="card">
+            <span class="card__i card__i--teal">02</span>
+            <h3>Future-proof</h3>
+            <p>
+              No primitive is hard-coded — only versioned suites, carried in every signed record
+              from record zero. Suites move forward only, verifiers keep every historical suite,
+              and migration runs through a hybrid so it stays safe even if the target scheme is
+              later broken.
+            </p>
+            <p class="card__foot">
+              The test a design has to pass: a change of substrate, primitive, format or
+              maintainer must be possible without invalidating a single existing name.
+            </p>
+          </article>
+
+          <article class="card">
+            <span class="card__i card__i--amber">03</span>
+            <h3>Cheap</h3>
+            <p>
+              A name costs seconds of CPU. Hosting costs your own disk. There is no token, no
+              treasury and no protocol fee — Article 7 forbids all three and Article 9 entrenches
+              the prohibition against amendment.
+            </p>
+            <div class="mini-table">
+              <div><span>Name</span><span class="mono">10–15 / year</span><span class="mono good">seconds of CPU</span></div>
+              <div><span>Hosting</span><span class="mono">60–300 / year</span><span class="mono good">your own disk</span></div>
+              <div><span>Certificate</span><span class="mono">an outage source</span><span class="mono good">none exist</span></div>
+              <div><span>Delivery</span><span class="mono">free tier → hundreds</span><span class="mono good">peers serve peers</span></div>
+            </div>
+            <p class="card__foot">
+              The honest counterpart: cheap for the publisher is not free in aggregate. Someone's
+              disk and bandwidth carry the content, and if nobody chooses to, it goes away.
+            </p>
+          </article>
+
+          <article class="card">
+            <span class="card__i card__i--blue">04</span>
+            <h3>Easy, or it does not count</h3>
+            <p>
+              A system only experts can operate has already centralised; it just has not admitted
+              it yet. The usability target is Phase 5's acceptance test, and it is deliberately
+              hard to argue with.
+            </p>
+            <p class="quote-sm">
+              Someone who has never opened a terminal completes install, identity, registration,
+              publishing and viewing — unassisted, without reading the specifications.
+            </p>
+            <ul class="ticks">
+              <li>No DNS records, nameservers or propagation waits.</li>
+              <li>No certificate issuance, renewal, or the outage when renewal fails.</li>
+              <li>No server to patch, no control panel, no account to lose.</li>
+              <li>Publishing is: point the client at a folder.</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ architecture ══ -->
+    <section class="band band--alt">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="kicker">Architecture</p>
+          <h2 class="h2">Lightweight, battle-tested peer-to-peer parts — chosen over novelty.</h2>
+          <p class="sub">
+            VayuWeb names are addressed <span class="mono">vayu://example.vayu/</span>, never
+            <span class="mono">https://</span>. Those schemes carry a promise about certificate
+            authorities that VayuWeb does not make; it makes a different one — content verified
+            byte for byte against its hash. A security indicator that lies is worse than none.
+          </p>
+        </div>
+
+        <ol class="stack">
+          <li class="layer"><span class="layer__n">Identity</span><span class="layer__t mono">Ed25519</span><span class="layer__d">Ownership and signatures. Registration, update, transfer and release are signed operations.</span></li>
+          <li class="layer"><span class="layer__n">Registry</span><span class="layer__t mono">Hypercore + Hyperbee</span><span class="layer__d">A signed, append-only log with an index over it. Every peer holds the whole history and verifies it without trusting anyone.</span></li>
+          <li class="layer"><span class="layer__n">Discovery</span><span class="layer__t mono">Hyperswarm / HyperDHT</span><span class="layer__d">Finding other peers.</span></li>
+          <li class="layer"><span class="layer__n">Content</span><span class="layer__t mono">IPFS (Helia) + IPNS</span><span class="layer__d">Immutable storage and mutable pointers, pinned by the people who care whether it survives.</span></li>
+          <li class="layer"><span class="layer__n">Resolution</span><span class="layer__t mono">Local proxy on loopback</span><span class="layer__d">Makes VayuWeb names work in an ordinary browser. A lookup never falls through to clearnet DNS, and queries are never logged.</span></li>
+          <li class="layer"><span class="layer__n">Client</span><span class="layer__t mono">Tauri 2.x</span><span class="layer__d">For people who do not use terminals.</span></li>
+          <li class="layer"><span class="layer__n">Governance</span><span class="layer__t mono">Constitution + VWIP</span><span class="layer__d">How the rules change, and what can never change.</span></li>
+        </ol>
+
+        <div class="note">
+          <h3>A name lookup does not leave your machine</h3>
+          <p>
+            Resolution runs against your local replica of the registry, so nobody learns which
+            name you resolved. It is the cheapest privacy in the design, because it comes from not
+            sending the query at all — and it is only about the lookup. Fetching the content
+            afterwards contacts peers, and that traffic reveals which site you are reading.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ namespace ══ -->
+    <section class="band" id="namespace">
+      <div class="wrap" x-data="namespace">
+        <div class="section-head">
+          <p class="kicker">Namespace</p>
+          <h2 class="h2">1,270 extensions at launch, and no ceiling.</h2>
+          <p class="sub">
+            Creating a top-level domain on the clearnet cost about USD 185,000 in the 2012
+            application round, plus roughly USD 25,000 a year, in a window that opens about once a
+            decade — a price that selects for capital rather than for use. Here it costs a
+            ratified proposal and some CPU.
+          </p>
+        </div>
+
+        <div class="explorer">
+          <div class="explorer__bar">
+            <label class="field">
+              <span class="visually-hidden">Search the namespace</span>
+              <svg class="field__i" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
+                <path d="M16.5 16.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              <input type="search" class="field__in mono" placeholder="Search 1,270 extensions — try zine, kin, or sovereignty" x-model="q">
+            </label>
+            <p class="explorer__count"><span x-text="countLabel"></span></p>
+          </div>
+
+          <div class="explorer__cats">
+            <template x-for="c in cats">
+              <button type="button" class="cat" x-bind:class="c.cls" x-on:click="pick(c.name)" x-text="c.label"></button>
+            </template>
+          </div>
+
+          <div class="explorer__grid">
+            <template x-for="e in shown">
+              <div class="ext">
+                <span class="ext__tld mono" x-text="e.tld"></span>
+                <span class="ext__who" x-show="showCat" x-cloak x-text="e.cat"></span>
+              </div>
+            </template>
+          </div>
+
+          <p class="explorer__more" x-show="truncated" x-cloak>
+            <span x-text="moreLabel"></span>
+          </p>
+          <p class="explorer__empty" x-show="empty" x-cloak>
+            Nothing in the Annex matches that. The set is closed — a client decides whether an
+            extension exists offline, from the copy it holds, so two honest nodes can never
+            compute different namespaces.
+          </p>
+        </div>
+
+        <div class="equal-note">
+          <p>
+            <strong>Every extension is equal.</strong> There is no premium tier, no reserved class,
+            no founding rank and no default suggestion — Article 35.1.c says so in terms, and no
+            client may present otherwise. The eleven named in the text of Article 35.1 are named so
+            the founding set survives loss of the file, not because they rank above the other
+            1,259.
+          </p>
+          <p class="mono tiny">
+            All 1,270, read from docs/spec/NAMESPACE-CATALOGUE.md — the normative Annex,
+            incorporated by Article 35.1. The Annex also records who each extension is for.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ charter ══ -->
+    <section class="band band--alt" id="charter">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="kicker">Charter</p>
+          <h2 class="h2">The rules came first, in public, while changing them was still cheap.</h2>
+        </div>
+
+        <div class="charter-grid">
+          <article class="charter-card">
+            <h3>Entrenched against amendment</h3>
+            <p>
+              No token. No treasury. No protocol fee. Article 7 forbids all three; Article 9 puts
+              them beyond amendment — so unlike a pricing promise, this one cannot be revised by
+              whoever is running things in ten years.
+            </p>
+          </article>
+          <article class="charter-card">
+            <h3>There is no governing body</h3>
+            <p>
+              That is the title of Article 39, and it means it. New extensions and protocol changes
+              move through the VWIP process and are ratified by peers. The network runs whatever
+              its peers choose to run.
+            </p>
+          </article>
+          <article class="charter-card">
+            <h3>The right to fork</h3>
+            <p>
+              The charter is dedicated to the public domain deliberately, so any fork can carry it.
+              A licence on a constitution is a leash on a fork, and the right to fork is the last
+              check that survives when every other one has failed.
+            </p>
+          </article>
+          <article class="charter-card charter-card--warn">
+            <h3>Six conflicts held open, not decided</h3>
+            <p>
+              Both sides of each are Articles, so Article 3.7 cannot rank them and Article 58
+              reserves the choice to an amendment. A consistency checker prints all six on every
+              run and fails if one is closed by editing a single side.
+            </p>
+          </article>
+        </div>
+
+        <div class="claims">
+          <h3 class="claims__h">Claims this project forbids itself from making</h3>
+          <p class="claims__p">
+            Article 21.4 lists them, and a checker in the repository reads that list out of the
+            charter rather than restating it — so amending the Article changes the check in the
+            same commit. The test in Article 21.5 is what the words assert to a reader who has read
+            nothing else, not what a longer passage elsewhere qualifies.
+          </p>
+          <!-- Deliberately empty. site.js fills it from assets/claims.js, which is
+               generated out of Article 21.4 — so this page contains none of the
+               words the charter forbids and stays inside the checker that reads
+               it, rather than needing an exemption from that checker. -->
+          <ul class="claims__list" id="claims-list"></ul>
+          <p class="claims__foot">
+            That gate now reads this page too. Marketing copy is where a forbidden claim is most
+            likely to be written and was the one surface the checker could not see.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ limits ══ -->
+    <section class="band">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="kicker">Limits</p>
+          <h2 class="h2">What VayuWeb does not promise.</h2>
+          <p class="sub">
+            A charter that overclaims dies the first time reality tests it, so these are stated up
+            front and repeated in the specifications.
+          </p>
+        </div>
+
+        <div class="limits">
+          <article class="limit">
+            <h3>It is a parallel web, not a hidden one</h3>
+            <p>
+              It does not hide who you are, where you are, or what you are reading from anyone
+              watching your network connection. An optional anonymity layer is deferred until
+              there is a population large enough for an anonymity set to mean anything. Use Tor
+              when hiding is what you need.
+            </p>
+          </article>
+          <article class="limit">
+            <h3>Availability is not guaranteed</h3>
+            <p>
+              Content lives while at least one peer pins it. If everybody stops pinning, it is
+              gone.
+            </p>
+          </article>
+          <article class="limit">
+            <h3>It cannot forget</h3>
+            <p>
+              The registry is an append-only log. You can withdraw a pointer and unpin your copy;
+              you cannot compel other peers to discard bytes they already hold.
+            </p>
+          </article>
+          <article class="limit">
+            <h3>Jurisdictions still exist</h3>
+            <p>
+              It removes intermediaries, not states. Blocking traffic at the network layer, seizing
+              a device and compelling a person are all still possible.
+            </p>
+          </article>
+          <article class="limit">
+            <h3>A lost key is a lost name</h3>
+            <p>
+              There is no support desk, because a support desk that can restore your name is a
+              support desk that can take it.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ roadmap ══ -->
+    <section class="band band--alt">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="kicker">Roadmap</p>
+          <h2 class="h2">Organised by dependency, not by calendar.</h2>
+          <p class="sub">
+            Dates on a volunteer protocol project are a form of dishonesty: set by wishful
+            thinking, missed, then quietly deleted. Each phase carries an acceptance test instead —
+            a condition an outsider can check without asking anyone whether it is done.
+          </p>
+        </div>
+
+        <ol class="phases">
+          <li class="phase phase--done">
+            <span class="phase__n">Phase 0</span><span class="phase__t">Charter and specification</span>
+            <span class="phase__s">Findings dispositioned</span>
+            <span class="phase__a">Done when a competent implementer can read the specifications alone and produce a client that would interoperate.</span>
+          </li>
+          <li class="phase phase--live">
+            <span class="phase__n">Phase 1</span><span class="phase__t">Registry core</span>
+            <span class="phase__s">Built</span>
+            <span class="phase__a">Done when a command-line tool can register a name into a local log and resolve it back.</span>
+          </li>
+          <li class="phase">
+            <span class="phase__n">Phase 2</span><span class="phase__t">Peer replication</span>
+            <span class="phase__s">Needs independent peers</span>
+            <span class="phase__a">Done when independent peers, started in any order and deliberately partitioned, converge.</span>
+          </li>
+          <li class="phase phase--pass">
+            <span class="phase__n">Phase 3</span><span class="phase__t">Resolution proxy</span>
+            <span class="phase__s">Acceptance test passes — on one machine</span>
+            <span class="phase__a">Done when an unmodified browser, pointed at the proxy, renders a VayuWeb page end to end.</span>
+          </li>
+          <li class="phase">
+            <span class="phase__n">Phase 4</span><span class="phase__t">Hosting</span>
+            <span class="phase__s">Needs a second machine</span>
+            <span class="phase__a">Done when a site published on one machine is fetched and rendered by a second that was never told where the content came from.</span>
+          </li>
+          <li class="phase">
+            <span class="phase__n">Phase 5</span><span class="phase__t">Desktop client</span>
+            <span class="phase__s">Not started</span>
+            <span class="phase__a">Done when someone who has never used a command line completes the full flow, unassisted.</span>
+          </li>
+          <li class="phase">
+            <span class="phase__n">Phase 6</span><span class="phase__t">Radicle migration · independent implementations</span>
+            <span class="phase__s">Not started</span>
+            <span class="phase__a">Done when a second implementation, by parties with no common employer or funder, interoperates.</span>
+          </li>
+          <li class="phase">
+            <span class="phase__n">Phase 7</span><span class="phase__t">Convenience layers</span>
+            <span class="phase__s">Not started</span>
+            <span class="phase__a">Done when every convenience layer can be removed and the system still works completely.</span>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ══ faq ══ -->
+    <section class="band">
+      <div class="wrap wrap--narrow">
+        <div class="section-head">
+          <p class="kicker">Questions</p>
+          <h2 class="h2">Including the unwelcome ones.</h2>
+        </div>
+
+        <div class="faq">
+          <details class="qa" open>
+            <summary>Can I use it today?</summary>
+            <div class="qa__b"><p>
+              No. There is no software you can run against a network. What exists is the
+              Constitution, the specifications, the threat model and a registry core that runs on
+              one machine. The roadmap explains the order and what “done” means for each phase.
+            </p></div>
+          </details>
+          <details class="qa">
+            <summary>Is this a blockchain?</summary>
+            <div class="qa__b"><p>
+              No. There is no global consensus on ordering, no mining, no block reward and no
+              chain. VayuWeb uses a signed append-only log per participant with a deterministic
+              convergence rule for the one case that genuinely conflicts — two people claiming the
+              same free name at the same time. Naming does not need double-spend prevention across
+              the whole system, only per name.
+            </p></div>
+          </details>
+          <details class="qa">
+            <summary>Is there a token?</summary>
+            <div class="qa__b"><p>
+              No. Article 7 forbids a token, a treasury and a protocol fee, and Article 9
+              entrenches that against amendment. A token creates a class of people whose interest
+              is the price rather than the protocol, and it makes governance purchasable.
+            </p></div>
+          </details>
+          <details class="qa">
+            <summary>So how is it funded?</summary>
+            <div class="qa__b"><p>
+              It isn't. Nobody gets paid. That is a real cost, and it is stated honestly rather
+              than solved with a mechanism that would be worth capturing.
+            </p></div>
+          </details>
+          <details class="qa">
+            <summary>What does it cost to register a name?</summary>
+            <div class="qa__b"><p>
+              No money — a few seconds of your computer's time. Registration and renewal use a
+              memory-hard proof-of-work that is trivial for one name and grows superlinearly if
+              you try to take ten thousand. It prices squatting without a payment rail, a token,
+              or a treasury that could be captured.
+            </p></div>
+          </details>
+          <details class="qa">
+            <summary>Who runs VayuWeb?</summary>
+            <div class="qa__b"><p>
+              Nobody. Article 39 is titled “There Is No Governing Body” and means it. Protocol
+              changes move through the VWIP process; the network runs whatever its peers choose to
+              run.
+            </p></div>
+          </details>
+          <details class="qa">
+            <summary>Can a business be built on it?</summary>
+            <div class="qa__b"><p>
+              Yes, above the protocol layer, and the test is one question: if this business shut
+              down tomorrow, would anybody lose a name? If yes, it is a chokepoint and it is
+              forbidden. If they lose only a convenience, it is a service. Registration-as-a-
+              service must generate the keypair on the customer's device; pinning must be
+              swappable; nothing may ship pre-selected in a client.
+            </p></div>
+          </details>
+          <details class="qa">
+            <summary>How can I help?</summary>
+            <div class="qa__b"><p>
+              At this stage, specification review is worth more than code. Reading the Constitution
+              adversarially and finding the clause a bad actor could drive a truck through is the
+              single most valuable contribution anyone can make right now. Security issues go
+              through <span class="mono">SECURITY.md</span>, not the public tracker.
+            </p></div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ close ══ -->
+    <section class="closer">
+      <div class="wrap wrap--narrow">
+        <span class="closer__mark" aria-hidden="true"></span>
+        <h2 class="closer__h">If you are here to break something, read the threat model and tell us what we missed.</h2>
+        <p class="closer__p">
+          Long-term development moves to Radicle; GitHub is a temporary public mirror. Code is MIT.
+          The charter, the specifications and the artwork are dedicated to the public domain under
+          CC0. There is no CLA, and there will not be one.
+        </p>
+        <div class="closer__actions">
+          <div class="btn-ring">
+            <a class="btn btn--primary" href="https://github.com/johalputt/VayuWeb/blob/main/docs/THREAT-MODEL.md">
+              <span>Read the threat model</span>
+              <svg class="btn__chev" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </a>
+          </div>
+          <a class="btn btn--ghost" href="https://github.com/johalputt/VayuWeb/blob/main/CONTRIBUTING.md">Contributing</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap">
+      <div class="foot__top">
+        <div class="foot__brand">
+          <span class="brand__mark brand__mark--sm" role="img" aria-label="VayuWeb"></span>
+          <div>
+            <p class="foot__name">VayuWeb</p>
+            <p class="foot__tag">The peer-owned root of the free internet.</p>
+          </div>
+        </div>
+        <nav class="foot__cols" aria-label="Documentation">
+          <div>
+            <p class="foot__h">Read first</p>
+            <a href="https://github.com/johalputt/VayuWeb/blob/main/constitution/CONSTITUTION.md">Constitution</a>
+            <a href="https://github.com/johalputt/VayuWeb/blob/main/docs/POSITION.md">Position</a>
+            <a href="https://github.com/johalputt/VayuWeb/blob/main/docs/WHITEPAPER.md">Whitepaper</a>
+            <a href="https://github.com/johalputt/VayuWeb/blob/main/docs/FAQ.md">FAQ</a>
+          </div>
+          <div>
+            <p class="foot__h">Specifications</p>
+            <a href="https://github.com/johalputt/VayuWeb/blob/main/docs/spec/REGISTRY.md">Registry</a>
+            <a href="https://github.com/johalputt/VayuWeb/blob/main/docs/spec/NAMES.md">Names &amp; TLDs</a>
+            <a href="https://github.com/johalputt/VayuWeb/blob/main/docs/spec/RESOLUTION.md">Resolution</a>
+            <a href="https://github.com/johalputt/VayuWeb/blob/main/docs/spec/PROOF-OF-WORK.md">Proof-of-work</a>
+          </div>
+          <div>
+            <p class="foot__h">Security</p>
+            <a href="https://github.com/johalputt/VayuWeb/blob/main/docs/THREAT-MODEL.md">Threat model</a>
+            <a href="https://github.com/johalputt/VayuWeb/blob/main/docs/spec/CONTENT-SECURITY.md">Content security</a>
+            <a href="https://github.com/johalputt/VayuWeb/blob/main/docs/spec/PRIVACY.md">Privacy</a>
+            <a href="https://github.com/johalputt/VayuWeb/blob/main/docs/AUDIT-FINDINGS.md">Audit findings</a>
+          </div>
+          <div>
+            <p class="foot__h">Process</p>
+            <a href="https://github.com/johalputt/VayuWeb/blob/main/docs/ROADMAP.md">Roadmap</a>
+            <a href="https://github.com/johalputt/VayuWeb/blob/main/docs/GOVERNANCE.md">Governance</a>
+            <a href="https://github.com/johalputt/VayuWeb/blob/main/docs/spec/VWIP-0000.md">VWIP-0000</a>
+            <a href="https://github.com/johalputt/VayuWeb">Repository</a>
+          </div>
+        </nav>
+      </div>
+      <div class="foot__bar">
+        <p>Code MIT · charter, specifications and artwork CC0 · no CLA, ever.</p>
+        <p class="mono">vayu://</p>
+      </div>
+    </div>
+  </footer>
+</div>
+</body>
+</html>
