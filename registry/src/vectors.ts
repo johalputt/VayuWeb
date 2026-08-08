@@ -186,6 +186,20 @@ const stripField = (bytes: Uint8Array, key: string): CborMap => {
   return map;
 };
 
+/**
+ * The same record with its signature replaced by bytes that verify under nothing.
+ *
+ * Used to build two-defect vectors, which are what make check ORDER testable across
+ * implementations: a record with one defect only ever produces one code, so it says nothing about
+ * the sequence the checks run in.
+ */
+function forge(bytes: Uint8Array): Uint8Array {
+  const map = decode(bytes);
+  if (!(map instanceof Map)) throw new Error('a record encodes to a map');
+  map.set('sig', new Uint8Array(64).fill(0xff));
+  return encode(map);
+}
+
 const FRESH: VectorState = {
   predecessor: null,
   revoked: false,
@@ -614,6 +628,30 @@ export function buildVectors(): Vector[] {
       now: VECTOR_NOW,
       state: FRESH,
       expect: rejectWith('BACKDATED'),
+    },
+    {
+      // The two-defect case that pins CHECK ORDER, which is the whole reason the record suite
+      // records a code rather than only an outcome. A postdated record with a garbage signature
+      // must be REJECTED, not held: `defer` is the one verdict that costs the verifier memory, so
+      // it has to be earned by a valid signature and a solved proof of work. Reached before those
+      // two, it was free storage — 1,024 such records filled the entire deferral queue for the
+      // price of the bytes on the wire.
+      //
+      // No vector combined these two defects, so reordering the checks changed no published
+      // expectation and a second implementation was free to disagree.
+      name: 'register/postdated-junk-is-rejected-not-deferred',
+      rule: 'REGISTRY.md: a deferral costs memory, so signature and proof of work are checked first',
+      record: toHex(
+        forge(
+          registration({
+            notBefore: VECTOR_NOW + 301,
+            notAfter: VECTOR_NOW + 301 + TERM_SECONDS,
+          }),
+        ),
+      ),
+      now: VECTOR_NOW,
+      state: FRESH,
+      expect: rejectWith('BAD_SIG'),
     },
     {
       name: 'register/clock-skew-is-deferred-not-rejected',

@@ -285,13 +285,25 @@ export function verify(
     if (record.notAfter - record.notBefore !== TERM_SECONDS) {
       return reject('BAD_TERM', 'a registration term is exactly one year');
     }
-    if (clock !== null) return clock;
     if (!verifyStrict(record.ownerKey, input, record.sig)) {
       return reject('BAD_SIG', 'signature does not verify under ownerKey');
     }
     if (!state.powVerified(record)) {
       return reject('BAD_POW', 'proof of work does not meet the required difficulty');
     }
+    // **Last, deliberately, and the opposite of the `NAME_TAKEN` reasoning above.**
+    //
+    // `defer` is the only verdict that costs the verifier memory: the record is held until its
+    // skew window opens. Reached before the signature and the proof of work, it was free storage —
+    // a record with a garbage signature and no solved work was HELD rather than rejected, and
+    // 1,024 of them filled the whole deferral queue and evicted every honest deferral for the
+    // price of the bytes on the wire.
+    //
+    // A cheap check whose outcome is a REJECTION belongs first, because it saves an Argon2id
+    // evaluation; that is why NAME_TAKEN is where it is. A cheap check whose outcome is "hold
+    // this until later" belongs last, because its outcome is a cost rather than a saving. The two
+    // rules look contradictory and are the same rule applied to opposite consequences.
+    if (clock !== null) return clock;
     return { outcome: 'accept', record };
   }
 
@@ -323,9 +335,6 @@ export function verify(
       `suite ${record.suite} is below the predecessor's ${prev.suite}; suites move forward only`,
     );
   }
-  // See clockVerdict: this bound is absent from the pseudocode outside REGISTER, and its
-  // absence is what makes a single RENEW able to buy an unbounded term.
-  if (clock !== null) return clock;
   if (state.revoked(record.name, record.tld)) {
     return reject('REVOKED', 'the name has been revoked and accepts no further records');
   }
@@ -357,6 +366,10 @@ export function verify(
   if (!verifyStrict(authority, input, record.sig)) {
     return reject('BAD_SIG', 'signature does not verify under the controlling key');
   }
+  // See clockVerdict: this bound is absent from the pseudocode outside REGISTER, and its absence
+  // is what makes a single RENEW able to buy an unbounded term. It sits AFTER the signature for
+  // the reason given in the REGISTER branch — a deferral costs memory, so it must be earned.
+  if (clock !== null) return clock;
   if (record.op !== 'TRANSFER' && !bytesEqual(record.ownerKey, prev.ownerKey)) {
     return reject('BAD_OWNER', `${record.op} must not change ownerKey`);
   }

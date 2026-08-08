@@ -124,6 +124,53 @@ limit is 2.1 MB of hex zeros in the artifact, of which every byte after the firs
 information. The vectors file went from 159 KB to 2.25 MB before this was noticed. A runner builds
 the buffer from the stated length and tests exactly what one reading two million zeros would.
 
+### Fixed — a deferral cost the verifier memory and cost the attacker nothing
+
+**The clock check ran before the signature and the proof of work.** So a record with a postdated
+`notBefore`, a garbage signature and no solved work was *held* rather than rejected. Measured:
+**1,024 such records filled the entire deferral queue**, evicting every honest deferral, for the
+price of the bytes on the wire.
+
+The deferral dedup added earlier in this session closed only the cheapest version of this — one
+record resent. Distinct junk is barely more expensive to make and was equally free, so the fix had
+closed the example and left the property open. Found by an adversarial pass over this session's own
+5,253 new lines, and confirmed by running it.
+
+The ordering principle is worth stating because the neighbouring `NAME_TAKEN` check is deliberately
+*early* for the opposite reason. **A cheap check whose outcome is a rejection belongs first** — it
+saves the verifier an Argon2id evaluation. **A cheap check whose outcome is "hold this in memory
+until later" belongs last** — its outcome is a cost, not a saving. The two rules read as
+contradictory and are one rule applied to opposite consequences.
+
+`clockVerdict` now runs after the signature in both the REGISTER and successor branches, and after
+the proof of work in REGISTER. A genuinely signed, genuinely solved postdated record is still
+deferred: the point is to charge for the storage, not to take clock tolerance from honest peers.
+
+**No published expectation changed, and that was the second finding.** Check order is what the
+record suite exists to pin — its own note says "a record with two defects must produce the same
+code everywhere, which is what makes check order testable across implementations" — and *no vector
+combined a bad signature with a postdated date*. Reordering was therefore invisible to the whole
+conformance set, and a second implementation was free to disagree. `register/postdated-junk-is-
+rejected-not-deferred` now pins it, and it catches the reordering by name.
+
+### Fixed — `serve --site` swept .git and dotfiles into a public, immutable CID
+
+`siteContentOf` walked a directory with no rules at all. Measured against an ordinary working
+directory it collected **`.env` and `.git/config`** and imported both into the root CID — content
+addressed, immutable, and fetchable by anyone holding the CID. A git config can carry a credential
+in a remote URL.
+
+HOSTING.md names this hazard in terms, for the neighbouring case: symbolic links "MUST NOT be
+followed … since a followed link can silently pull a private key into a public CID". It simply did
+not anticipate the door it came through, and none of its package rules were enforced.
+
+Symlinks *were* skipped — by accident. `Dirent` methods are lstat-shaped, so a link is neither a
+file nor a directory and fell out of both branches. That is the safe direction and still not what
+the specification asks for: silently omitting a file is neither "dereference" nor "refuse", and the
+site publishes with a hole in it that the publisher is never told about. A link now stops the
+publish and says why; excluded dot-entries are listed rather than dropped in silence; `.vayu`
+stays, because the manifest lives there and is not served.
+
 ### Fixed — two entries of one type were a fork, and the vector set could not express it
 
 Uniqueness is imposed on exactly one entry type: `alias` is at most one and must not coexist with

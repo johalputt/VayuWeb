@@ -588,6 +588,77 @@ function merkleRootOf(store: Store, length: number): Uint8Array {
 const RESOLVER_VERSION = '0.1.0';
 
 /**
+ * The files a directory publishes, with HOSTING.md's package rules applied.
+ *
+ * **A publish walk is a disclosure surface, and this one had no rules at all.** Measured against
+ * an ordinary working directory it collected `.env` and `.git/config` and imported both into the
+ * root CID — content addressed, immutable, and fetchable by anyone holding the CID. A git config
+ * can carry a credential in a remote URL.
+ *
+ * HOSTING.md names the hazard in terms, for the neighbouring case: symbolic links "MUST NOT be
+ * followed … since a followed link can silently pull a private key into a public CID". It just did
+ * not anticipate the door it came through.
+ *
+ * Three rules, each from that document's package section:
+ *
+ * - **A leading dot is excluded.** `.vayu` is the one exception, because the manifest lives there
+ *   and is metadata rather than something served.
+ * - **A symbolic link stops the publish.** It was already skipped, but by accident — `Dirent`
+ *   methods are lstat-shaped, so a link is neither a file nor a directory and fell out of both
+ *   branches. Silently omitting a file is neither "dereference" nor "refuse", and it publishes a
+ *   site with a hole in it that the publisher is never told about.
+ * - **A filename over 255 bytes stops the publish**, rather than being quietly renamed or dropped.
+ *
+ * Excluded entries are reported rather than dropped in silence, for the same reason: a site that
+ * renders wrong because an asset vanished is worse than one that refused to publish.
+ */
+export function siteFilesFor(directory: string): SiteFile[] {
+  const files: SiteFile[] = [];
+  const excluded: string[] = [];
+
+  const walk = (dir: string, prefix: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+
+      if (entry.isSymbolicLink()) {
+        throw new UsageError(
+          `${rel} is a symbolic link. HOSTING.md requires a publisher to dereference links or ` +
+            `refuse the import, because a followed link can pull a private key into a public CID. ` +
+            `Replace it with the file it points at, or remove it.`,
+        );
+      }
+      // HOSTING.md's 255-byte filename bound. Defensive rather than reachable here: every
+      // filesystem this is likely to run on enforces the same limit itself, so a longer name
+      // cannot be created to test against — which is exactly why it is worth keeping and not
+      // worth claiming a test for.
+      if (Buffer.byteLength(entry.name, 'utf8') > 255) {
+        throw new UsageError(`${rel}: a filename may not exceed 255 bytes`);
+      }
+      // `.vayu` carries the manifest and is not served; everything else with a leading dot is
+      // build or tooling state that has no business in a public, immutable blob.
+      if (entry.name.startsWith('.') && entry.name !== '.vayu') {
+        excluded.push(rel);
+        continue;
+      }
+      if (entry.isDirectory()) walk(join(dir, entry.name), rel);
+      else if (entry.isFile())
+        files.push({ path: rel, content: readFileSync(join(dir, entry.name)) });
+    }
+  };
+  walk(directory, '');
+
+  if (excluded.length > 0) {
+    err(
+      `excluded ${excluded.length} dot-entr${excluded.length === 1 ? 'y' : 'ies'} from the publish:`,
+    );
+    for (const path of excluded.slice(0, 8)) err(`  ${path}`);
+    if (excluded.length > 8) err(`  … and ${excluded.length - 8} more`);
+  }
+  if (files.length === 0) throw new UsageError(`${directory} holds no files to publish`);
+  return files;
+}
+
+/**
  * A content port over a directory published into memory.
  *
  * Returns null when no `--site` was given, which leaves the proxy answering a bare 200 -- the
@@ -596,17 +667,7 @@ const RESOLVER_VERSION = '0.1.0';
 function siteContentOf(directory: string | undefined): ContentPort | null {
   if (directory === undefined) return null;
 
-  const files: SiteFile[] = [];
-  const walk = (dir: string, prefix: string): void => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
-      if (entry.isDirectory()) walk(join(dir, entry.name), rel);
-      else if (entry.isFile())
-        files.push({ path: rel, content: readFileSync(join(dir, entry.name)) });
-    }
-  };
-  walk(directory, '');
-  if (files.length === 0) throw new UsageError(`${directory} holds no files to publish`);
+  const files = siteFilesFor(directory);
 
   const built = importSite(files);
   const source = memorySource(built.blocks);

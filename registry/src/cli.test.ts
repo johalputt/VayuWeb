@@ -7,11 +7,11 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { main } from './cli.ts';
+import { main, siteFilesFor } from './cli.ts';
 import { CID_PARAMETERS, cidBytes, encodeCid, sha256 } from './content.ts';
 import { Store } from './store.ts';
 
@@ -219,6 +219,76 @@ test('every flag the help text advertises is one the tool will accept', () => {
         `--${flag} is in the help text but not in KNOWN_FLAGS`,
       );
     }
+  } finally {
+    done();
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/* What `serve --site` puts into a public, immutable CID                       */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: publishing a directory does not sweep .git or dotfiles into the CID', () => {
+  // **HOSTING.md warns about exactly this hazard and the new publish path walked straight past
+  // it.** Its package rules say filenames "MUST NOT contain … a leading `.` for any file intended
+  // to be served", and that "Symbolic links MUST NOT be followed; a publisher SHALL either
+  // dereference them at build time or refuse the import, since a followed link can silently pull
+  // a private key into a public CID."
+  //
+  // `siteContentOf` enforced none of it. Measured before this test: publishing an ordinary working
+  // directory collected `.env` and `.git/config` and imported both into the root CID — content
+  // addressed, immutable, and fetchable by anyone holding the CID. A git config can carry a
+  // credential in a remote URL. The specification names the consequence precisely for the
+  // neighbouring case; it just did not anticipate the door it came through.
+  const { dir, done } = scratch();
+  try {
+    const site = join(dir, 'site');
+    mkdirSync(join(site, '.git'), { recursive: true });
+    mkdirSync(join(site, 'assets'), { recursive: true });
+    writeFileSync(join(site, 'index.html'), '<h1>real</h1>');
+    writeFileSync(join(site, 'assets', 'style.css'), 'h1{color:red}');
+    writeFileSync(join(site, '.env'), 'SECRET=abc123');
+    writeFileSync(join(site, '.git', 'config'), '[remote]\n  url = https://token@example.com/r');
+
+    const collected = siteFilesFor(site).map((f: { path: string }) => f.path);
+    assert.deepEqual([...collected].sort(), ['assets/style.css', 'index.html']);
+    // Named individually so a failure says which rule broke rather than only that the set differs.
+    assert.equal(collected.includes('.env'), false, 'a dotfile must not reach the CID');
+    assert.equal(
+      collected.includes('.git/config'),
+      false,
+      'a dot-directory must not reach the CID',
+    );
+
+    // `.vayu` is the one dot-entry that belongs: HOSTING.md puts the manifest there, and it is
+    // metadata rather than something served. Excluding it would break the manifest instead.
+    mkdirSync(join(site, '.vayu'), { recursive: true });
+    writeFileSync(join(site, '.vayu', 'manifest.json'), '{"version":1}');
+    const withManifest = siteFilesFor(site).map((f: { path: string }) => f.path);
+    assert.ok(withManifest.includes('.vayu/manifest.json'), 'the manifest is not build state');
+  } finally {
+    done();
+  }
+});
+
+test('a symbolic link refuses the publish rather than vanishing from it', () => {
+  // The link was already skipped before this change — but by accident, not by rule: `Dirent`
+  // methods are lstat-shaped, so a link is neither a file nor a directory and fell out of both
+  // branches. That is the safe direction and it is still not what HOSTING.md asks for. Silently
+  // omitting a file is neither "dereference" nor "refuse": the site publishes with a hole in it
+  // and the publisher is never told, which is a worse outcome than a refusal they can act on.
+  const { dir, done } = scratch();
+  try {
+    const site = join(dir, 'site');
+    mkdirSync(site, { recursive: true });
+    writeFileSync(join(site, 'index.html'), '<h1>real</h1>');
+    const secret = join(dir, 'outside.txt');
+    writeFileSync(secret, 'PRIVATE KEY MATERIAL');
+    symlinkSync(secret, join(site, 'linked.txt'));
+
+    assert.throws(() => siteFilesFor(site), /linked\.txt is a symbolic link/);
+    // And the refusal explains itself, because "refused" without a reason is a bug report.
+    assert.throws(() => siteFilesFor(site), /private key into a public CID/);
   } finally {
     done();
   }

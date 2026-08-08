@@ -91,7 +91,7 @@ conforming peer can hold. It is unit-tested against a constructed predecessor, a
 activates a second suite must add the wire vector. A test also fails if an exempted code
 acquires a vector, so the excuse cannot outlive the reason for it.
 
-The file carries seven suites: `vectors` holds 72 record-verification vectors, and `convergence`,
+The file carries seven suites: `vectors` holds 73 record-verification vectors, and `convergence`,
 `resolution`, `replication`, `equivocation`, `pow` and `blockExchange` hold their own. Those six
 pin what implementations must *agree* about rather than what one of them accepts, which is where a
 fork lives.

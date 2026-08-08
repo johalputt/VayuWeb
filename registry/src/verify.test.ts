@@ -743,3 +743,46 @@ test('AUDIT: the signing input separates suites, so a signature cannot be replay
   const legacy: CborMap = new Map<string | Uint8Array, CborValue>([['version', 1]]);
   assert.throws(() => signingInput(legacy), /suite/);
 });
+
+test('AUDIT: a record must earn its deferral — no signature, no proof of work, no storage', () => {
+  // **Deferral is the one verdict that costs the verifier memory, and it was reachable for free.**
+  //
+  // `clockVerdict` ran before `verifyStrict` and before `powVerified`, so a record with a
+  // postdated `notBefore`, a garbage signature and no proof of work was HELD rather than rejected.
+  // Measured: 1,024 such records filled the entire deferral queue, evicting every honest deferral,
+  // at a cost to the attacker of the bytes on the wire.
+  //
+  // Deduplicating that queue by record hash — an earlier fix in this session — closed only the
+  // cheapest version, where one record was resent. Distinct junk is barely more expensive to make
+  // and was equally free.
+  //
+  // The ordering principle is worth stating, because the neighbouring `NAME_TAKEN` check is
+  // deliberately early for the opposite reason. A cheap check whose outcome is a REJECTION belongs
+  // first: it saves the verifier an Argon2id evaluation. A cheap check whose outcome is "hold this
+  // in memory until later" must come last, because its outcome is a cost rather than a saving.
+  const postdated = NOW + MAX_CLOCK_SKEW_SECONDS + 600;
+
+  // Signed with the wrong key and carrying a proof of work the view refuses, so nothing about it
+  // is valid except its shape and its date.
+  const junk = registration({
+    notBefore: postdated,
+    notAfter: postdated + TERM_SECONDS,
+  });
+  const forged = parseRecordBytes(junk);
+  void forged;
+  const verdict = verify(junk, view({ powVerified: () => false }), NOW);
+  assert.notEqual(code(verdict), 'defer:CLOCK_SKEW', 'unsolved junk must not be held for later');
+  assert.equal(verdict.outcome, 'reject');
+
+  // And a genuinely signed, genuinely solved postdated record is STILL deferred. The point is to
+  // charge for the storage, not to take clock tolerance away from honest peers.
+  const honest = registration({
+    notBefore: postdated,
+    notAfter: postdated + TERM_SECONDS,
+  });
+  assert.equal(
+    code(verify(honest, view({ powVerified: () => true }), NOW)),
+    'defer:CLOCK_SKEW',
+    'a valid postdated record is still held across the skew window',
+  );
+});
