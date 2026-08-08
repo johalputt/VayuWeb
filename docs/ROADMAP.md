@@ -481,6 +481,29 @@ Listed in advance, so that changing our minds later looks like integrity rather 
 - **Independent verification is too expensive.** If full-history verification cannot run on
   ordinary consumer hardware, most people will use somebody else's verified view, and a de facto
   root returns through the back door.
+
+  **Measured, and on the evidence so far this condition is met.**
+  `registry/scripts/benchmark-replay.mjs` times it. `Store.open` replays every entry and
+  re-verifies it, which runs a full Argon2id evaluation for every REGISTER and RENEW, and every
+  command opens the store before doing anything — so this is the cost of running *any* command
+  against a log of that size, not a one-off startup cost.
+
+  On one machine, in the pure-JavaScript implementation: one evaluation takes a median of
+  **2.5 seconds** (range 2.47–2.84 s over seven samples), and a measured three-record `Store.open`
+  costs 2.55 s per record, 1.02× one evaluation — so the proof dominates and the rest of replay is
+  noise beside it. Multiplying that out gives roughly **4 minutes** for a hundred records,
+  **43 minutes** for a thousand, and **71 hours** for a hundred thousand.
+
+  What this does not settle: a native Argon2id is several times faster and a phone is slower, and
+  neither was measured. The figures above are an order of magnitude rather than a benchmark of the
+  protocol, and the memory cost — 64 MiB per evaluation — is a separate constraint on the smallest
+  device that this measures not at all. Even generously, a thousand-record log is a number a real
+  registry passes early.
+
+  **No fix is proposed here on purpose.** Caching a verdict, trusting a replay, or verifying
+  proofs lazily are each a change to *when* verification happens, which is a security argument and
+  not a performance tweak — and this section exists for recording that a stated condition has been
+  met, not for quietly resolving it in the same breath.
 - **Bootstrap or pinning concentration proves unavoidable.** If the concentration metrics of
   Article 53 show a de facto centre forming despite plural, swappable defaults, then the
   no-chokepoint invariant is aspirational rather than real, and the honest response is to say so

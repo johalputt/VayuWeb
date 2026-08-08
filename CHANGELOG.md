@@ -10,6 +10,34 @@ it.
 
 ## [Unreleased]
 
+### Added — the replay cost, measured, and a stated stop-and-rethink condition met
+
+`docs/ROADMAP.md` lists in advance what would make this project change its mind. One of them:
+"**Independent verification is too expensive.** If full-history verification cannot run on ordinary
+consumer hardware, most people will use somebody else's verified view, and a de facto root returns
+through the back door."
+
+`Store.open` replays every entry and re-verifies it, which runs a full Argon2id evaluation for
+every REGISTER and RENEW, and every CLI command opens the store first. That makes the condition
+answerable with a stopwatch, so `registry/scripts/benchmark-replay.mjs` is the stopwatch.
+
+Measured on one machine in the pure-JavaScript implementation: one evaluation takes a median of
+2.5 s (2.47–2.84 s over seven samples), and a real three-record `Store.open` costs 2.55 s per
+record — 1.02× one evaluation, so the proof dominates and everything else in replay is noise.
+Multiplied out: ~4 minutes at a hundred records, ~43 minutes at a thousand, ~71 hours at a hundred
+thousand. Per command, not per session.
+
+The script separates what it measured from what it multiplied, and states what it does not settle:
+a native Argon2id is several times faster, a phone is slower, neither was measured, and the 64 MiB
+per evaluation is a memory constraint on the smallest device that this touches not at all. It also
+checks its own premise rather than assuming it — if the per-record replay cost ever stops tracking
+one evaluation, it says the extrapolation is unsound instead of printing it.
+
+**No fix ships with this.** Caching a verdict, trusting a replay, or verifying proofs lazily are
+each a change to *when* verification happens, which is a security argument rather than a
+performance tweak. Recording that a stated condition has been met, and quietly resolving it in the
+same breath, are different things.
+
 ### Fixed — the replication driver asked for a range of the wrong log
 
 **Phase 2's third consensus-shaped defect, found the same way as the first two: by asking what
