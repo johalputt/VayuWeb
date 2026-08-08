@@ -37,8 +37,10 @@ import { labelRejection, isRatifiedTld, MAX_TLD_LENGTH, MAX_LABEL_LENGTH } from 
 import {
   RESOLVE_ERRORS,
   resolveName,
+  sourceCandidates,
   type ResolveErrorName,
   type ResolverPorts,
+  type SourceType,
 } from './resolve.ts';
 import { cidFromBytes, encodeCid } from './content.ts';
 import type { CborValue } from './cbor.ts';
@@ -111,6 +113,7 @@ export const DIAGNOSTIC_HEADERS: readonly string[] = [
   'x-vayuweb-source',
   'x-vayuweb-resolved-from',
   'x-vayuweb-stale',
+  'x-vayuweb-fallbacks',
 ];
 
 /**
@@ -336,7 +339,7 @@ export function normaliseHost(host: string): { label: string; tld: string } | nu
   return { label, tld };
 }
 
-function refusal(error: ResolveErrorName): ProxyResponse {
+export function refusal(error: ResolveErrorName): ProxyResponse {
   const spec = RESOLVE_ERRORS[error];
   const headers = new Map<string, string>(SECURITY_HEADERS);
   headers.set('content-type', 'text/plain; charset=utf-8');
@@ -414,19 +417,63 @@ export function handleRequest(
   // rather than a pretend page. What arrives from the port has already been VERIFIED --
   // `fetch.ts` checks every block against the CID that referred it -- so these are bytes that
   // hashed correctly, not bytes a peer sent.
+  //
+  // **The fallback across sources lives here, and used to not exist anywhere.** RESOLUTION.md:
+  // "If the chosen entry fails, the resolver SHOULD fall back to the next, MUST record the
+  // fallback in the control API's per-request diagnostics, and MUST mark the answer stale." One
+  // source was tried and that was the end of it, so a record carrying the arrangement HOSTING.md
+  // recommends — an `ipns` pointer beside a `cid` snapshot — answered 502 while the snapshot the
+  // publisher supplied for exactly that case went unasked. `Diagnostics.fallbacks` was declared
+  // and always empty.
   let body: Uint8Array = EMPTY_BODY;
+  let source: SourceType | null = outcome.diagnostics.source;
+  /**
+   * The identifier actually served, for `X-VayuWeb-CID`.
+   *
+   * That header is enumerated in RESOLUTION.md and was emitted nowhere — declared in
+   * `DIAGNOSTIC_HEADERS` and set by no line of code. The only test over the list asserted the
+   * headers are ABSENT by default, which is true of a header that does not exist, so the list
+   * could name anything and stay green.
+   *
+   * It carries the source's rendered value rather than the record's first entry, because after a
+   * fallback those are different things and the useful one is what the reader received.
+   */
+  let servedCid: string | null = null;
+  const fallbacks: SourceType[] = [];
   if (options.content !== undefined) {
-    const value = sourceValueOf(outcome.entry);
-    if (value === null) return refusal('NO_USABLE_RECORD');
-    const fetched = options.content.fetch(
-      { type: outcome.entry.type, value },
-      pathOf(request.target),
-    );
-    if (!fetched.ok) return refusal(fetched.error);
-    headers.set('content-type', fetched.contentType);
-    // Handed on unchanged. There is no encoding step here any more, which is the point: the two
-    // that used to exist did not agree with each other.
-    body = fetched.bytes;
+    const candidates = sourceCandidates(outcome.record);
+    let failure: ResolveErrorName = 'NO_USABLE_RECORD';
+    let served = false;
+    for (const candidate of candidates) {
+      const type = candidate.type as SourceType;
+      const value = sourceValueOf(candidate);
+      if (value === null) {
+        // A malformed entry is this source failing, not the request failing. The next source is
+        // exactly what a publisher supplied a second entry for.
+        failure = 'NO_USABLE_RECORD';
+        fallbacks.push(type);
+        continue;
+      }
+      const fetched = options.content.fetch({ type, value }, pathOf(request.target));
+      if (fetched.ok) {
+        headers.set('content-type', fetched.contentType);
+        // Handed on unchanged. There is no encoding step here any more, which is the point: the
+        // two that used to exist did not agree with each other.
+        body = fetched.bytes;
+        source = type;
+        servedCid = type === 'cid' ? value : null;
+        served = true;
+        break;
+      }
+      // **The one MUST NOT, and the one whose absence is exploitable.** Bad bytes mean somebody
+      // is lying, not that a host is down. A resolver that falls back on an integrity failure
+      // hands an attacker a downgrade: corrupt the source the publisher prefers, and the resolver
+      // walks itself to whichever source the attacker can better influence.
+      if (fetched.error === 'CONTENT_INTEGRITY') return refusal('CONTENT_INTEGRITY');
+      failure = fetched.error;
+      fallbacks.push(type);
+    }
+    if (!served) return refusal(failure);
   }
 
   if (options.diagnostics === true) {
@@ -435,9 +482,13 @@ export function handleRequest(
     // an attacker chose the bytes of.
     headers.set('x-vayuweb-name', key);
     headers.set('x-vayuweb-seq', String(outcome.diagnostics.seq ?? ''));
-    headers.set('x-vayuweb-source', outcome.diagnostics.source ?? '');
+    headers.set('x-vayuweb-cid', servedCid ?? '');
+    headers.set('x-vayuweb-source', source ?? '');
     headers.set('x-vayuweb-resolved-from', outcome.diagnostics.resolvedFrom ?? '');
-    headers.set('x-vayuweb-stale', outcome.diagnostics.stale ? '1' : '0');
+    // Stale when a source was abandoned, which is the MUST the specification attaches to falling
+    // back: the answer is not the one the publisher would rather have served.
+    headers.set('x-vayuweb-stale', outcome.diagnostics.stale || fallbacks.length > 0 ? '1' : '0');
+    headers.set('x-vayuweb-fallbacks', fallbacks.join(','));
   }
 
   return { status: 200, headers, body };

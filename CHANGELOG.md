@@ -10,6 +10,79 @@ it.
 
 ## [Unreleased]
 
+### Fixed — one throw anywhere took the whole resolver down
+
+`serveConnection` called its handler with nothing around it, and no module in the registry installs
+an `uncaughtException` handler. So a throw from any injected port — a resolver bug, a corrupt log,
+a store that cannot read its own file — did not answer 500. It terminated the process, and with it
+the browsing proxy **and** the control API, which are separate listeners inside one process.
+Measured against a proxy whose `lookup` throws: `UNCAUGHT EXCEPTION reached the process`.
+
+The surface an operator uses to find out why a resolver is unhappy died of the fault it exists to
+report. A refusal is a response; a crash is a denial of service that anyone who can provoke one bug
+gets for free. RESOLUTION.md's catalogue already had the answer — entry 1500, INTERNAL, 500 — an
+entry with no producer anywhere in the codebase.
+
+The guard is in three places and each earns its own test:
+
+- **`serveConnection` catches, and that is the structural one.** The defect was that nothing
+  guaranteed the property, so a third listener added later would have reintroduced it by writing
+  the same natural code. It answers a bare 500 and never binds the error at all — an exception
+  message is the likeliest place in this program for a filesystem path, a token or a record's bytes
+  to be sitting.
+- **The proxy catches its own**, so its 500 carries the full security-header set. A 500 that is the
+  one response on that surface without a Content-Security-Policy is a response an attacker would
+  rather have than the page.
+- **The control API catches its own**, so its 500 is parseable JSON. The first version of that test
+  could not tell this from the backstop — removing the catch left every assertion passing, because
+  a bare 500 satisfied all of them. The test now asserts the body shape the backstop cannot produce.
+
+### Fixed — a record carrying both `ipns` and `cid` returned 502
+
+The arrangement HOSTING.md tells publishers to use — a living pointer beside the snapshot "the
+owner is willing to have served if the pointer cannot be resolved" — failed. Reproduced: the content
+port was asked for `ipns`, refused, and the `cid` supplied for exactly that case was never asked for
+at all.
+
+RESOLUTION.md states three obligations in one paragraph and none of them existed: "If the chosen
+entry fails, the resolver **SHOULD** fall back to the next, MUST record the fallback in the control
+API's per-request diagnostics, and MUST mark the answer stale. It MUST NOT fall back across a
+`CONTENT_INTEGRITY` failure." `selectSource` returned one entry and stopped, and
+`Diagnostics.fallbacks` was declared and only ever `[]`.
+
+What makes it the sharpest instance of this project's recurring defect: `SOURCE_ORDER`'s own
+docstring reasons at length about why `ipns` must be preferred, and calls `cid` "the fallback for
+when the pointer cannot be resolved" — describing a mechanism the module did not contain. A
+publisher following HOSTING and a resolver following RESOLUTION both conformed, and every reader
+got a 502.
+
+`sourceCandidates` now returns the fetchable sources in preference order and the proxy walks them,
+recording each abandoned source and marking the answer stale. The `MUST NOT` is the one whose
+absence was exploitable: falling back on bad bytes is a downgrade an attacker drives by corrupting
+the source the publisher prefers, so an integrity failure refuses instead of trying elsewhere. All
+four obligations are mutation-tested separately.
+
+Stated rather than silently omitted: an `alias` entry is not in the fallback chain. Falling back to
+an alias is not a second fetch but a second resolution, with its own hop budget and diagnostics, and
+step 9 already follows an alias when one is selected.
+
+### Fixed — `X-VayuWeb-CID` was enumerated in two places and emitted in none
+
+It is named in RESOLUTION.md's normative list of diagnostic headers and declared in
+`DIAGNOSTIC_HEADERS`, and no line of code set it. The only test over that list asserted the headers
+are **absent** by default — which is true of a header that does not exist, so the list could have
+named anything and stayed green. A list checked only for absence is a list nothing checks.
+
+The test now reads the enumeration out of RESOLUTION.md and requires each header to appear on a
+diagnostic response, in both directions — the same repair the roadmap describes for the
+Permissions-Policy list, for the same reason. `X-VayuWeb-CID` carries the identifier actually
+served, which after a fallback is not the record's first entry.
+
+`X-VayuWeb-Fallbacks` is added to RESOLUTION.md's enumeration in the same pass. That list is
+normative, so a seventh header not named there would have been non-conformant — the paragraph
+requiring a fallback to be recorded already contemplated disclosing it "through the `X-VayuWeb-*`
+headers", and the omission made the required disclosure unimplementable.
+
 ### Added — the control-API client the crate has been advertising
 
 `client/Cargo.toml` has described this crate as "identity handling and the control-API client"

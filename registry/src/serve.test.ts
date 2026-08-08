@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { connect } from 'node:net';
 import { randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, statSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -574,4 +574,126 @@ test('AUDIT: a HEAD response carries the length and none of the body', async () 
       assert.equal(bodyOf(asGet).length, bytes.length);
     },
   );
+});
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT: one throw anywhere took the whole resolver down                      */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: a handler that throws answers 500 and leaves the listener running', async () => {
+  // **Measured before this fix: `UNCAUGHT EXCEPTION reached the process`.**
+  //
+  // `serveConnection` called `respond(parsed)` with nothing around it, and no module in the
+  // registry installs an `uncaughtException` handler. So a throw from any injected port — a
+  // resolver bug, a corrupt log, a store that cannot read its own file — did not answer 500. It
+  // terminated the process, and with it the browsing proxy AND the control API, which are
+  // separate listeners in one process. The surface that exists to diagnose a failing resolver
+  // died with the resolver.
+  //
+  // A refusal is a response. A crash is a denial of service that anyone who can provoke one bug
+  // gets for free, and the catalogue already had the answer: RESOLUTION.md entry 1500, INTERNAL,
+  // 500 — an entry with no producer anywhere in the codebase until now.
+  const listener = await serveProxy({
+    ports: {
+      lookup: () => {
+        throw new Error('a port threw, carrying /home/someone/.vayuweb/secret-token-abc');
+      },
+      hasVerifiedHead: () => true,
+    },
+    port: 0,
+    now: () => SERVE_NOW,
+  });
+  try {
+    const answer = await speak(listener.address, 'GET / HTTP/1.1\r\nHost: atlas.vayu\r\n\r\n');
+    assert.match(answer, /^HTTP\/1\.1 500 /);
+
+    // The error's own text never reaches the wire. An exception message is the likeliest place
+    // for a path, a token or a record's bytes to be sitting, and LOCAL-SURFACE.md 2.4 forbids a
+    // refusal that confirms VayuWeb is running at all.
+    assert.doesNotMatch(answer, /secret-token-abc/);
+    assert.doesNotMatch(answer, /home\/someone/);
+    assert.doesNotMatch(answer, /a port threw/);
+    // The body carries nothing at all, which is the general form of the three assertions above:
+    // there is no channel for the exception's text rather than a filter over it. (`/Error/` was
+    // the first version of this assertion and it was wrong — it matches the standard reason
+    // phrase "Internal Server Error", so it failed on a correct response.)
+    const body = answer.slice(answer.indexOf('\r\n\r\n') + 4);
+    assert.equal(body, '', `a 500 body must be empty, got ${JSON.stringify(body)}`);
+    assert.match(answer, /content-length: 0/i);
+    // And it is still a proper refusal, not a bare socket close: the security headers are on it.
+    assert.match(answer, /content-security-policy: /i);
+
+    // The half that matters most. A 500 for one request is a bug; a listener that stops
+    // answering is the outage.
+    const second = await speak(listener.address, 'GET / HTTP/1.1\r\nHost: atlas.vayu\r\n\r\n');
+    assert.match(second, /^HTTP\/1\.1 500 /, 'the listener must survive the throw');
+  } finally {
+    await listener.close();
+  }
+});
+
+test('AUDIT: a control port that throws does not take the control API with it', async () => {
+  // The same defect on the other surface, and the more damaging one: the control API is where an
+  // operator goes to find out why the resolver is unhappy. A diagnostic surface that dies of the
+  // fault it exists to report is worse than none, because its silence reads as "nothing to say".
+  const directory = mkdtempSync(join(tmpdir(), 'vayuweb-control-'));
+  const path = join(directory, 'control.sock');
+  const token = randomBytes(32).toString('base64url');
+  const listener = await serveControl({
+    ports: {
+      ...controlPorts,
+      status: () => {
+        throw new Error('the log is unreadable at /var/lib/vayuweb/log');
+      },
+    },
+    path,
+    token,
+  });
+  try {
+    const answer = await speak(listener.address, authorised('/v1/status', token));
+    assert.match(answer, /^HTTP\/1\.1 500 /);
+    assert.doesNotMatch(answer, /var\/lib\/vayuweb/, 'no path from an exception message');
+    assert.doesNotMatch(answer, /unreadable/);
+
+    // **The answer is the CONTROL API's, not the backstop's, and the first version of this test
+    // could not tell the two apart.** Removing this surface's own catch left every assertion above
+    // passing, because `serveConnection`'s backstop answers a bare 500 that satisfies all of them.
+    //
+    // What the surface's own refusal adds is a body an operator can parse. This is a diagnostic
+    // API: the person reading this response is the one whose resolver is failing, and an empty
+    // body tells them only that something went wrong somewhere. So the assertion is on the shape
+    // the backstop cannot produce.
+    const body = answer.slice(answer.indexOf('\r\n\r\n') + 4);
+    assert.notEqual(body, '', 'a bare 500 is the backstop answering, not this surface');
+    const parsed: unknown = JSON.parse(body);
+    assert.deepEqual(parsed, { error: 'internal' });
+    // And the reason is a constant. An authenticated caller is still not entitled to a stack
+    // trace: this response ends up in support tickets and screenshots.
+    assert.equal(JSON.stringify(parsed).includes('vayuweb'), false);
+
+    // Still serving, and the route that does not throw still answers.
+    const health = await speak(listener.address, authorised('/v1/health', token));
+    assert.match(health, /^HTTP\/1\.1 200 /, 'the control API must survive one bad route');
+  } finally {
+    await listener.close();
+  }
+});
+
+test('AUDIT: the backstop, not the callers, is what makes a throw unable to reach the process', () => {
+  // The two tests above exercise the two callers. Both would still pass if `serveConnection` had
+  // no catch of its own — and then a third listener added later, written the same natural way,
+  // would reintroduce the outage. The defect was structural: nothing guaranteed the property. So
+  // the property is asserted of the MODULE, against a responder that is neither of the two.
+  //
+  // Read the source rather than a third listener, because binding one here would be asserting
+  // about a fixture rather than about the code that ships.
+  const source = readFileSync(new URL('./serve.ts', import.meta.url), 'utf8');
+  const body = source.slice(source.indexOf('function serveConnection'));
+  const guarded = /try\s*\{\s*answer = respond\(parsed\);\s*\}\s*catch/.test(body);
+  assert.ok(guarded, 'serveConnection must not call respond() outside a try');
+  // And the backstop must not be able to leak the exception either: no reference to the caught
+  // value at all, which is stronger than checking what it formats.
+  const backstop = body.slice(body.indexOf('answer = respond(parsed)'));
+  const clause = backstop.slice(0, backstop.indexOf('writeHttp(socket, 500'));
+  assert.doesNotMatch(clause, /catch\s*\(/, 'the backstop must not bind the error at all');
 });

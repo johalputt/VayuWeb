@@ -37,9 +37,9 @@ import {
   NegativeCache,
   PROXY_LIMITS,
   handleRequest,
+  refusal,
   type ProxyOptions,
   type ProxyRequest,
-  type ProxyResponse,
 } from './proxy.ts';
 import {
   TOKEN_BYTES,
@@ -278,7 +278,30 @@ function serveConnection(
         writeHttp(socket, statusFor(code), new Map(), asciiBody(code));
         return;
       }
-      const answer = respond(parsed);
+      // **Nothing used to stand between a handler's throw and the process.**
+      //
+      // There is no `uncaughtException` handler anywhere in this package, so a throw from any
+      // injected port — a resolver bug, a corrupt log, a store that cannot read its own file —
+      // did not answer 500. It terminated the process, taking the browsing proxy AND the control
+      // API with it, because they are separate listeners inside one process. The surface an
+      // operator uses to find out why a resolver is unhappy died of the fault it exists to report.
+      //
+      // The catch sits HERE rather than in each of the two callers, because the defect was
+      // structural: nothing guaranteed the property, so a third listener added later would have
+      // reintroduced it by writing the same natural code. Both callers also refuse in their own
+      // vocabulary; this is the backstop that makes "no throw reaches the process" true of the
+      // module rather than of its current call sites.
+      let answer: { status: number; headers: ReadonlyMap<string, string>; body: Uint8Array };
+      try {
+        answer = respond(parsed);
+      } catch {
+        // The error itself is DISCARDED, not logged to the wire. An exception message is the
+        // likeliest place in this program for a filesystem path, a token or a record's bytes to
+        // be sitting, and LOCAL-SURFACE.md 2.4 forbids a refusal that confirms VayuWeb is even
+        // running. RESOLUTION.md's catalogue entry 1500 is a bare 500 for exactly this reason.
+        writeHttp(socket, 500, new Map(), new Uint8Array(0), parsed.method === 'HEAD');
+        return;
+      }
       // RFC 7230 3.3.3: a response to HEAD never carries an entity, whatever its status. Applied
       // here, once, for both surfaces — the handlers decide what the answer IS and this decides
       // how much of it goes on the wire, which is the split the rest of this file keeps.
@@ -401,14 +424,19 @@ export function serveProxy(options: ProxyServerOptions): Promise<Listener> {
           target: head.target,
           headers: head.headers,
         };
-        const response: ProxyResponse = handleRequest(
-          request,
-          options.ports,
-          cache,
-          clock(),
-          options.options ?? {},
-        );
-        return response;
+        // Caught here as well as in `serveConnection`, and the difference is the answer's SHAPE.
+        // The backstop below can only emit a bare 500 — it serves two surfaces and knows neither's
+        // vocabulary. This one knows it is the browsing proxy, so its 500 carries the full
+        // security-header set that every other proxy response carries. A 500 that is the one
+        // response on this surface without a Content-Security-Policy is a response an attacker
+        // would rather have than the page.
+        try {
+          return handleRequest(request, options.ports, cache, clock(), options.options ?? {});
+        } catch {
+          // RESOLUTION.md catalogue entry 1500. The error is discarded rather than reported: an
+          // exception message is where a path, a token or a record's bytes would be.
+          return refusal('INTERNAL');
+        }
       });
     }),
     options.maxConnections ?? SERVE_LIMITS.connections,
@@ -483,11 +511,20 @@ export function serveControl(options: ControlServerOptions): Promise<Listener> {
           path: head.target,
           headers: head.headers,
         };
-        const response: ControlResponse = handleControlRequest(
-          request,
-          options.ports,
-          options.token,
-        );
+        // Caught here as well as in `serveConnection`, for the same reason the proxy catches its
+        // own: the backstop can only emit a bare 500. This surface answers JSON, and an operator
+        // whose resolver has a failing port is exactly the person parsing this response.
+        //
+        // The reason is a CONSTANT, not the exception. `handleControlRequest` is reached only past
+        // the token check, so the caller is authenticated — but "authenticated" is not "entitled
+        // to a stack trace": an internal error's message is where a log path or a record's bytes
+        // would be, and this response ends up in support tickets and screenshots.
+        let response: ControlResponse;
+        try {
+          response = handleControlRequest(request, options.ports, options.token);
+        } catch {
+          response = { status: 500, headers: new Map(), body: { error: 'internal' } };
+        }
         return {
           status: response.status,
           headers: response.headers,

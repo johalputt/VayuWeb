@@ -226,11 +226,43 @@ const fail = (error: ResolveErrorName, detail: string, diagnostics: Diagnostics)
  * unchanged, which is not the same as being usable.
  */
 export function selectSource(record: RegistryRecord): RecordEntry | null {
+  return sourceCandidates(record)[0] ?? null;
+}
+
+/**
+ * Every content source a record offers, in preference order.
+ *
+ * **`selectSource` returning one entry was the whole of the defect.** RESOLUTION.md says "if the
+ * chosen entry fails, the resolver SHOULD fall back to the next" — and there was no next, because
+ * nothing above this line could see one. A record carrying the arrangement HOSTING.md recommends
+ * to publishers, an `ipns` pointer beside a `cid` snapshot, answered 502: the pointer was refused
+ * and the snapshot supplied for exactly that case was never asked for.
+ *
+ * `alias` is deliberately NOT in this list even though it is in `SOURCE_ORDER`. Falling back to an
+ * alias is not a second fetch, it is a second RESOLUTION — a new name, a new record, its own hop
+ * budget and its own diagnostics — and step 9 already follows an alias when one is selected. What
+ * this function returns is the set of candidates a content layer can be handed directly, which is
+ * what a fallback loop over `fetch` needs and all it can honestly use. A resolver that wanted to
+ * fall back from a dead pointer to an alias would re-enter `resolveName`, and that is a larger
+ * change than the one the failing case required; it is stated here rather than left as a silent
+ * omission from a list a reader would assume is complete.
+ */
+export function sourceCandidates(record: RegistryRecord): readonly RecordEntry[] {
+  const fetchable: readonly SourceType[] = ['ipns', 'cid'];
+  const candidates: RecordEntry[] = [];
   for (const type of SOURCE_ORDER) {
     const match = record.entries.find((e) => e.known && e.type === type);
-    if (match !== undefined) return match;
+    if (match === undefined) continue;
+    if (!fetchable.includes(type)) {
+      // An alias is a source, and it is the LAST one; reaching it means the fetchable sources are
+      // exhausted. Returning it here would hand the content layer a name to fetch, which is not
+      // something a content layer can do.
+      if (candidates.length === 0) return [match];
+      continue;
+    }
+    candidates.push(match);
   }
-  return null;
+  return candidates;
 }
 
 /**

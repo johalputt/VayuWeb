@@ -421,9 +421,16 @@ staleness in the control API's per-request diagnostics, and MUST send
 is one of them, and is off by default for the reason given below.
 
 Diagnostic headers — `X-VayuWeb-Name`, `X-VayuWeb-Seq`, `X-VayuWeb-CID`, `X-VayuWeb-Source`
-(`cid`, `ipns`, `peer`), `X-VayuWeb-Resolved-From` (`cache`, `registry`) and
-`X-VayuWeb-Stale` — MUST be **off by default** and enabled only through the control
-API.
+(`cid`, `ipns`, `peer`), `X-VayuWeb-Resolved-From` (`cache`, `registry`),
+`X-VayuWeb-Stale` and `X-VayuWeb-Fallbacks` — MUST be **off by default** and enabled
+only through the control API.
+
+`X-VayuWeb-Fallbacks` was missing from this list while the paragraph above already
+required a fallback to be recorded and contemplated disclosing it "through the
+`X-VayuWeb-*` headers". The enumeration is normative and an implementation emitting a
+seventh header not named here would be non-conformant, so the omission made the
+required disclosure unimplementable. It carries the sources tried and abandoned, in
+order, comma-separated, and is empty when none was.
 
 Emitted unconditionally they brand every response as VayuWeb, which is the most
 consequential fingerprint the resolver produces: it lets any page that can

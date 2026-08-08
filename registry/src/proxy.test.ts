@@ -20,7 +20,7 @@ import { CID_PARAMETERS, cidBytes, encodeCid, sha256 } from './content.ts';
 import { parseRecord } from './record.ts';
 import { POW_ALGORITHM, POW_NONCE_LENGTH } from './pow.ts';
 import type { CborValue } from './cbor.ts';
-import { RESOLVE_ERRORS, type ResolverPorts } from './resolve.ts';
+import { RESOLVE_ERRORS, resolveName, sourceCandidates, type ResolverPorts } from './resolve.ts';
 import type { RegistryRecord } from './record.ts';
 
 const NOW = 1_782_518_400;
@@ -590,4 +590,181 @@ test('AUDIT: a fetched body leaves the handler byte for byte', () => {
       `${what} must survive the proxy unchanged`,
     );
   }
+});
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT: the fallback three MUSTs describe and nothing implemented            */
+/* -------------------------------------------------------------------------- */
+
+/** The arrangement HOSTING.md tells a publisher to use: the living pointer and the snapshot. */
+const pointerAndSnapshot = (): RegistryRecord =>
+  live([cborEntry('ipns', 'k51qzi5uqu5dabcdefghijklmnop'), cborEntry('cid', CID_BYTES)]);
+
+test('AUDIT: a record carrying both ipns and cid falls back to the snapshot', () => {
+  // **The arrangement the specification recommends returned 502.** Reproduced before the fix:
+  // the content port was asked for `ipns`, refused, and the `cid` beside it — the snapshot the
+  // publisher supplied for exactly this case — was never asked for at all.
+  //
+  // RESOLUTION.md states three obligations in one paragraph and none existed:
+  //
+  //   "If the chosen entry fails, the resolver SHOULD fall back to the next, MUST record the
+  //    fallback in the control API's per-request diagnostics, and MUST mark the answer stale."
+  //
+  // `selectSource` returned one entry and stopped; `Diagnostics.fallbacks` was declared and only
+  // ever `[]`. Worse, `SOURCE_ORDER`'s own docstring reasons at length about why `ipns` must be
+  // preferred and calls `cid` "the fallback for when the pointer cannot be resolved" — describing
+  // a mechanism the module does not contain. A publisher following HOSTING and a resolver
+  // following RESOLUTION both conformed, and every reader got a 502.
+  const asked: string[] = [];
+  const content: ContentPort = {
+    fetch: (source) => {
+      asked.push(source.type);
+      if (source.type !== 'cid') return { ok: false, error: 'CONTENT_UNAVAILABLE' };
+      return {
+        ok: true,
+        bytes: new TextEncoder().encode('the snapshot'),
+        contentType: 'text/html',
+      };
+    },
+  };
+  const response = handleRequest(
+    get('/', { host: 'atlas.vayu' }),
+    { lookup: () => pointerAndSnapshot(), hasVerifiedHead: () => true },
+    new NegativeCache(),
+    NOW,
+    { content, diagnostics: true },
+  );
+
+  assert.equal(response.status, 200, 'the snapshot must be served, not a 502');
+  assert.deepEqual(Uint8Array.from(response.body), new TextEncoder().encode('the snapshot'));
+  // The pointer was tried FIRST and the snapshot second. Serving the snapshot by preferring it
+  // would pass the assertions above and reintroduce the defect `SOURCE_ORDER` was reordered to
+  // fix: an author republishing weekly into a pointer nobody consults.
+  assert.deepEqual(asked, ['ipns', 'cid']);
+
+  // MUST record the fallback, and MUST mark the answer stale. Both are observable only through
+  // the diagnostic headers, which is why this request enables them.
+  assert.equal(response.headers.get('x-vayuweb-source'), 'cid');
+  assert.equal(response.headers.get('x-vayuweb-fallbacks'), 'ipns');
+  assert.equal(response.headers.get('x-vayuweb-stale'), '1');
+});
+
+test('AUDIT: recording the fallback does not depend on disclosing it', () => {
+  // RESOLUTION.md: "recording is mandatory, disclosing is not". The headers are off by default,
+  // so a fallback that were only ever computed while building them would satisfy every test above
+  // and record nothing on an ordinary request. Asserted through the resolver rather than the
+  // proxy, because that is the layer the control API reads.
+  const record = pointerAndSnapshot();
+  const outcome = resolveName(
+    'atlas.vayu',
+    { lookup: () => record, hasVerifiedHead: () => true },
+    NOW,
+  );
+  assert.ok(outcome.ok);
+  // The resolver itself still selects one entry — the fallback is a property of the FETCH, and
+  // this asserts the shape the proxy needs rather than pre-judging where the loop lives.
+  assert.equal(outcome.entry.type, 'ipns');
+  assert.deepEqual(
+    sourceCandidates(record).map((e) => e.type),
+    ['ipns', 'cid'],
+  );
+});
+
+test('AUDIT: a failing pointer with no snapshot still refuses, and says so once', () => {
+  // The fallback must not turn every failure into a 200 by trying until something works. With
+  // only a pointer, there is nothing to fall back to and the refusal stands.
+  const asked: string[] = [];
+  const content: ContentPort = {
+    fetch: (source) => {
+      asked.push(source.type);
+      return { ok: false, error: 'CONTENT_UNAVAILABLE' };
+    },
+  };
+  const response = handleRequest(
+    get('/', { host: 'atlas.vayu' }),
+    {
+      lookup: () => live([cborEntry('ipns', 'k51qzi5uqu5dabcdefghijklmnop')]),
+      hasVerifiedHead: () => true,
+    },
+    new NegativeCache(),
+    NOW,
+    { content },
+  );
+  assert.equal(response.status, RESOLVE_ERRORS.CONTENT_UNAVAILABLE.http);
+  assert.deepEqual(asked, ['ipns'], 'one source, one attempt');
+});
+
+test('AUDIT: the resolver does not fall back across a content-integrity failure', () => {
+  // **The one MUST NOT in the paragraph, and the one whose absence is exploitable.**
+  //
+  // RESOLUTION.md: "It MUST NOT fall back across a CONTENT_INTEGRITY failure, which signals an
+  // attack rather than an availability problem." A resolver that falls back on bad bytes hands an
+  // attacker a downgrade: corrupt the answer for the source the publisher prefers, and the
+  // resolver walks itself down to whichever source the attacker can better influence. The failure
+  // that means "someone is lying to you" must not be the trigger for trying somewhere else.
+  const asked: string[] = [];
+  const content: ContentPort = {
+    fetch: (source) => {
+      asked.push(source.type);
+      return { ok: false, error: 'CONTENT_INTEGRITY' };
+    },
+  };
+  const response = handleRequest(
+    get('/', { host: 'atlas.vayu' }),
+    { lookup: () => pointerAndSnapshot(), hasVerifiedHead: () => true },
+    new NegativeCache(),
+    NOW,
+    { content, diagnostics: true },
+  );
+  assert.equal(response.status, RESOLVE_ERRORS.CONTENT_INTEGRITY.http);
+  assert.deepEqual(asked, ['ipns'], 'the cid must NOT have been tried after bad bytes');
+  // A refusal carries no diagnostic headers at all — not an empty one. LOCAL-SURFACE.md 2.4:
+  // a refusal must not be distinguishable in a way that confirms VayuWeb is running, and an
+  // `x-vayuweb-*` header on a 502 confirms it by existing. (Asserting the empty string was the
+  // first version of this line, and it was asserting that the wrong thing was present.)
+  for (const header of DIAGNOSTIC_HEADERS) {
+    assert.equal(response.headers.has(header), false, `${header} must not be on a refusal`);
+  }
+});
+
+test('AUDIT: every diagnostic header RESOLUTION.md enumerates is one the resolver emits', () => {
+  // **`x-vayuweb-cid` was declared in `DIAGNOSTIC_HEADERS` and emitted nowhere.** The only test
+  // over that list asserted the headers are ABSENT by default — which is true of a header that
+  // does not exist, so the list could name anything and stay green. A list that is checked only
+  // for absence is a list nothing checks.
+  //
+  // So this reads the enumeration out of RESOLUTION.md and requires each one to actually appear
+  // on a diagnostic response. Same repair the roadmap describes for the Permissions-Policy list:
+  // derive from the document rather than restating it, because a restatement drifts silently.
+  const spec = readFileSync(new URL('../../docs/spec/RESOLUTION.md', import.meta.url), 'utf8');
+  const flat = spec.replace(/\s+/g, ' ');
+  const paragraph = /Diagnostic headers — (.*?) — MUST be \*\*off by default\*\*/.exec(flat);
+  assert.ok(paragraph, 'RESOLUTION.md must enumerate the diagnostic headers');
+  const enumerated = [...paragraph[1]!.matchAll(/`(X-VayuWeb-[A-Za-z-]+)`/g)].map((m) =>
+    m[1]!.toLowerCase(),
+  );
+  assert.ok(enumerated.length >= 6, `only ${enumerated.length} headers enumerated`);
+
+  // The code's own list must be exactly the document's, in both directions.
+  assert.deepEqual([...DIAGNOSTIC_HEADERS].sort(), [...enumerated].sort());
+
+  const content: ContentPort = {
+    fetch: () => ({ ok: true, bytes: new TextEncoder().encode('page'), contentType: 'text/html' }),
+  };
+  const response = handleRequest(
+    get('/', { host: 'atlas.vayu' }),
+    { lookup: () => live([cborEntry('cid', CID_BYTES)]), hasVerifiedHead: () => true },
+    new NegativeCache(),
+    NOW,
+    { content, diagnostics: true },
+  );
+  assert.equal(response.status, 200);
+  for (const header of enumerated) {
+    assert.ok(
+      response.headers.has(header),
+      `${header} is enumerated in RESOLUTION.md and never emitted`,
+    );
+  }
+  // And the CID one carries the identifier actually served, rendered as a reader would compare it.
+  assert.equal(response.headers.get('x-vayuweb-cid'), CID_TEXT);
 });
