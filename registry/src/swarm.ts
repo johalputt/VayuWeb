@@ -48,6 +48,7 @@ import {
   type ReceiveOutcome,
   type ReplicationSink,
 } from './replicate.ts';
+import { EQUIVOCATION_LIMITS, type EquivocationReader } from './equivocation.ts';
 
 /** The discovery topic, per REPLICATION.md 2.2. */
 export const TOPIC_PREIMAGE = 'VayuWeb-Replication-v1';
@@ -253,7 +254,14 @@ export interface PeerOutcome {
   rejected: number;
   deferred: number;
   duplicates: number;
+  /** Equivocation reports this peer sent that verified. Verified is not the same as new. */
   equivocations: number;
+  /** Of those, how many were facts this peer had not already written down. */
+  recorded: number;
+  /** Reports handed to this peer, which is REPLICATION.md 6.3's SHOULD made to happen. */
+  forwarded: number;
+  /** Reports not handed over, because one connection's forwarding budget ran out. Never silent. */
+  withheld: number;
 }
 
 /**
@@ -288,6 +296,25 @@ const REAL_TIMERS: DriverTimers = {
 export const DRIVER_TICK_MS = (LIMITS.wantDeadlineSeconds * 1000) / 4;
 
 /**
+ * What a driver is given besides the connection itself.
+ *
+ * A bag rather than two more positional parameters, and the reason is the second one: `timers`
+ * and `ledger` are both optional and both objects, so `drivePeer(stream, sink, now, x)` would have
+ * been ambiguous to a reader and silently wrong to a caller who passed the wrong one.
+ */
+export interface DriverOptions {
+  readonly timers?: DriverTimers;
+  /**
+   * Where verified equivocation reports are written, and where forwarded ones are read from.
+   *
+   * Absent means a connection that verifies reports, counts them and forgets them — which is what
+   * every connection did before the ledger existed, and is now a choice a caller makes rather than
+   * the only behaviour there is.
+   */
+  readonly ledger?: EquivocationReader;
+}
+
+/**
  * Drive one peer connection.
  *
  * Returns the running totals, which the caller may watch. Exported separately from the swarm so
@@ -307,8 +334,10 @@ export function drivePeer(
   stream: PeerStream,
   sink: ReplicationSink,
   now: () => number,
-  timers: DriverTimers = REAL_TIMERS,
+  options: DriverOptions = {},
 ): PeerOutcome {
+  const timers = options.timers ?? REAL_TIMERS;
+  const ledger = options.ledger;
   const session = new ReplicationSession(sink);
   const deframer = new Deframer();
   const outcome: PeerOutcome = {
@@ -317,6 +346,9 @@ export function drivePeer(
     deferred: 0,
     duplicates: 0,
     equivocations: 0,
+    recorded: 0,
+    forwarded: 0,
+    withheld: 0,
   };
 
   const send = (message: Message): void => {
@@ -350,13 +382,54 @@ export function drivePeer(
     }
   };
 
+  /**
+   * Hand this peer the evidence we hold, once, as soon as it has introduced itself.
+   *
+   * REPLICATION.md 6.3's SHOULD, and the whole of it that a single connection can perform. What
+   * this driver knows about is one peer, so "forward" here means an opening offer rather than a
+   * relay: a report that arrives mid-connection is recorded and not echoed back down the only wire
+   * there is, which is also why no reflection loop is possible. Propagation between peers happens
+   * because they share a ledger and connect again — a report reaches a third party on its next
+   * connection, not the instant it lands.
+   *
+   * That is a real limit and it is stated rather than papered over. Making it immediate would mean
+   * a bus every live connection subscribes to, which is a fan-out an attacker aims by sending one
+   * message; a SHOULD is not worth building an amplifier for.
+   *
+   * The budget matters for the same reason. A peer holding a full ledger would otherwise open
+   * every connection with megabytes of evidence nobody asked for, so it offers at most
+   * {@link EQUIVOCATION_LIMITS.perConnection} and reports what it held back rather than trimming
+   * quietly — a cap nobody can see is a cap nobody audits.
+   */
+  let offered = false;
+  const offerEvidence = (): void => {
+    if (offered || ledger === undefined || !session.ready) return;
+    offered = true;
+    const held = ledger.entries();
+    const budget = Math.min(held.length, EQUIVOCATION_LIMITS.perConnection);
+    for (let i = 0; i < budget; i += 1) {
+      const evidence = held[i]!.evidence;
+      send({ t: 'EQUIVOCATION', a: evidence.a, b: evidence.b });
+    }
+    outcome.forwarded += budget;
+    outcome.withheld += held.length - budget;
+  };
+
   const record = (result: ReceiveOutcome): void => {
     outcome.applied += result.applied;
     outcome.rejected += result.rejected;
     outcome.deferred += result.deferred;
     outcome.duplicates += result.duplicates;
     outcome.equivocations += result.equivocations.length;
+    // Verified by the session; recorded here, because the session has no disk and the ledger has
+    // the budgets. `recorded` and `equivocations` differ by the reports that were already known,
+    // and the difference is the number worth watching: a peer resending the same fact forever
+    // shows up as one and not the other.
+    for (const evidence of result.equivocations) {
+      if (ledger?.record(evidence, 'received') === 'recorded') outcome.recorded += 1;
+    }
     for (const reply of result.replies) send(reply);
+    offerEvidence();
     pump();
   };
 
@@ -432,6 +505,14 @@ export interface SwarmOptions {
   };
   readonly sink: ReplicationSink;
   readonly now: () => number;
+  /**
+   * One ledger shared by every peer this swarm drives, which is what makes forwarding go anywhere.
+   *
+   * A per-connection ledger would record a report and lose it when the socket closed. Sharing it
+   * is how a report from one peer reaches another: the second peer is offered it on its next
+   * connection, out of the same ledger the first peer's report went into.
+   */
+  readonly ledger?: EquivocationReader;
 }
 
 /**
@@ -455,7 +536,12 @@ export async function joinSwarm(options: SwarmOptions): Promise<Swarm> {
     });
     // The remote's authenticated public key is available here and is deliberately not read.
     // REPLICATION.md 2.3: nothing about the channel is evidence about a record.
-    drivePeer(stream, options.sink, options.now);
+    drivePeer(
+      stream,
+      options.sink,
+      options.now,
+      options.ledger === undefined ? {} : { ledger: options.ledger },
+    );
   });
 
   const discovery = options.swarm.join(replicationTopic(), { server: true, client: true });

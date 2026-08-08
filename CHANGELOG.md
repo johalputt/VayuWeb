@@ -10,6 +10,72 @@ it.
 
 ## [Unreleased]
 
+### Added — equivocation is written down and handed on, which REPLICATION.md 6.3 requires
+
+6.3 is one sentence and a MUST: "a peer detecting equivocation MUST record it and SHOULD forward
+the evidence". Neither half happened. `converge.ts` could tell equivocation from an honest race,
+`store.ts` identified the case by name in a comment and refused the record, `replicate.ts` verified
+a report a peer sent — and then the driver incremented a counter that died with the process. No
+shipping path had ever constructed an outbound `EQUIVOCATION` message: the type had an encoder, a
+decoder, a verifier and a conformance vector, and no sender.
+
+The record could not simply go in the log, because the log can only ever hold one half of it. The
+evidence is a pair, and equivocation is found when a record arrives conflicting with one already
+held — so the incumbent is in the log, the newcomer is refused, and its bytes were discarded when
+`append` returned. The detection was unrecoverable the moment the function ended.
+
+`registry/src/equivocation.ts` is where it goes: a durable, verifying, bounded ledger beside the
+log, `vw equivocations` to read it, and an opening offer of what this peer holds to every peer that
+introduces itself. Detection now runs on every rejection rather than only the registration race —
+6.1 defines equivocation without reference to the operation, and a second `UPDATE` at a passed
+`seq` is `BAD_SEQ`, a different code for the same fact.
+
+**Every bound in it exists because evidence is cheap to mint.** 6.2.4 forbids requiring either
+record to be *acceptable* — no proof of work, no expiry — and is right to, since requiring them
+would let an equivocator escape the record by breaking their own proof in both halves. The
+consequence is that two signatures buy a pair every conforming peer will verify, record and hand
+on. So: deduplication is by the *fact's* identity (`ownerKey`, tld, name, `seq`) and not the pair's
+bytes, or varying `notBefore` by a second would mint unlimited distinct reports about one fact.
+Detections and received reports have separate budgets, so a flood cannot displace what this peer
+found itself. A full budget refuses rather than evicting, because eviction would let an attacker
+flush a genuine report by minting cheap ones after it — and the refusal is counted and printed,
+since a cap nobody can see is a cap nobody audits. One connection is offered at most 32 reports,
+because a peer holding a full ledger would otherwise open every connection with megabytes nobody
+asked for, which is an amplifier built out of a SHOULD.
+
+**And a report is verified before it is believed, on both paths.** The conflict path in `store.ts`
+compares owner keys as bytes, which is correct for deciding a name and useless as grounds for a
+report: an owner key is public. Anyone could have copied a held name's key into a record they
+signed themselves and had this peer write down, then hand on, an accusation against its holder —
+6.4's manufactured evidence by the front door. The arriving record's own signature is now checked
+before the store will even scan for the other half, which is also the bound that keeps a rejected
+record from costing a walk of a log that is never truncated.
+
+Proven end to end rather than in a harness: `scripts/acceptance-replication.mjs` now stages an
+equivocation in one OS process, reads it back through the CLI, reconnects, and finds it on the
+other peer's disk marked `received` — with the name it is about still resolving, because 6.4 has no
+penalty and the only way to show a mechanism does not strip names is to look at the name
+afterwards.
+
+Two of the tests exist because a mutation *survived*. The first budget test covered the ledger's
+write path, and a single-pool mutation of the read path — `settled`, the question the store asks
+before it looks at all — passed against it. That is not a smaller version of the same bug: a peer
+minting 256 reports about names nobody has heard of would have switched off this peer's detection
+for every name it holds, and the ledger would have shown nothing wrong.
+
+### Changed — `drivePeer` takes an options bag
+
+`timers` and `ledger` are both optional objects, so a fourth and fifth positional parameter would
+have been ambiguous to a reader and silently wrong to a caller who passed the wrong one. The type
+checker caught all four existing call sites, which is the point of making it a distinct type.
+
+### Fixed — `registry/README.md` described a package with no network
+
+Its state table called peer replication "not started" and checkpoints likewise, after `vw sync`
+shipped and two processes converged over a socket. Understating what exists is a milder fault than
+overstating it and it is the same fault: a status table nobody can trust in one direction is a
+status table nobody reads in either.
+
 ### Added — the replay cost, measured, and a stated stop-and-rethink condition met
 
 `docs/ROADMAP.md` lists in advance what would make this project change its mind. One of them:

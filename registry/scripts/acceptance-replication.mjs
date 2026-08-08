@@ -276,6 +276,90 @@ try {
     listing.code === 0 && listing.out.includes('borealisstations'),
     listing.out.trim().split('\n').slice(0, 3).join(' | '),
   );
+
+  /* ---------------------------------------------------------------------- */
+  /* REPLICATION.md 6.3 — record, and forward                               */
+  /* ---------------------------------------------------------------------- */
+
+  // 6.3: "A peer detecting equivocation MUST record it and SHOULD forward the evidence." Both
+  // halves, across two processes that share nothing but a socket. Bob signs a second, different
+  // registration of a name he already holds — one owner, one name, one seq, two futures, which is
+  // 6.1's definition — and the interesting part is what happens on ALICE's disk afterwards.
+  //
+  // Bob equivocating against his own name is the harmless case by 6.5, and it is the only one a
+  // harness can stage honestly: manufacturing evidence against a third party is precisely what
+  // 6.2.1 makes impossible, so there is no way to produce it here that a peer would accept.
+  dialler.child.kill('SIGTERM');
+  await sleep(300);
+
+  const twin = await cli([
+    'register',
+    '--log',
+    bob.log,
+    '--key',
+    bob.key,
+    '--name',
+    'borealisstations.vayu',
+    '--txt',
+    'v=vayuweb1;a-second-future-for-one-name',
+  ]);
+  check(
+    'a second registration of a held name is refused, as it was before',
+    twin.code === 1,
+    twin.err.trim().split('\n').slice(-1)[0] ?? '',
+  );
+
+  const bobReports = await cli(['equivocations', '--log', bob.log]);
+  check(
+    'and the peer that detected it wrote it down — 6.3 is a MUST',
+    bobReports.code === 0 && bobReports.out.includes('borealisstations.vayu'),
+    bobReports.out.trim().split('\n')[0] ?? '',
+  );
+
+  const aliceBefore = await cli(['equivocations', '--log', alice.log]);
+  check(
+    'while the other peer, which was not connected, knows nothing of it',
+    aliceBefore.out.includes('no equivocation recorded'),
+  );
+
+  // Reconnect. The report is offered when the peer introduces itself, so this is also the reason
+  // the dialler is restarted rather than left running: a process holds the ledger it opened, and
+  // the registration above happened in a different process entirely.
+  dialler = startSync(['--log', bob.log, '--connect', `127.0.0.1:${port}`]);
+  const forwarded = await until(async () => {
+    const seen = await cli(['equivocations', '--log', alice.log]);
+    return seen.out.includes('borealisstations.vayu');
+  });
+  check('the evidence reaches the other peer over the wire — 6.3’s SHOULD', forwarded);
+
+  if (forwarded) {
+    const aliceAfter = await cli(['equivocations', '--log', alice.log]);
+    // `received`, not `detected`: Alice never held the conflicting pair herself. She verified the
+    // two encodings from their own bytes, which is the property 6.2 exists for.
+    check(
+      'recorded as received evidence, verified by the receiver rather than taken on trust',
+      aliceAfter.out.includes('(received)'),
+      aliceAfter.out.trim().split('\n')[1] ?? '',
+    );
+    check(
+      'and the receiving peer states plainly that nothing is penalised by it — 6.4',
+      aliceAfter.out.includes('no exclusion, no blacklist'),
+    );
+    // The name is untouched. 6.4 has no penalty, no exclusion and no loss of a name, and the one
+    // way to prove a mechanism does not strip names is to look at the name afterwards.
+    const stillThere = await cli([
+      'resolve',
+      '--log',
+      alice.log,
+      '--name',
+      'borealisstations.vayu',
+    ]);
+    check(
+      'and the name it is about still resolves, because the protocol does not punish',
+      stillThere.code === 0,
+      stillThere.out.trim().split('\n')[0] ?? '',
+    );
+  }
 } catch (error) {
   failures += 1;
   process.stdout.write(`FAIL  the harness could not complete — ${error.message}\n`);

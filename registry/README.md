@@ -3,9 +3,11 @@
 The signed name registry: record format, verification rules, proof-of-work, the index keyspace
 and the name lifecycle, with a command-line tool that runs all of it against a local log.
 
-**There is no network yet.** Nothing here discovers, dials or replicates, and the log is a local
-file rather than a Hypercore. That is Phase 2. What exists is the part that decides whether a
-record is valid — the part every peer must agree on byte for byte.
+**There is no discovery yet.** `vw sync` dials and replicates over a socket you name, and two
+processes converge over it — `scripts/acceptance-replication.mjs` is that, run — but nothing here
+joins a DHT or finds a peer it was not told about, and the log is a local file rather than a
+Hypercore. The part that decides whether a record is valid, which every peer must agree on byte
+for byte, is what this package is mostly made of.
 
 ## State
 
@@ -22,12 +24,13 @@ record is valid — the part every peer must agree on byte for byte.
 | Name lifecycle: grace, quarantine, revocation (`src/lifecycle.ts`) | Implemented, tested |
 | Local append-only log and index (`src/store.ts`) | Implemented, tested — **not** Hypercore |
 | Convergence and equivocation detection (`src/converge.ts`) | Implemented, tested |
+| Equivocation ledger: record and forward (`src/equivocation.ts`) | Implemented, tested |
 | Resolution algorithm (`src/resolve.ts`) | Implemented, tested — no network; steps 11-12 are ports |
 | Command-line tool (`src/cli.ts`, `bin/`) | Implemented |
 | Conformance vectors ([`../conformance/vectors.json`](../conformance/vectors.json)) | Registry rules only |
 | Hypercore log and Hyperbee index | Not started |
-| Peer replication (Hyperswarm/HyperDHT transport) | Not started |
-| Checkpoints and light clients | Not started |
+| Peer replication (`src/replicate.ts`, `src/swarm.ts`, `vw sync`) | Implemented, tested over TCP; the Hyperswarm binding is injected and unexercised |
+| Checkpoints and light clients | Encoded and verified; nothing publishes or consumes one |
 
 `src/store.ts` is a single-writer, file-backed log with an index rebuilt by replay. It is enough
 to finish and test Phase 1 without pulling in the peer-to-peer stack, and the difference from
@@ -54,6 +57,9 @@ vw register --log ./log --key owner.key --name atlasobservatory.vayu --txt "v=va
 vw resolve  --log ./log --name atlasobservatory.vayu
 vw list     --log ./log
 vw vectors                      # run the conformance suite
+
+vw sync     --log ./log --listen 4747          # or --connect host:port
+vw equivocations --log ./log                   # what this peer knows about, and from whom
 ```
 
 Exit codes: `0` accepted, `1` rejected or error, `2` deferred for clock skew, `3` name not live.
@@ -75,6 +81,21 @@ vw difficulty --log ./log --name atlas.vayu
 
 `--bits` may raise the difficulty — over-payment is valid — but a value below the requirement is
 refused up front rather than after the work, since the verifier would reject it anyway.
+
+### Equivocation is recorded, and punished by nothing
+
+One owner key signing two different records at the same `seq` for one name is equivocation, and
+REPLICATION.md 6.3 makes recording it a MUST. `vw equivocations` is the reading end: reports this
+peer detected in its own log, reports peers sent it, and how many were turned away and why.
+
+The evidence is the two record encodings and nothing else, so anyone can check it without trusting
+whoever passed it on — which is also why **both signatures are verified before anything is written
+down**. An owner key is public, so a pair checked for everything except who signed it can be minted
+by anyone against anyone.
+
+Nothing acts on the list. There is no penalty, no exclusion and no loss of a name: a mechanism able
+to strip a name on evidence is a mechanism able to strip a name on manufactured evidence, and
+REPLICATION.md 6.4 refuses to build one.
 
 ### Keys are files
 

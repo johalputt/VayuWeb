@@ -39,7 +39,7 @@
 
 import { decode, encode, type CborMap, type CborValue } from './cbor.ts';
 import { isEquivocation, type Candidate } from './converge.ts';
-import { parseRecordBytes } from './record.ts';
+import { parseRecordBytes, type RegistryRecord } from './record.ts';
 import { recordHashFromBytes, signingInput } from './domain.ts';
 import { verifyStrict } from './signature.ts';
 import type { Verdict } from './verify.ts';
@@ -338,6 +338,12 @@ export function decodeMessage(bytes: Uint8Array): Message {
 /**
  * Is this record attributable to the key it names as owner, from its own bytes alone?
  *
+ * Exported because two callers need it and only one of them is a wire report. The local detection
+ * in `store.ts` runs it on an arriving record BEFORE it will scan its log for the other half, and
+ * that ordering is the bound: `NAME_TAKEN` and `BAD_SEQ` are both decided before any proof of work
+ * is verified, so a rejected record costs a hostile peer an encode — and one signature check is a
+ * great deal cheaper than a scan of a log that REGISTRY.md never truncates.
+ *
  * The one signature check equivocation evidence needs. REPLICATION.md 6.2 puts it first in the
  * list of what a recipient checks, and everything downstream depends on it: equivocation is a
  * claim about *who signed*, so evidence carrying no signature by the accused is not weak
@@ -355,8 +361,7 @@ export function decodeMessage(bytes: Uint8Array): Message {
  *   The named owner's own signature is `coSig`, which the schema requires on TRANSFER and
  *   forbids everywhere else, and which verifies under `ownerKey`.
  */
-function attributable(candidate: Candidate): boolean {
-  const record = candidate.record;
+export function signedByNamedOwner(record: RegistryRecord): boolean {
   const signature = record.op === 'TRANSFER' ? record.coSig : record.sig;
   if (signature === null) return false;
   return verifyStrict(record.ownerKey, signingInput(record.map), signature);
@@ -413,7 +418,7 @@ export function verifyEquivocation(evidence: EquivocationMessage): boolean {
     return false;
   }
   if (!isEquivocation(left, right)) return false;
-  return attributable(left) && attributable(right);
+  return signedByNamedOwner(left.record) && signedByNamedOwner(right.record);
 }
 
 /* -------------------------------------------------------------------------- */

@@ -60,7 +60,8 @@ import {
 import { verifyPow, rateWindow, requiredBits, EPOCH_SECONDS } from './pow.ts';
 import { lifecycleOf, isFullyReleased } from './lifecycle.ts';
 import { treeOf } from './merkle.ts';
-import type { ReplicationSink } from './replicate.ts';
+import { signedByNamedOwner, type ReplicationSink } from './replicate.ts';
+import type { EquivocationRecorder } from './equivocation.ts';
 
 const LENGTH_PREFIX_BYTES = 4;
 
@@ -203,8 +204,30 @@ export class Store implements RegistryView {
    */
   private readonly rates = new Map<string, number[]>();
 
+  /**
+   * Where a detected equivocation goes, or null if nobody is listening.
+   *
+   * Optional because the store is the wrong place to decide that a detection should be persisted:
+   * a caller running against a temporary log in a test wants nothing written beside it, and a
+   * caller with no log path at all has nowhere to write. Null is therefore a working store that
+   * detects nothing, and the CLI attaches one for every command that can append.
+   */
+  private equivocation: EquivocationRecorder | null = null;
+
   private constructor(path: string) {
     this.path = path;
+  }
+
+  /**
+   * Send detected equivocation to a recorder.
+   *
+   * Deliberately not a constructor argument. `Store.open` replays a log that *cannot* contain
+   * equivocation — the second of two conflicting records would have been refused on arrival, and
+   * replay throws on anything that no longer verifies — so there is nothing to record during open,
+   * and taking a recorder there would suggest otherwise.
+   */
+  watchEquivocation(recorder: EquivocationRecorder): void {
+    this.equivocation = recorder;
   }
 
   /**
@@ -256,13 +279,86 @@ export class Store implements RegistryView {
     }
     const verdict = this.verifyAt(bytes, now);
     if (verdict.outcome === 'reject' && verdict.code === 'NAME_TAKEN') {
-      return this.mergeConflict(bytes, now, verdict);
+      const merged = this.mergeConflict(bytes, now, verdict);
+      // An accepted merge is a race between *strangers* that the newcomer won, which is the one
+      // outcome that cannot be equivocation: `mergeConflict` returns early when the owner keys are
+      // equal, so reaching acceptance means they were not.
+      if (merged.outcome !== 'accept') this.noteEquivocation(bytes);
+      return merged;
     }
-    if (verdict.outcome !== 'accept') return verdict;
+    if (verdict.outcome !== 'accept') {
+      this.noteEquivocation(bytes);
+      return verdict;
+    }
 
     this.write(bytes);
     this.apply(bytes, verdict.record);
     return verdict;
+  }
+
+  /**
+   * Did the record we just refused equivocate with one we hold? If so, write the pair down.
+   *
+   * REPLICATION.md 6.3: "A peer detecting equivocation MUST record it". This is the detection, and
+   * it runs on every rejection rather than only on the two codes that happen to be reachable
+   * today. Equivocation is defined at 6.1 as one owner key signing two different records at one
+   * `seq` for one `name.tld` — the operation is not part of the definition, and the two rejections
+   * this actually fires on are different codes for the same fact: a second REGISTER at `seq` 0 is
+   * `NAME_TAKEN`, while a second UPDATE or RENEW at a `seq` the chain has passed is `BAD_SEQ`.
+   * Keying on the codes would have recorded the first case and silently missed every later one.
+   *
+   * ## Why it verifies rather than comparing owner keys
+   *
+   * An `ownerKey` is public — it appears in every record its holder ever published. The conflict
+   * path in {@link mergeConflict} compares owner keys as *bytes*, which is correct for what it is
+   * deciding (whether to award a name) and catastrophic as a basis for a report: anyone can copy a
+   * held name's owner key into a record they signed themselves, send it here, and have this peer
+   * write down and then forward a fabricated accusation against its holder. That is 6.4's
+   * manufactured evidence arriving by the front door, and 6.2.1 says so in terms.
+   *
+   * So the pair goes through {@link EquivocationRecorder.record}, which runs the same
+   * `verifyEquivocation` a wire report passes and checks *both* signatures against the key they
+   * name. `NAME_TAKEN` is decided before the signature is ever checked, so at this point nothing
+   * has established that the arriving record is the owner's at all.
+   *
+   * ## Why `settled` is asked first
+   *
+   * A rejected record is cheap for a hostile peer to produce — most rejections are reached before
+   * any proof of work is verified — so a scan of the log per rejection would be a linear amplifier
+   * over a file that is never truncated. `settled` answers in two map lookups from the incoming
+   * record alone, because a verified pair agrees on all four components of its identity. After the
+   * first report about a fact, every repetition costs a lookup.
+   */
+  private noteEquivocation(bytes: Uint8Array): void {
+    const recorder = this.equivocation;
+    if (recorder === null) return;
+    let incoming: RegistryRecord;
+    try {
+      incoming = parseRecordBytes(bytes);
+    } catch {
+      return;
+    }
+    const key = nameKey(incoming.name, incoming.tld);
+    if (!this.names.has(key)) return;
+    if (recorder.settled(incoming, 'detected')) return;
+    // One signature, before any scan. A forged pair would be refused by the recorder anyway — it
+    // runs the same check on both halves — but only after this function had walked the whole log
+    // to find the half to pair it with, on a rejection the attacker got for the price of an
+    // encode. Checking the arriving record first means a name's own owner is the only party who
+    // can make this peer look.
+    if (!signedByNamedOwner(incoming)) return;
+
+    const incomingHash = hex(recordHashFromBytes(bytes));
+    for (const entry of this.entries) {
+      if (entry.record.seq !== incoming.seq) continue;
+      if (nameKey(entry.record.name, entry.record.tld) !== key) continue;
+      if (compareBytes(entry.record.ownerKey, incoming.ownerKey) !== 0) continue;
+      // Identical bytes are a duplicate, which `append` has already answered; a different record
+      // at the same seq by the same owner is the fact 6.1 defines.
+      if (hex(entry.hash) === incomingHash) continue;
+      recorder.record({ a: entry.bytes, b: bytes }, 'detected');
+      return;
+    }
   }
 
   /**

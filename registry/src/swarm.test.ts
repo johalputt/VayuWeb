@@ -503,11 +503,13 @@ test('AUDIT: a peer that greets and then goes silent has its slots reclaimed', (
   const clock = { at: NOW };
   const ticks: (() => void)[] = [];
   drivePeer(stream, emptySink(), () => clock.at, {
-    setInterval: (fn: () => void) => {
-      ticks.push(fn);
-      return ticks.length;
+    timers: {
+      setInterval: (fn: () => void) => {
+        ticks.push(fn);
+        return ticks.length;
+      },
+      clearInterval: () => undefined,
     },
-    clearInterval: () => undefined,
   });
 
   // The peer greets, declaring a log far ahead of ours, and then says nothing ever again.
@@ -554,9 +556,11 @@ test('the driver stops its own clock when the connection closes', () => {
   const stream = fakeStream();
   let cleared = 0;
   drivePeer(stream, emptySink(), () => NOW, {
-    setInterval: () => 'handle',
-    clearInterval: () => {
-      cleared += 1;
+    timers: {
+      setInterval: () => 'handle',
+      clearInterval: () => {
+        cleared += 1;
+      },
     },
   });
   assert.equal(cleared, 0, 'nothing is cleared while the connection is open');
@@ -592,11 +596,13 @@ test('AUDIT: a deferred record is actually retried, not merely held', () => {
     treeRoot: () => new Uint8Array(32),
   };
   drivePeer(stream, sink, () => clock.at, {
-    setInterval: (fn: () => void) => {
-      ticks.push(fn);
-      return ticks.length;
+    timers: {
+      setInterval: (fn: () => void) => {
+        ticks.push(fn);
+        return ticks.length;
+      },
+      clearInterval: () => undefined,
     },
-    clearInterval: () => undefined,
   });
 
   stream.feed(

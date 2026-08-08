@@ -42,6 +42,7 @@ import { memorySource } from './blockstore.ts';
 import { fetchPath, FetchError } from './fetch.ts';
 import { treeOf } from './merkle.ts';
 import { TOKEN_BYTES } from './control.ts';
+import { EquivocationLedger, ledgerPathFor, type LedgerEntry } from './equivocation.ts';
 
 const toHex = (bytes: Uint8Array): string =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
@@ -249,6 +250,7 @@ const FLAGS_FOR: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['revoke', new Set(['log', 'key', 'name', 'at'])],
   ['resolve', new Set(['log', 'name', 'at'])],
   ['list', new Set(['log', 'at'])],
+  ['equivocations', new Set(['log'])],
   ['difficulty', new Set(['log', 'name', 'at'])],
   ['verify', new Set(['log', 'record', 'at'])],
   ['vectors', new Set<string>()],
@@ -319,7 +321,7 @@ function randomSecret(): Uint8Array {
 }
 
 function cmdRegister(args: Args): number {
-  const store = Store.open(required(args, 'log'), clockOf(args));
+  const { store, ledger } = openWithLedger(required(args, 'log'), clockOf(args));
   const { label, tld } = splitName(required(args, 'name'));
   const secret = readSecret(required(args, 'key'));
   const now = clockOf(args);
@@ -379,11 +381,11 @@ function cmdRegister(args: Args): number {
     return 1;
   }
 
-  return finish(store, skeleton(nonce), secret, undefined, now);
+  return finish(store, skeleton(nonce), secret, undefined, now, ledger);
 }
 
 function cmdSuccessor(op: string, args: Args): number {
-  const store = Store.open(required(args, 'log'), clockOf(args));
+  const { store, ledger } = openWithLedger(required(args, 'log'), clockOf(args));
   const { label, tld } = splitName(required(args, 'name'));
   const secret = readSecret(required(args, 'key'));
   const now = clockOf(args);
@@ -451,23 +453,57 @@ function cmdSuccessor(op: string, args: Args): number {
     return 1;
   }
 
-  return finish(store, build(powProof), secret, coSecret, now);
+  return finish(store, build(powProof), secret, coSecret, now, ledger);
 }
 
 /** Sign, append, and report the verdict in the same words the verifier uses. */
+/**
+ * Open a log with its equivocation ledger attached, for the commands that can append.
+ *
+ * The ledger lives beside the log rather than inside it, because the log cannot hold what this
+ * records: equivocation is found when a record arrives that conflicts with one already held, and
+ * the arriving half is refused. Attaching it here rather than inside `Store.open` keeps the
+ * decision to write a file beside somebody's log with the tool that owns the filesystem, which is
+ * this one — a library that creates sidecar files its caller did not ask for is a library that
+ * surprises people.
+ */
+function openWithLedger(path: string, now: number): { store: Store; ledger: EquivocationLedger } {
+  const store = Store.open(path, now);
+  const ledger = EquivocationLedger.open(ledgerPathFor(path));
+  store.watchEquivocation(ledger);
+  return { store, ledger };
+}
+
+/** One report, in one line an operator can act on without a hex editor. */
+function describeReport(entry: LedgerEntry): string {
+  const [owner, tld, name, seq] = entry.key.split(' ');
+  return `${name}.${tld}  seq ${seq}  owner ${owner?.slice(0, 16)}…  (${entry.origin})`;
+}
+
 function finish(
   store: Store,
   map: CborMap,
   secret: Uint8Array,
   coSecret: Uint8Array | undefined,
   now: number,
+  ledger?: EquivocationLedger,
 ): number {
   const input = signingInput(map);
   map.set('sig', sign(secret, input));
   if (coSecret !== undefined) map.set('coSig', sign(coSecret, input));
 
   const bytes = encode(map);
+  const before = ledger?.size ?? 0;
   const verdict = store.append(bytes, now);
+  // Reported here because a detection nobody is told about is the same defect as a detection
+  // nobody wrote down. The operator asked for a registration and got a refusal; which refusal it
+  // is — a name somebody else holds, or a second future they themselves signed for a name they
+  // already hold — is the whole of what they need to know next.
+  if (ledger !== undefined && ledger.size > before) {
+    const recorded = ledger.entries()[ledger.size - 1]!;
+    err(`equivocation recorded  ${describeReport(recorded)}`);
+    err(`  written to ${ledger.path} — nothing is penalised by it; see REPLICATION.md 6.4`);
+  }
 
   if (verdict.outcome === 'accept') {
     const r = verdict.record;
@@ -548,6 +584,51 @@ function cmdList(args: Args): number {
   for (const row of rows) out(`${row.state.padEnd(11)} ${row.name}.${row.tld}`);
   out('');
   out(`${rows.length} name(s), ${store.length} record(s)`);
+  return 0;
+}
+
+/**
+ * Show what this peer knows about equivocation.
+ *
+ * REPLICATION.md 6.3 makes recording a MUST and Article 38 asks for a legible record; a file only
+ * a hex editor can read is neither. This is the reading end of the ledger, and it is the only one
+ * — nothing in the resolver, the verifier or the convergence rule consults it.
+ *
+ * The closing line is not decoration. 6.4 says the protocol does not punish equivocation, and a
+ * list of names printed under the word "equivocation" with no further comment reads as a
+ * blocklist to every operator who has ever seen one. A page that overstates what is enforcing is
+ * a defect of the same kind as a control that does not work.
+ */
+function cmdEquivocations(args: Args): number {
+  const path = required(args, 'log');
+  const ledger = EquivocationLedger.open(ledgerPathFor(path));
+  const held = ledger.entries();
+
+  if (held.length === 0) {
+    out(`no equivocation recorded for ${path}`);
+    out(
+      `  ledger: ${ledger.path} (${existsSync(ledger.path) ? 'present and empty' : 'not created yet'})`,
+    );
+  } else {
+    out(`${held.length} report(s) in ${ledger.path}`);
+    for (const report of held) out(`  ${describeReport(report)}`);
+    out();
+    out(
+      `  detected here: ${ledger.countOf('detected')}   received from peers: ` +
+        `${ledger.countOf('received')}`,
+    );
+  }
+
+  // Printed always, including at zero, because "nothing was refused" and "nothing was looked at"
+  // are different states and a counter shown only when it is non-zero cannot distinguish them.
+  const refused = ledger.refused;
+  out(
+    `  refused: ${refused.unverified} unverified, ${refused.full} over budget, ` +
+      `${refused.unreadable} unreadable`,
+  );
+  out();
+  out('Nothing is penalised by this list. The protocol has no exclusion, no blacklist and no');
+  out('loss of a name — see REPLICATION.md 6.4. It is a record, and what to do with it is yours.');
   return 0;
 }
 
@@ -817,7 +898,7 @@ async function cmdSync(args: Args): Promise<number> {
     throw new UsageError('sync takes exactly one of --listen <port> or --connect <host:port>');
   }
 
-  const store = Store.open(path, Math.floor(Date.now() / 1000));
+  const { store, ledger } = openWithLedger(path, Math.floor(Date.now() / 1000));
   const sink = sinkOver(store);
   const now = (): number => Math.floor(Date.now() / 1000);
   out(`log ${path} holds ${store.length} record(s)`);
@@ -827,7 +908,8 @@ async function cmdSync(args: Args): Promise<number> {
     out(
       `${label}  applied ${outcome.applied}  rejected ${outcome.rejected}  ` +
         `deferred ${outcome.deferred}  duplicate ${outcome.duplicates}  ` +
-        `equivocations ${outcome.equivocations}`,
+        `equivocations ${outcome.equivocations} (${outcome.recorded} new)  ` +
+        `forwarded ${outcome.forwarded}${outcome.withheld > 0 ? ` (${outcome.withheld} withheld)` : ''}`,
     );
   };
 
@@ -849,7 +931,7 @@ async function cmdSync(args: Args): Promise<number> {
   const drive = (socket: Socket, label: string): void => {
     sockets.add(socket);
     socket.on('close', () => sockets.delete(socket));
-    const outcome = drivePeer(socket, sink, now);
+    const outcome = drivePeer(socket, sink, now, { ledger });
     // Printed on close rather than per message: a line per record turns a sync of a real log into
     // a wall of output, and the totals are what an operator is actually asking about.
     socket.on('close', () => report(label, outcome));
@@ -1002,6 +1084,7 @@ const USAGE = `vayuweb-registry — local name registry (Phase 1: no network)
   revoke     --log <file> --key <file> --name <label.tld> [--at <unix>]
   resolve    --log <file> --name <label.tld> [--at <unix>]
   list       --log <file> [--at <unix>]
+  equivocations --log <file>
   difficulty --log <file> --name <label.tld> [--at <unix>]
   verify     --log <file> --record <file containing hex> [--at <unix>]
   vectors
@@ -1052,6 +1135,8 @@ export function main(argv: readonly string[]): number | Promise<number> {
         return cmdSuccessor('REVOKE', args);
       case 'resolve':
         return cmdResolve(args);
+      case 'equivocations':
+        return cmdEquivocations(args);
       case 'list':
         return cmdList(args);
       case 'difficulty':
