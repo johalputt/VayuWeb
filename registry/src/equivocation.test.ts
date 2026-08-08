@@ -489,6 +489,23 @@ test('a report appended to the ledger file by hand is dropped on the next open',
   assert.ok(reopened.refused.unverified >= 1, 'and the planted one is refused and counted');
 });
 
+test('a length prefix nobody could have written is refused before it is believed', () => {
+  // The bound on an entry is now enforced in exactly one place — the reader — because that is the
+  // only place the length comes from a file somebody else may have written. A four-byte prefix
+  // that reserves however much memory the writer felt like naming is the cheapest denial of
+  // service a length-prefixed format offers, and `swarm.ts` has the same check on the wire for the
+  // same reason.
+  const path = scratch('log');
+  const ledgerPath = ledgerPathFor(path);
+  const lie = new Uint8Array(64);
+  new DataView(lie.buffer).setUint32(0, 0xffff_fff0, false);
+  writeFileSync(ledgerPath, lie);
+
+  const ledger = EquivocationLedger.open(ledgerPath);
+  assert.equal(ledger.size, 0);
+  assert.equal(ledger.refused.unreadable, 1, 'refused and counted, not read and not silent');
+});
+
 test('a half-written final entry loses that entry and nothing before it', () => {
   // The ordinary consequence of a process being killed mid-append, which is not tampering and must
   // not cost the operator the reports they already had. The log's own reader is right to be strict

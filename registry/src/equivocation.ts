@@ -58,7 +58,7 @@ import { dirname } from 'node:path';
 
 import { decode, encode, type CborMap, type CborValue } from './cbor.ts';
 import { parseRecordBytes, type RegistryRecord } from './record.ts';
-import { verifyEquivocation, type EquivocationMessage } from './replicate.ts';
+import { LIMITS, verifyEquivocation, type EquivocationMessage } from './replicate.ts';
 import { frame } from './store.ts';
 
 /**
@@ -123,8 +123,22 @@ export const EQUIVOCATION_LIMITS = {
   perConnection: 32,
 } as const;
 
-/** Bytes a single ledger entry may occupy on disk, framing included. Two records plus a small map. */
-const MAX_LEDGER_ENTRY_BYTES = 16_384;
+/**
+ * Bytes a single ledger entry may occupy on disk, framing included.
+ *
+ * **Derived rather than chosen**, because the only place it is enforced is the reader — where the
+ * length comes from a file somebody else may have written — and a writer that could exceed it
+ * would be a writer whose entry vanishes on the next open. `verifyEquivocation` refuses either
+ * record over `LIMITS.recordBytes` before anything reaches here, so two of them plus a three-key
+ * CBOR map cannot reach this number; the 512 is the map, the keys and the two byte-string headers,
+ * several times over.
+ *
+ * It was a round 16,384 for one commit, with a size check in the writer that returned silently on
+ * a value it could not produce. That is the shape of thing this project keeps finding: a branch
+ * nobody can reach, which would have left an entry in memory and not on disk, with no counter to
+ * say so. Deriving the bound deletes the branch instead of testing it.
+ */
+const MAX_LEDGER_ENTRY_BYTES = 2 * LIMITS.recordBytes + 512;
 
 const LENGTH_PREFIX_BYTES = 4;
 
@@ -304,10 +318,8 @@ export class EquivocationLedger implements EquivocationReader {
       ['a', entry.evidence.a],
       ['b', entry.evidence.b],
     ]);
-    const bytes = encode(map);
-    if (bytes.length + LENGTH_PREFIX_BYTES > MAX_LEDGER_ENTRY_BYTES) return;
     mkdirSync(dirname(this.path), { recursive: true });
-    appendFileSync(this.path, frame(bytes));
+    appendFileSync(this.path, frame(encode(map)));
   }
 }
 

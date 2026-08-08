@@ -63,6 +63,14 @@ before it looks at all — passed against it. That is not a smaller version of t
 minting 256 reports about names nobody has heard of would have switched off this peer's detection
 for every name it holds, and the ledger would have shown nothing wrong.
 
+Attacking the ledger afterwards found one more, in code written the same hour: the writer had a
+size check it could not fail, on a bound chosen as a round number, and it returned silently — so an
+entry too large to persist would have sat in memory, absent from disk, with no counter to say so.
+The bound is now derived from the record limit `verifyEquivocation` already enforces, which deletes
+the branch rather than testing it, and the one place a length is still attacker-supplied — the
+reader, parsing a file somebody else may have written — has a test that a declared length nobody
+could have written is refused before it is believed.
+
 ### Changed — `drivePeer` takes an options bag
 
 `timers` and `ledger` are both optional objects, so a fourth and fifth positional parameter would
