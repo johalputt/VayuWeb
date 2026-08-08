@@ -156,6 +156,10 @@ export class ReplicationError extends Error {
  */
 const RECORDS_ENVELOPE_BYTES = 64;
 
+/** A byte string as a Set key. Hex rather than `join(',')` so the key length is fixed. */
+const toHexKey = (bytes: Uint8Array): string =>
+  Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+
 /**
  * What a session needs from the local registry.
  *
@@ -436,6 +440,8 @@ export class ReplicationSession {
    */
   private outstanding: number[] = [];
   private readonly deferredQueue: Array<{ bytes: Uint8Array; at: number }> = [];
+  /** Record hashes currently in {@link deferredQueue}, so a resend costs a peer nothing. */
+  private readonly deferredKeys = new Set<string>();
 
   constructor(sink: ReplicationSink) {
     this.sink = sink;
@@ -622,7 +628,23 @@ export class ReplicationSession {
    * the refusal cheap.
    */
   private holdDeferred(bytes: Uint8Array, at: number): void {
-    if (this.deferredQueue.length >= LIMITS.deferred) this.deferredQueue.shift();
+    // Deduplicated by record hash, because the bound counts held encodings and the thing being
+    // protected is CAPACITY. One postdated record resent 1,024 times used to fill the whole queue
+    // with copies of itself and evict every genuine deferral from the front — the attacker
+    // spending one record it already had, and the peer losing skew tolerance for everybody.
+    //
+    // 4.6's silent-drop rule does not cover this: it applies to records the peer "already holds",
+    // and a deferred record is precisely one that is not held. The bound was doing exactly what it
+    // said and protecting nothing, because a bound on entries only bounds capacity when the
+    // entries are distinct.
+    const key = toHexKey(recordHashFromBytes(bytes));
+    if (this.deferredKeys.has(key)) return;
+    if (this.deferredQueue.length >= LIMITS.deferred) {
+      const evicted = this.deferredQueue.shift();
+      if (evicted !== undefined)
+        this.deferredKeys.delete(toHexKey(recordHashFromBytes(evicted.bytes)));
+    }
+    this.deferredKeys.add(key);
     this.deferredQueue.push({ bytes, at });
   }
 
@@ -635,6 +657,7 @@ export class ReplicationSession {
   retryDeferred(now: number): number {
     if (this.deferredQueue.length === 0) return 0;
     const pending = this.deferredQueue.splice(0, this.deferredQueue.length);
+    this.deferredKeys.clear();
     let applied = 0;
     for (const held of pending) {
       let verdict: Verdict;

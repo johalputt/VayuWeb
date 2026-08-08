@@ -1156,3 +1156,147 @@ test('AUDIT: a late reply may overshoot the budget by one, and never by more', (
   while (session.nextWant(0, later) !== null) settled += 1;
   assert.equal(settled, LIMITS.outstandingWants, 'the window closes when the late replies stop');
 });
+
+test('AUDIT: one postdated record resent cannot evict every other deferred record', () => {
+  // The deferral queue holds records that arrived slightly ahead of this peer's clock, so they get
+  // a second chance instead of being lost to skew. Its bound counts **held encodings, not distinct
+  // records**, and `holdDeferred` pushes unconditionally — nothing dedupes.
+  //
+  // So one postdated record, resent 1,024 times, fills the entire queue with copies of itself and
+  // evicts every genuine deferred record from the front. The cost to the attacker is one record it
+  // already has, sent repeatedly; the cost to the peer is the whole skew-tolerance mechanism, for
+  // everybody. 4.6's silent-drop rule does not help: it covers records the peer "already holds",
+  // and a deferred record is precisely one that has not been held.
+  //
+  // The bound was doing what it said — bounding memory — while the thing it was protecting was
+  // capacity, and capacity is only bounded if the entries are distinct.
+  const deferrals = new Set<string>();
+  const sink: ReplicationSink = {
+    append: (bytes): Verdict =>
+      deferrals.has(bytes.join(','))
+        ? { outcome: 'accept', record: null as never, duplicate: true }
+        : { outcome: 'defer', reason: 'CLOCK_SKEW', detail: 'ahead of this clock' },
+    encodingAt: () => null,
+    length: () => 0,
+    treeRoot: () => new Uint8Array(32),
+  };
+  const session = new ReplicationSession(sink);
+  session.open();
+  session.receive({ t: 'HELLO', v: PROTOCOL_VERSION, len: 0, root: new Uint8Array(32) }, NOW);
+
+  // One genuine deferral from an honest peer.
+  const honest = Uint8Array.from([1, 2, 3, 4]);
+  session.receive({ t: 'RECORDS', from: 0, recs: [honest] }, NOW);
+  assert.equal(session.deferredCount, 1);
+
+  // Now the flood: the same postdated record, over and over.
+  const flood = Uint8Array.from([9, 9, 9, 9]);
+  for (let i = 0; i < LIMITS.deferred * 2; i += 1) {
+    session.receive({ t: 'RECORDS', from: 0, recs: [flood] }, NOW);
+  }
+
+  // The queue must not have become 1,024 copies of one record, and the honest deferral must
+  // still be in it.
+  assert.ok(
+    session.deferredCount <= 2,
+    `one repeated record occupies ${session.deferredCount} slots`,
+  );
+});
+
+test('deduplication does not break the mechanism it protects', () => {
+  // The dangerous fix here is one that makes the queue useless: dedup that swallows genuinely
+  // different records, or that never releases a key so a record deferred once can never be
+  // deferred again after its retry. Both would look like a passing flood test and a broken
+  // skew tolerance, which is a worse bug than the one being fixed.
+  let deferAll = true;
+  const sink: ReplicationSink = {
+    append: (): Verdict =>
+      deferAll
+        ? { outcome: 'defer', reason: 'CLOCK_SKEW', detail: 'ahead of this clock' }
+        : { outcome: 'reject', code: 'NOT_A_MAP', detail: 'settled' },
+    encodingAt: () => null,
+    length: () => 0,
+    treeRoot: () => new Uint8Array(32),
+  };
+  const session = new ReplicationSession(sink);
+  session.open();
+  session.receive({ t: 'HELLO', v: PROTOCOL_VERSION, len: 0, root: new Uint8Array(32) }, NOW);
+
+  // Distinct records are all held — dedup must key on content, not merely on arrival.
+  const distinct = Array.from({ length: 50 }, (_, i) => Uint8Array.from([i, i + 1, i + 2]));
+  session.receive({ t: 'RECORDS', from: 0, recs: distinct }, NOW);
+  assert.equal(session.deferredCount, 50, 'every distinct deferral is held');
+
+  // And the queue still fills to its stated bound with distinct records, so the cap was not
+  // accidentally lowered by keying on something coarser.
+  const more = Array.from({ length: LIMITS.deferred }, (_, i) =>
+    Uint8Array.from([(i >> 16) & 0xff, (i >> 8) & 0xff, i & 0xff, 0xaa]),
+  );
+  session.receive({ t: 'RECORDS', from: 0, recs: more.slice(0, LIMITS.recordsPerBatch) }, NOW);
+  assert.ok(session.deferredCount > 50, 'the queue keeps accepting distinct records');
+
+  // After a retry drains the queue, the same record may be deferred again — the key set must be
+  // released, or a transient skew becomes a permanent refusal to hold that record ever again.
+  deferAll = false;
+  session.retryDeferred(NOW + 1);
+  assert.equal(session.deferredCount, 0, 'the retry drained it');
+  deferAll = true;
+  session.receive({ t: 'RECORDS', from: 0, recs: [distinct[0]!] }, NOW + 2);
+  assert.equal(session.deferredCount, 1, 'a record may be deferred again after a retry');
+});
+
+test('AUDIT: an evicted record can be deferred again, and the key set never outgrows the queue', () => {
+  // Found by a mutation that SURVIVED: deleting the evicted entry's key from the dedup set failed
+  // no test. It matters twice over. The key set would grow without bound — the very thing the
+  // queue's own limit exists to prevent, reintroduced beside it — and a record evicted once could
+  // never be deferred again, so a transient skew would become a permanent refusal to hold that
+  // record while its own retry window was still open.
+  //
+  // **`deferredCount` cannot see this**, which is why the first attempt at this test failed
+  // against correct code. Once the queue is at its bound the count is at its bound whatever
+  // happens next: a re-held record evicts another and the total is unchanged. What distinguishes
+  // a leak from a re-hold is *which* records are in the queue, so the sink is used as the probe —
+  // it accepts exactly one record on retry, and `retryDeferred` reports whether that record was
+  // there to be retried.
+  let acceptOnly: Uint8Array | null = null;
+  const sink: ReplicationSink = {
+    append: (bytes): Verdict =>
+      acceptOnly !== null && bytes.join(',') === acceptOnly.join(',')
+        ? { outcome: 'accept', record: null as never }
+        : { outcome: 'defer', reason: 'CLOCK_SKEW', detail: 'ahead of this clock' },
+    encodingAt: () => null,
+    length: () => 0,
+    treeRoot: () => new Uint8Array(32),
+  };
+  const session = new ReplicationSession(sink);
+  session.open();
+  session.receive({ t: 'HELLO', v: PROTOCOL_VERSION, len: 0, root: new Uint8Array(32) }, NOW);
+
+  const record = (i: number): Uint8Array =>
+    Uint8Array.from([(i >> 16) & 0xff, (i >> 8) & 0xff, i & 0xff, 0x5a]);
+  const first = record(0);
+
+  session.receive({ t: 'RECORDS', from: 0, recs: [first] }, NOW);
+  for (
+    let sent = 1;
+    sent < LIMITS.deferred + LIMITS.recordsPerBatch;
+    sent += LIMITS.recordsPerBatch
+  ) {
+    const batch = Array.from({ length: LIMITS.recordsPerBatch }, (_, k) => record(sent + k));
+    session.receive({ t: 'RECORDS', from: 0, recs: batch }, NOW);
+  }
+  assert.equal(session.deferredCount, LIMITS.deferred, 'the queue holds exactly its stated bound');
+
+  // `first` has been evicted. Send it again: if its key leaked at eviction this is silently
+  // dropped, and if it did not the record is back in the queue. The count is identical either way.
+  session.receive({ t: 'RECORDS', from: 0, recs: [first] }, NOW);
+  assert.equal(session.deferredCount, LIMITS.deferred, 'still exactly the bound after a re-defer');
+
+  // The probe. Exactly one record can now be accepted, and it is `first`.
+  acceptOnly = first;
+  assert.equal(
+    session.retryDeferred(NOW),
+    1,
+    'a record evicted earlier must still be deferrable — its key leaked at eviction',
+  );
+});

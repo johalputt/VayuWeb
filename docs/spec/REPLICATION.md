@@ -173,7 +173,18 @@ the only attack a hostile peer retains, and an unbounded field is an invitation.
 | `RECORDS.recs` length | 256 | Matches `WANT.count`. It bounds array iteration, not volume — see 4.3a. |
 | Each record encoding | 4,096 bytes | The record limit from REGISTRY.md, restated so a receiver checks it before parsing rather than after. |
 | Outstanding `WANT`s per connection | 8 | Bounds memory held for in-flight requests. Reclaimed on a deadline as well as by a reply — see 4.3.b. |
-| Deferred (`CLOCK_SKEW`) records held | 1,024 | Bounded because a deferred record is memory an attacker can allocate by dating records into the near future. Oldest evicted first. |
+| Deferred (`CLOCK_SKEW`) records held | 1,024 **distinct** | Bounded because a deferred record is memory an attacker can allocate by dating records into the near future. Deduplicated by record hash, then oldest evicted first — see 5.4. |
+
+5.4 A bound on the number of held entries bounds **capacity** only if the entries are distinct.
+The deferral queue MUST therefore be deduplicated by record hash.
+
+Counting encodings rather than distinct records left one postdated record, resent 1,024 times,
+filling the entire queue with copies of itself and evicting every genuine deferral from the front.
+The attacker spends one record it already holds; the peer loses clock-skew tolerance for every
+other peer it is talking to. 4.6's silent-drop rule does not reach this — that rule covers records
+a peer "already holds", and a deferred record is precisely one that is not held.
+
+The bound was doing exactly what it said, and protecting nothing.
 
 5.1 A peer MUST NOT allocate memory proportional to a value a remote peer asserted. In particular
 `HELLO.len` is a claim, not a measurement: a peer claiming a length of 2^53 MUST cost the

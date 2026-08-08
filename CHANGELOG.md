@@ -124,6 +124,36 @@ limit is 2.1 MB of hex zeros in the artifact, of which every byte after the firs
 information. The vectors file went from 159 KB to 2.25 MB before this was noticed. A runner builds
 the buffer from the stated length and tests exactly what one reading two million zeros would.
 
+### Fixed — one postdated record could evict every other deferred record
+
+The deferral queue holds records that arrived slightly ahead of this peer's clock, so skew costs a
+retry instead of a loss. Its bound counted **held encodings, not distinct records**, and
+`holdDeferred` pushed unconditionally — nothing deduplicated.
+
+So one postdated record, resent 1,024 times, filled the whole queue with copies of itself and
+evicted every genuine deferral from the front. Measured before the fix: **1,024 slots occupied by
+one record.** The attacker spends one record it already holds; the peer loses clock-skew tolerance
+for every peer it is talking to. 4.6's silent-drop rule does not reach it — that covers records a
+peer "already holds", and a deferred record is precisely one that is not held.
+
+**The bound was doing exactly what it said and protecting nothing.** A bound on entries bounds
+capacity only when the entries are distinct, which is now REPLICATION.md **5.4**.
+
+**Then a mutation survived again, and again it was the interesting part.** Forgetting to drop the
+evicted entry's key from the dedup set failed no test. It leaks twice over: the key set grows
+without bound — the very thing the queue's limit exists to prevent, reintroduced beside it — and a
+record evicted once can never be deferred again, so a transient skew becomes a permanent refusal.
+
+Writing the test for it found a defect in the *test*, not the code. `deferredCount` cannot see this
+at all: once the queue is at its bound the count is at its bound whatever happens next, because a
+re-held record evicts another. The first version asserted on the count and failed against correct
+code. What distinguishes a leak from a re-hold is *which* records are in the queue, so the sink is
+now the probe — it accepts exactly one record on retry and `retryDeferred` reports whether that
+record was there to be retried.
+
+Three more mutations, all now failing: dedup removed, the key set never cleared on retry (a
+transient skew becoming permanent), and the evicted key left behind.
+
 ### Fixed — two clauses written today that closed the example instead of the property
 
 Both are in VWIP-0005, both were added in this session's audit, and both are the same mistake:
