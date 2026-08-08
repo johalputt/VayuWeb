@@ -335,8 +335,8 @@ test('8.2 two peers fed disjoint sets converge once they exchange', () => {
   left.session.receive(rightHello, NOW);
   right.session.receive(leftHello, NOW);
 
-  const wantFromLeft = left.session.nextWant(0, NOW);
-  const wantFromRight = right.session.nextWant(0, NOW);
+  const wantFromLeft = left.session.nextWant(NOW);
+  const wantFromRight = right.session.nextWant(NOW);
   assert.ok(wantFromLeft && wantFromRight, 'each peer must want what the other announced');
 
   const toLeft = right.session.receive(wantFromLeft, NOW).replies;
@@ -590,7 +590,7 @@ test('8.4 an enormous claimed length costs one bounded request, not an allocatio
   );
   assert.equal(p.session.remoteClaimedLength, Number.MAX_SAFE_INTEGER);
 
-  const want = p.session.nextWant(0, NOW);
+  const want = p.session.nextWant(NOW);
   assert.ok(want);
   assert.equal(want.count, LIMITS.wantCount, 'we ask for a bounded window, not what they claimed');
 });
@@ -604,7 +604,9 @@ test('8.4 outstanding requests are capped', () => {
 
   let issued = 0;
   for (let i = 0; i < LIMITS.outstandingWants + 5; i += 1) {
-    if (p.session.nextWant(i * LIMITS.wantCount, NOW) !== null) issued += 1;
+    // No arithmetic here any more: the session advances its own cursor per outstanding request,
+    // which is the behaviour this test was hand-computing.
+    if (p.session.nextWant(NOW) !== null) issued += 1;
   }
   assert.equal(issued, LIMITS.outstandingWants, 'no more than the cap may be in flight');
 });
@@ -629,7 +631,7 @@ test('8.4 nothing is accepted before the remote has introduced itself', () => {
   );
   assert.equal(outcome.applied, 0, 'records before HELLO are ignored');
   assert.equal(stateOf(p.store).length, 0);
-  assert.equal(p.session.nextWant(0, NOW), null, 'and there is nothing to want yet');
+  assert.equal(p.session.nextWant(NOW), null, 'and there is nothing to want yet');
 });
 
 test('8.4 a second HELLO is ignored, so a peer cannot rewind mid-session', () => {
@@ -646,7 +648,7 @@ test('8.4 a peer speaking another protocol version is not engaged with', () => {
     NOW,
   );
   assert.equal(p.session.ready, false);
-  assert.equal(p.session.nextWant(0, NOW), null);
+  assert.equal(p.session.nextWant(NOW), null);
 });
 
 test('8.4 deferred records are bounded, oldest evicted first', () => {
@@ -902,7 +904,7 @@ test('AUDIT: an honest reply to the commonest WANT can actually be encoded', () 
   );
 
   // Exactly what a peer starting from nothing sends.
-  const want = session.nextWant(0, NOW);
+  const want = session.nextWant(NOW);
   assert.ok(want, 'a peer behind by a full batch must ask for one');
   assert.equal(want.count, LIMITS.wantCount);
 
@@ -947,30 +949,48 @@ test('a truncated reply still makes progress, and the next want resumes where it
     length: () => encodings.length,
     treeRoot: () => new Uint8Array(32),
   };
-  const session = new ReplicationSession(sink);
-  session.open();
-  session.receive(
+  // **Two sessions, because the resume position is now the REQUESTER's state.** The first version
+  // of this test used one session as both ends and advanced a local `have` variable by hand — so
+  // it asserted that a number the test computed matched a reply the test asked for, and the
+  // requester's own bookkeeping was never exercised. That is the same shape as the defect this
+  // change fixes: the one decision the code makes was made by the test instead.
+  const responder = new ReplicationSession(sink);
+  const requester = new ReplicationSession({
+    append: () => ({ outcome: 'accept' }) as never,
+    encodingAt: () => null,
+    length: () => 0,
+    treeRoot: () => new Uint8Array(32),
+  });
+  responder.open();
+  requester.open();
+  // The responder needs a greeting too: `onWant` is answered only by a session that has completed
+  // the handshake, and the single-session version of this test got one by accident.
+  responder.receive({ t: 'HELLO', v: PROTOCOL_VERSION, len: 0, root: new Uint8Array(32) }, NOW);
+  requester.receive(
     { t: 'HELLO', v: PROTOCOL_VERSION, len: encodings.length, root: new Uint8Array(32) },
     NOW,
   );
 
-  const first = session.receive(session.nextWant(0, NOW)!, NOW).replies[0] as Records;
+  const firstWant = requester.nextWant(NOW)!;
+  const first = responder.receive(firstWant, NOW).replies[0] as Records;
   assert.ok(first.recs.length > 0 && first.recs.length < LIMITS.wantCount, 'the reply is short');
   assert.doesNotThrow(() => encodeMessage(first));
+  requester.receive(first, NOW);
 
   // The requester asks again from where it got to, and the rest arrives. Walk it to the end so a
   // fix that made progress but never terminated would fail here rather than pass.
-  let have = first.recs.length;
-  for (let round = 0; round < 32 && have < encodings.length; round += 1) {
-    const want = session.nextWant(have, NOW);
+  for (let round = 0; round < 32 && requester.fetched < encodings.length; round += 1) {
+    const have = requester.fetched;
+    const want = requester.nextWant(NOW);
     assert.ok(want, `a peer at ${have} of ${encodings.length} must still ask`);
-    const reply = session.receive(want, NOW).replies[0] as Records;
+    assert.equal(want.from, have, 'the request resumes where delivery actually reached');
+    const reply = responder.receive(want, NOW).replies[0] as Records;
     assert.equal(reply.from, have, 'the reply resumes where the requester stopped');
     assert.ok(reply.recs.length > 0, 'a responder holding records must not answer with none');
     assert.doesNotThrow(() => encodeMessage(reply));
-    have += reply.recs.length;
+    requester.receive(reply, NOW);
   }
-  assert.equal(have, encodings.length, 'the whole log is reachable in bounded rounds');
+  assert.equal(requester.fetched, encodings.length, 'the whole log is reachable in bounded rounds');
 });
 
 test('AUDIT: a reply encodes at every record size, not just the one a test happened to pick', () => {
@@ -1001,7 +1021,7 @@ test('AUDIT: a reply encodes at every record size, not just the one a test happe
       { t: 'HELLO', v: PROTOCOL_VERSION, len: encodings.length, root: new Uint8Array(32) },
       NOW,
     );
-    const reply = session.receive(session.nextWant(0, NOW)!, NOW).replies[0];
+    const reply = session.receive(session.nextWant(NOW)!, NOW).replies[0];
     if (reply === undefined) {
       failures.push(`size ${size}: a peer holding records answered with none`);
       continue;
@@ -1048,14 +1068,14 @@ test('AUDIT: a peer that greets and then declines everything does not freeze the
 
   // Fill every slot. The peer declines each one, which 4.3 permits and which produces no message.
   for (let i = 0; i < LIMITS.outstandingWants; i += 1) {
-    assert.ok(session.nextWant(0, NOW), `slot ${i} must be available`);
+    assert.ok(session.nextWant(NOW), `slot ${i} must be available`);
   }
-  assert.equal(session.nextWant(0, NOW), null, 'the budget is exhausted, which is correct');
+  assert.equal(session.nextWant(NOW), null, 'the budget is exhausted, which is correct');
 
   // A year later, still asking for a log of a hundred thousand records it has none of.
   const later = NOW + 365 * 86_400;
   assert.ok(
-    session.nextWant(0, later),
+    session.nextWant(later),
     'a requester must release a slot the remote was never obliged to answer',
   );
 });
@@ -1078,9 +1098,17 @@ test('a slot is released by a reply as well as by the deadline, and is not relea
   };
   const session = new ReplicationSession(sink);
   session.open();
-  session.receive({ t: 'HELLO', v: PROTOCOL_VERSION, len: 10, root: new Uint8Array(32) }, NOW);
+  // **A remote log far larger than the budget can cover**, which the fixture did not used to be.
+  // With `len: 10` the loop below expected eight requests for a ten-record log — reachable only
+  // because the caller passed the same `haveThrough` every time, so the session asked for the
+  // same range eight times over. That expectation was satisfiable only by the defect. The property
+  // under test is the SLOT budget, and it needs a log with more in it than one batch.
+  session.receive(
+    { t: 'HELLO', v: PROTOCOL_VERSION, len: 1_000_000, root: new Uint8Array(32) },
+    NOW,
+  );
 
-  const want = session.nextWant(0, NOW);
+  const want = session.nextWant(NOW);
   assert.ok(want);
   // The reply arrives promptly: the slot comes back without any deadline being involved.
   session.receive({ t: 'RECORDS', from: 0, recs: [new Uint8Array(10)] }, NOW);
@@ -1088,7 +1116,7 @@ test('a slot is released by a reply as well as by the deadline, and is not relea
   // Now exhaust the budget and confirm it is still exactly the stated size — not one larger
   // because the reply and a later expiry both released the same request.
   let issued = 0;
-  while (session.nextWant(0, NOW) !== null) {
+  while (session.nextWant(NOW) !== null) {
     issued += 1;
     assert.ok(issued <= LIMITS.outstandingWants, 'the budget must not exceed its stated size');
   }
@@ -1133,27 +1161,27 @@ test('AUDIT: a late reply may overshoot the budget by one, and never by more', (
   );
 
   let issued = 0;
-  while (session.nextWant(0, NOW) !== null) issued += 1;
+  while (session.nextWant(NOW) !== null) issued += 1;
   assert.equal(issued, LIMITS.outstandingWants);
 
   // Every deadline elapses, then three late replies arrive for requests already reclaimed.
   const late = NOW + LIMITS.wantDeadlineSeconds + 1;
   const lateReplies = 3;
   let extra = 0;
-  while (session.nextWant(0, late) !== null) extra += 1;
+  while (session.nextWant(late) !== null) extra += 1;
   assert.equal(extra, LIMITS.outstandingWants, 'expiry returns the whole budget and no more');
 
   for (let i = 0; i < lateReplies; i += 1) {
     session.receive({ t: 'RECORDS', from: 0, recs: [] }, late);
   }
   let afterLate = 0;
-  while (session.nextWant(0, late) !== null) afterLate += 1;
+  while (session.nextWant(late) !== null) afterLate += 1;
   assert.equal(afterLate, lateReplies, 'the overshoot is exactly one slot per late reply');
 
   // And it does not accumulate: with no further late replies the budget is the stated size again.
   const later = late + LIMITS.wantDeadlineSeconds + 1;
   let settled = 0;
-  while (session.nextWant(0, later) !== null) settled += 1;
+  while (session.nextWant(later) !== null) settled += 1;
   assert.equal(settled, LIMITS.outstandingWants, 'the window closes when the late replies stop');
 });
 
@@ -1299,4 +1327,43 @@ test('AUDIT: an evicted record can be deferred again, and the key set never outg
     1,
     'a record evicted earlier must still be deferrable — its key leaked at eviction',
   );
+});
+
+test('AUDIT: a want that expires unanswered is asked for again, not skipped past', () => {
+  // **The guard for this survived its first mutation**, which means nothing was watching it.
+  //
+  // 4.3.b reclaims the SLOT when a deadline passes. The range that slot was asking for is a
+  // separate matter: the request cursor has already moved past it, and if it is not pulled back
+  // then nothing in the session will ever ask for those records again. The peer stays silently
+  // short for the life of the connection, and because a `WANT` is the only message this protocol
+  // re-sends, that is also the only retransmission there is.
+  //
+  // The reply path pulls the cursor back too, so this is only observable when NOTHING arrives —
+  // which is exactly the case the deadline exists for and the case the other tests do not create.
+  const sink: ReplicationSink = {
+    append: () => ({ outcome: 'accept' }) as never,
+    encodingAt: () => null,
+    length: () => 0,
+    treeRoot: () => new Uint8Array(32),
+  };
+  const session = new ReplicationSession(sink);
+  session.open();
+  session.receive({ t: 'HELLO', v: PROTOCOL_VERSION, len: 1_000, root: new Uint8Array(32) }, NOW);
+
+  const first = session.nextWant(NOW);
+  assert.ok(first);
+  assert.equal(first.from, 0);
+
+  // The peer says nothing at all. The deadline passes.
+  const late = NOW + LIMITS.wantDeadlineSeconds + 1;
+  const again = session.nextWant(late);
+  assert.ok(again, 'the slot must come back');
+  assert.equal(again.from, 0, 'and the range nobody answered must be asked for again');
+  assert.equal(again.count, first.count);
+
+  // Delivery still moves it forward, so the fallback is a retry and not a stall.
+  session.receive({ t: 'RECORDS', from: 0, recs: [new Uint8Array(10)] }, late);
+  const third = session.nextWant(late);
+  assert.ok(third);
+  assert.equal(third.from, 1, 'what was delivered is not requested a third time');
 });

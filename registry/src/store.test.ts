@@ -4,7 +4,8 @@ import { mkdtempSync, readFileSync, writeFileSync, appendFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { Store, StoreError, frame, unframe, writeLog } from './store.ts';
+import { Store, StoreError, frame, sinkOver, unframe, writeLog } from './store.ts';
+import { treeOf } from './merkle.ts';
 import { encode, type CborMap, type CborValue } from './cbor.ts';
 import { signingInput } from './domain.ts';
 import { sign, publicKeyFrom } from './signature.ts';
@@ -415,4 +416,46 @@ test('AUDIT: a settled transfer replays, and the index knows who controls it mea
   const reopened = Store.open(path, settledAt);
   assert.equal(reopened.length, 3);
   assert.deepEqual(reopened.lookup(LABEL, 'vayu')?.current.record.ownerKey, RECIPIENT);
+});
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT: HELLO.root has never carried a real value in any run                 */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: a sink over a real store reports the real merkle root', () => {
+  // **Every sink in this repository stubbed `treeRoot: () => new Uint8Array(32)`** — fifteen of
+  // them across the replication and swarm tests — so `HELLO.root` has been thirty-two zero bytes
+  // in every run this project has ever made. REPLICATION.md gives that field to a peer as the
+  // cheap check that two logs agree before either asks for anything, and a constant makes it
+  // agree with everybody.
+  //
+  // `merkleRootOf` existed the whole time, private to `cli.ts`. Nothing joined the two, which is
+  // the same shape as `retryDeferred` having no caller and `joinSwarm` having none: a mechanism
+  // built, tested against itself, and connected to nothing that ships.
+  const store = Store.open(scratch(), NOW);
+  {
+    const sink = sinkOver(store);
+
+    // Empty log, empty tree — and specifically NOT the thirty-two zeros the stubs returned, or
+    // this test would pass against the defect it was written for.
+    const empty = sink.treeRoot();
+    assert.equal(sink.length(), 0);
+    assert.equal(empty.length, 32);
+    assert.deepEqual(empty, treeOf([]).root());
+
+    // One real record moves it, which is the property the field exists for.
+    const record = registration();
+    assert.equal(store.append(record, NOW).outcome, 'accept');
+    const afterOne = sinkOver(store).treeRoot();
+    assert.notDeepEqual(afterOne, empty, 'appending a record must move the root');
+    assert.notDeepEqual(afterOne, new Uint8Array(32), 'and it is not the stub value');
+    assert.deepEqual(afterOne, treeOf([record]).root());
+
+    // The sink reads through to the store rather than snapshotting it, because a driver holds one
+    // sink for the life of a connection while the log grows underneath it.
+    assert.equal(sink.length(), 1);
+    assert.deepEqual(sink.treeRoot(), afterOne);
+    assert.deepEqual(sink.encodingAt(0), record);
+    assert.equal(sink.encodingAt(1), null);
+  }
 });

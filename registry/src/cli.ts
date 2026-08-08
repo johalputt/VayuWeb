@@ -27,12 +27,14 @@ import { sign, publicKeyFrom, SECRET_KEY_LENGTH } from './signature.ts';
 import { parseRecordBytes, type RecordEntry, type RegistryRecord } from './record.ts';
 import { RATIFIED_TLDS, assertValidName } from './names.ts';
 import { POW_ALGORITHM, POW_NONCE_LENGTH, solvePow, requiredBits } from './pow.ts';
-import { Store } from './store.ts';
+import { Store, sinkOver } from './store.ts';
 import { TERM_SECONDS, SETTLEMENT_SECONDS } from './verify.ts';
 import { stateAt } from './lifecycle.ts';
 import { buildVectors, fromHex } from './vectors.ts';
 import { verify, predecessorFrom, type RegistryView } from './verify.ts';
 import { serveControl, serveProxy } from './serve.ts';
+import { drivePeer, SWARM_LIMITS, type PeerOutcome } from './swarm.ts';
+import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import { sourceValueOf, type ContentPort } from './proxy.ts';
 import { importSite, type SiteFile } from './unixfs.ts';
 import { cidBytes, decodeCid } from './content.ts';
@@ -251,6 +253,7 @@ const FLAGS_FOR: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['verify', new Set(['log', 'record', 'at'])],
   ['vectors', new Set<string>()],
   ['serve', new Set(['log', 'port', 'socket', 'site'])],
+  ['sync', new Set(['log', 'listen', 'connect', 'address'])],
 ]);
 
 /** Every flag some command understands, for the "did you mean" hint only. */
@@ -789,6 +792,116 @@ function contentTypeOf(path: string): string {
   return known[ext] ?? 'application/octet-stream';
 }
 
+/**
+ * Replicate with one peer over TCP, until interrupted.
+ *
+ * **The reference transport binding had no shipping caller.** `swarm.ts` has held the framing, the
+ * discovery topic and a driver since Phase 2, and `registry/src/cli.ts` had no verb that opened a
+ * socket — so every claim about replication rested on two objects joined by a pipe inside one
+ * process. ROADMAP.md's own acceptance criterion asks for "independent peers, started in any order
+ * and partitioned deliberately", and two operating-system processes with their own stores, talking
+ * over a real socket, are that. What they are NOT is two machines: they share a kernel, a clock and
+ * a filesystem, so this closes the gap between the code and its claims without closing the phase.
+ *
+ * **Loopback by default, and widening is a decision nobody has made.** `--address` exists and is
+ * not defaulted to `0.0.0.0`: a default that publishes a registry to whatever network the machine
+ * happens to be on is the kind of default an operator discovers afterwards. The protocol is built
+ * to survive a hostile peer — REPLICATION.md 2.3, nothing about the channel is evidence about a
+ * record — but surviving one and inviting one are different choices.
+ */
+async function cmdSync(args: Args): Promise<number> {
+  const path = required(args, 'log');
+  const listen = args.flags.get('listen');
+  const connect = args.flags.get('connect');
+  if ((listen === undefined) === (connect === undefined)) {
+    throw new UsageError('sync takes exactly one of --listen <port> or --connect <host:port>');
+  }
+
+  const store = Store.open(path, Math.floor(Date.now() / 1000));
+  const sink = sinkOver(store);
+  const now = (): number => Math.floor(Date.now() / 1000);
+  out(`log ${path} holds ${store.length} record(s)`);
+
+  /** Report what a connection did, so an operator watching sees progress rather than silence. */
+  const report = (label: string, outcome: PeerOutcome): void => {
+    out(
+      `${label}  applied ${outcome.applied}  rejected ${outcome.rejected}  ` +
+        `deferred ${outcome.deferred}  duplicate ${outcome.duplicates}  ` +
+        `equivocations ${outcome.equivocations}`,
+    );
+  };
+
+  const sockets = new Set<Socket>();
+  let server: Server | null = null;
+
+  const closed = new Promise<void>((resolve) => {
+    const stop = (): void => {
+      for (const socket of sockets) socket.destroy();
+      server?.close();
+      resolve();
+    };
+    // A long-running command ends on a signal, not on a timer. `once` rather than `on`, so a
+    // second interrupt reaches the default handler and kills a process that will not stop.
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+  });
+
+  const drive = (socket: Socket, label: string): void => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+    const outcome = drivePeer(socket, sink, now);
+    // Printed on close rather than per message: a line per record turns a sync of a real log into
+    // a wall of output, and the totals are what an operator is actually asking about.
+    socket.on('close', () => report(label, outcome));
+  };
+
+  if (listen !== undefined) {
+    const port = Number(listen);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new UsageError(`--listen ${listen} is not a port`);
+    }
+    const address = args.flags.get('address') ?? '127.0.0.1';
+    let peers = 0;
+    server = createServer((socket) => {
+      if (peers >= SWARM_LIMITS.connections) {
+        socket.destroy();
+        return;
+      }
+      peers += 1;
+      socket.on('close', () => {
+        peers -= 1;
+      });
+      out(`peer connected from ${socket.remoteAddress ?? 'unknown'}`);
+      drive(socket, 'peer');
+    });
+    await new Promise<void>((resolve, reject) => {
+      server?.once('error', reject);
+      server?.listen(port, address, resolve);
+    });
+    out(`listening on ${address}:${port} — interrupt to stop`);
+  } else {
+    const target = connect!;
+    const split = target.lastIndexOf(':');
+    if (split <= 0) throw new UsageError(`--connect ${target} is not host:port`);
+    const host = target.slice(0, split);
+    const port = Number(target.slice(split + 1));
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new UsageError(`--connect ${target} is not host:port`);
+    }
+    const socket = await new Promise<Socket>((resolve, reject) => {
+      const dialled = createConnection({ host, port });
+      dialled.once('connect', () => resolve(dialled));
+      dialled.once('error', reject);
+    });
+    out(`connected to ${host}:${port} — interrupt to stop`);
+    drive(socket, 'peer');
+  }
+
+  await closed;
+  out(`log ${path} now holds ${store.length} record(s)`);
+  return 0;
+}
+
 async function cmdServe(args: Args): Promise<number> {
   const store = Store.open(required(args, 'log'), Math.floor(Date.now() / 1000));
   const started = Math.floor(Date.now() / 1000);
@@ -893,6 +1006,7 @@ const USAGE = `vayuweb-registry — local name registry (Phase 1: no network)
   verify     --log <file> --record <file containing hex> [--at <unix>]
   vectors
   serve      --log <file> [--port <n>] [--socket <path>] [--site <dir>]
+  sync       --log <file> (--listen <port> [--address <ip>] | --connect <host:port>)
 
 Flags are checked against the command that was typed, not against the tool as a whole, so
 'register --site ./public' is refused rather than accepted and dropped. 'renew' and 'transfer'
@@ -948,6 +1062,8 @@ export function main(argv: readonly string[]): number | Promise<number> {
         return cmdVectors();
       case 'serve':
         return cmdServe(args);
+      case 'sync':
+        return cmdSync(args);
       default:
         err(`unknown command: ${command}`);
         err('');

@@ -45,7 +45,11 @@ function run(argv: string[]): { code: number; out: string; err: string } {
   }) as typeof process.stderr.write;
   try {
     const result = main(argv);
-    assert.equal(typeof result, 'number', 'only `serve` is async, and no test here runs it');
+    assert.equal(
+      typeof result,
+      'number',
+      '`serve` and `sync` are the async commands, and no test here runs one to completion',
+    );
     return { code: result as number, out: written.join(''), err: errored.join('') };
   } finally {
     process.stdout.write = stdout;
@@ -276,6 +280,9 @@ function advertisedPerCommand(help: string): Map<string, Set<string>> {
   return perCommand;
 }
 
+/** Commands that open a listener instead of returning, and so are never run here. */
+const BINDS = new Set(['serve', 'sync']);
+
 test('AUDIT: each command accepts exactly the flags its own usage line advertises', () => {
   // **The first version of this test pinned the defect it was written to prevent.**
   //
@@ -306,9 +313,11 @@ test('AUDIT: each command accepts exactly the flags its own usage line advertise
     // and reaches a command cannot write anything outside it.
     const value = join(dir, 'x');
     for (const [command, advertised] of perCommand) {
-      // `serve` is the one command that would BIND rather than return, so it is exercised only in
-      // the refusing direction — which is safe, because the flag check runs before the dispatch.
-      if (command !== 'serve') {
+      // `serve` and `sync` are the commands that would BIND rather than return, so they are
+      // exercised only in the refusing direction — which is safe, because the flag check runs
+      // before the dispatch. Named rather than detected: there is no marker for "this one listens",
+      // and a test that guessed would start a listener the first time somebody added a third.
+      if (!BINDS.has(command)) {
         for (const flag of advertised) {
           const accepted = run([command, `--${flag}`, value]);
           assert.doesNotMatch(

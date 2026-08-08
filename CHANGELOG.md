@@ -10,6 +10,78 @@ it.
 
 ## [Unreleased]
 
+### Fixed — the replication driver asked for a range of the wrong log
+
+**Phase 2's third consensus-shaped defect, found the same way as the first two: by asking what
+*two* peers do.**
+
+`WANT.from` indexes the **remote** peer's log — REPLICATION.md 4.2 says "records of the remote's
+log" — and `drivePeer` passed `sink.length()`, its own total. The two quantities coincide only when
+one log is a prefix of the other, which is the shape every test in this repository happened to use.
+Two peers each holding one *different* record both have length 1, both announce `len` 1, and each
+concludes it needs nothing. They stay permanently diverged over a connection that looks healthy
+from both ends.
+
+The session-level tests could not see it. They call `nextWant(0, NOW)` with the position written by
+hand, so the one decision the driver actually makes was never exercised — the same shape as the
+`retryDeferred` and `joinSwarm` findings, where a mechanism was built, tested against itself, and
+connected to nothing that ships.
+
+`nextWant` no longer takes the position as a parameter. The session tracks two cursors of its own,
+and each of the four rules between them is separately mutation-tested:
+
+- **`fetchedThrough`** advances by records *delivered*, not records applied. A record already held
+  is a duplicate and one refused is a rejection, and both still occupy a position in the remote's
+  log — advancing only on `applied` would re-request the same index forever the first time a peer
+  sent something already held, which is every heal after a partition.
+- **`requestedThrough`** advances by the count actually asked for, not by a full batch. Assuming
+  each in-flight request covers `wantCount` overshoots near the end of a log: measured against a
+  remote claiming ten records, the second request started at index 257 and the sync stopped one
+  reply in.
+- **A reply pulls the request cursor back to what was delivered.** 4.3.a splits an honest reply on
+  a byte total the requester cannot predict, so a request that aimed at 256 and returned 216 leaves
+  forty records nobody would ask for again. Measured: a sync stopped at 216 of 256 and sat there.
+  This protocol has no request identifier, so a reply cannot be matched to its request and a
+  per-request range cannot be settled; the cost of the honest rule is that a range may be requested
+  twice and arrive as duplicates, which are accepted and explicitly not counted as progress.
+- **An expired want re-requests its range.** 4.3.b reclaims the slot; the range that slot was
+  asking for is a separate matter, and nothing else would ever ask for it again. This guard
+  survived its first mutation, which meant nothing was watching it — the reply path pulls the
+  cursor back too, so it is observable only when *nothing* arrives, which is the case the deadline
+  exists for and the case no other test created.
+
+### Added — a `sync` verb, and the first run the transport binding has ever had
+
+`swarm.ts` has held the framing, the discovery topic and a driver since Phase 2, and nothing that
+ships opened a socket: `joinSwarm` had no caller and the CLI had no verb. Every claim about
+replication rested on two objects joined by a pipe inside one process.
+
+- **`vayuweb-registry sync --listen <port> | --connect <host:port>`**. Loopback by default, and
+  `--address` is not defaulted to `0.0.0.0` — a default that publishes a registry to whatever
+  network the machine happens to be on is one an operator discovers afterwards. The protocol is
+  built to survive a hostile peer, but surviving one and inviting one are different choices.
+- **`sinkOver(store)`**, a `ReplicationSink` over a real log. `HELLO.root` had never carried a real
+  value in any run this project made: fifteen test sinks stub `treeRoot: () => new Uint8Array(32)`,
+  the tree code was written, the root was computed privately inside `cli.ts` for the control API,
+  and nothing joined the two. The sink reads through rather than snapshotting, because a driver
+  holds one for the life of a connection while the log grows underneath it.
+- **`registry/scripts/acceptance-replication.mjs`** — Phase 2's criterion, executed. Two OS
+  processes, independent stores, started in either order, converging over a real socket; then a
+  deliberate partition, a record written on one side while there is no path between them, and a
+  heal. Eleven checks.
+
+**It compares registry state, not merkle roots, and the first version got that wrong.** A log is
+ordered by arrival, so two peers holding exactly the same records in different orders have
+different roots — the ordinary outcome of a real sync. The harness reported converged peers as
+divergent. `HELLO.root` is a cheap hint that two logs are byte-identical, not a statement about
+registry state, and the harness now asserts the roots *differ* to keep that distinction visible.
+
+What this does not do is close the phase, and the script says so on every run: two processes here
+share a kernel, a clock and a filesystem. A second machine would exercise a different network stack
+and a genuinely independent clock, which is what the `CLOCK_SKEW` deferral path exists for. The
+ROADMAP prose claiming the criterion asks for "peers on other machines" is corrected in the same
+pass — the criterion says "independent peers", and it was being quoted more strictly than written.
+
 ### Fixed — prefetch counted blocks and weighed none of them
 
 `prefetch` bounded the NUMBER of distinct blocks and nothing bounded their size, so

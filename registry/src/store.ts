@@ -59,6 +59,8 @@ import {
 } from './verify.ts';
 import { verifyPow, rateWindow, requiredBits, EPOCH_SECONDS } from './pow.ts';
 import { lifecycleOf, isFullyReleased } from './lifecycle.ts';
+import { treeOf } from './merkle.ts';
+import type { ReplicationSink } from './replicate.ts';
 
 const LENGTH_PREFIX_BYTES = 4;
 
@@ -594,4 +596,40 @@ export function writeLog(path: string, entries: readonly Uint8Array[]): void {
     at += f.length;
   }
   writeFileSync(path, out);
+}
+
+/**
+ * A {@link ReplicationSink} over a real log.
+ *
+ * **`HELLO.root` had never carried a real value in any run this project made.** Fifteen test
+ * sinks stub `treeRoot: () => new Uint8Array(32)`, and no other sink existed — so the field
+ * REPLICATION.md gives a peer as the cheap check that two logs agree before either asks for
+ * anything was a constant, and a constant agrees with everybody. The tree code was written, the
+ * root was computed privately inside `cli.ts` for the control API, and nothing joined the two.
+ * That is the same shape as `retryDeferred` having no caller and `joinSwarm` having none.
+ *
+ * **It reads through rather than snapshotting.** A driver holds one sink for the life of a
+ * connection while the log grows underneath it — from its own peer, and from this process's other
+ * connections — so a `length()` captured at construction would go stale in exactly the situation
+ * the protocol exists for.
+ *
+ * The root is recomputed per call rather than cached. `HELLO` is sent once per connection and the
+ * control API asks rarely, so the cost is a hash over the log at a moment when nothing else is
+ * happening; a cache would need invalidating on every append and this module has enough state.
+ */
+export function sinkOver(store: Store): ReplicationSink {
+  return {
+    append: (bytes, now) => store.append(bytes, now),
+    length: () => store.length,
+    encodingAt: (index) => store.entryAt(index)?.bytes ?? null,
+    treeRoot: () => {
+      const entries: Uint8Array[] = [];
+      for (let i = 0; i < store.length; i += 1) {
+        const entry = store.entryAt(i);
+        if (entry === null) break;
+        entries.push(entry.bytes);
+      }
+      return treeOf(entries).root();
+    },
+  };
 }

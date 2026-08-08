@@ -439,6 +439,31 @@ export class ReplicationSession {
    * something happening and the whole defect was that nothing had to happen.
    */
   private outstanding: number[] = [];
+  /**
+   * How much of THIS REMOTE's log has been fetched on this connection.
+   *
+   * **Not this peer's own log length, which is what the driver used to pass in.** REPLICATION.md
+   * 4.2 asks for a range "of the remote's log", so the cursor indexes the remote's sequence — and
+   * the two quantities coincide only when one log is a prefix of the other. Two peers each holding
+   * one different record both have length 1, both announce `len` 1, and each concluded it needed
+   * nothing: permanently diverged over a connection that looked healthy from both ends.
+   *
+   * It lives here rather than in the caller because the session is the only thing that knows what
+   * arrived from whom. A caller cannot compute it, and the old signature invited it to try.
+   */
+  private fetchedThrough = 0;
+  /**
+   * How far requests have been AIMED into the remote's log.
+   *
+   * Separate from {@link fetchedThrough} because several requests are in flight at once: the next
+   * one must start after the last one asked for, not after the last one delivered, or eight
+   * outstanding requests would all ask for the same range.
+   *
+   * It is pulled back to `fetchedThrough` when a request expires, which is what makes the deadline
+   * a retransmission rather than only a slot release: a range nobody answered has to be asked for
+   * again, and nothing else in this session would ever ask for it.
+   */
+  private requestedThrough = 0;
   private readonly deferredQueue: Array<{ bytes: Uint8Array; at: number }> = [];
   /** Record hashes currently in {@link deferredQueue}, so a resend costs a peer nothing. */
   private readonly deferredKeys = new Set<string>();
@@ -599,6 +624,34 @@ export class ReplicationSession {
       } else rejected += 1;
     }
 
+    // **Advance the cursor into the remote's log by what this reply covered**, and only when the
+    // reply starts where the cursor is. A short reply is the normal case — 4.3.a splits on a byte
+    // total the requester cannot predict — so the next `WANT` must resume from where delivery
+    // actually reached, not from where the request was aimed.
+    //
+    // Counted in RECORDS DELIVERED, not in records applied. A record this peer already holds is a
+    // duplicate and one it refuses is a rejection, and both still occupy a position in the
+    // remote's log: advancing only on `applied` would re-request the same index forever the first
+    // time a peer sent something already held, which is every heal after a partition.
+    if (message.from <= this.fetchedThrough) {
+      this.fetchedThrough = Math.max(this.fetchedThrough, message.from + message.recs.length);
+      // **The request cursor falls back to what was DELIVERED, not to what was asked for.**
+      //
+      // 4.3.a splits an honest reply on a byte total the requester cannot predict, and 4.2's
+      // "fewer than requested" is the normal case at scale. So a request that aimed at 256 records
+      // and returned 216 leaves forty nobody will ever ask for again — the cursor had already
+      // moved past them. Measured: a sync stopped at 216 of 256 and sat there.
+      //
+      // Pulling back to delivery is the honest rule here because **this protocol has no request
+      // identifier** (REPLICATION.md section 3), so a reply cannot be matched to the request that
+      // prompted it and a per-request range cannot be settled. The cost is that with several
+      // requests in flight, a reply can cause a range another one already covers to be asked for
+      // twice; the responder serves it, the records arrive as duplicates, and duplicates are
+      // accepted and explicitly not counted as progress. The alternative cost is a sync that
+      // stalls forty records short and waits sixty seconds for a deadline to notice.
+      this.requestedThrough = this.fetchedThrough;
+    }
+
     // A reply releases the OLDEST outstanding request. The protocol carries no request identifier
     // (REPLICATION.md section 3), so a reply cannot be matched to the `WANT` that prompted it, and
     // "oldest" is chosen because the oldest is the most likely to have been abandoned — releasing
@@ -693,14 +746,27 @@ export class ReplicationSession {
    * rest of the connection while the peer broke no rule. The absence of a duty on one side has to
    * be paid for by a bound on the other, and this is that bound.
    */
-  nextWant(haveThrough: number, now: number): Want | null {
+  nextWant(now: number): Want | null {
     if (!this.helloReceived) return null;
     this.expireWants(now);
     if (this.outstanding.length >= LIMITS.outstandingWants) return null;
-    if (haveThrough >= this.remoteLength) return null;
-    const count = Math.min(LIMITS.wantCount, this.remoteLength - haveThrough);
+    // The cursor is the session's own, and it used to be a parameter. A caller that passed its
+    // local log length — which the shipping driver did — asked for a range of the wrong log.
+    const from = this.requestedThrough;
+    if (from >= this.remoteLength) return null;
+    const count = Math.min(LIMITS.wantCount, this.remoteLength - from);
     this.outstanding.push(now);
-    return { t: 'WANT', from: haveThrough, count };
+    // Advanced by the count actually asked for, not by a full `wantCount`. Assuming each in-flight
+    // request covers a whole batch overshoots near the end of a log — measured against a remote
+    // claiming ten records, the second request started at index 257 and the sync stopped one reply
+    // in, believing there was nothing left to ask for.
+    this.requestedThrough = from + count;
+    return { t: 'WANT', from, count };
+  }
+
+  /** How much of the remote's log this connection has taken delivery of. */
+  get fetched(): number {
+    return this.fetchedThrough;
   }
 
   /**
@@ -712,11 +778,19 @@ export class ReplicationSession {
    * decision to stop waiting, not a finding about anyone.
    */
   private expireWants(now: number): void {
+    let expired = 0;
     while (
       this.outstanding.length > 0 &&
       now - this.outstanding[0]! >= LIMITS.wantDeadlineSeconds
     ) {
       this.outstanding.shift();
+      expired += 1;
     }
+    // **A released slot is not enough on its own.** 4.3.b reclaims the slot; the RANGE that slot
+    // was asking for is still missing, and nothing else here would ever ask for it again. Pulling
+    // the request cursor back to what was actually delivered is what turns the deadline into a
+    // retransmission — which matters because a `WANT` is the only message this protocol ever
+    // re-sends, so without this a batch lost on the wire is lost for the life of the connection.
+    if (expired > 0) this.requestedThrough = this.fetchedThrough;
   }
 }

@@ -148,10 +148,27 @@ topic, the length-prefix framing that section 2.1 asks for and a stream does not
 driver that carries messages without ever reading the channel's authenticated remote key. Two
 peers driven over a pipe converge on identical state, each having verified locally.
 
-**Running it against peers on other machines is what remains**, and it is the part a sandbox
-cannot honestly claim: the acceptance test asks for independent peers, started in any order and
-deliberately partitioned, and a pipe between two objects in one process is not that however
-carefully it is wired.
+**The binding now has a caller, and the driver had never been run.** `registry/src/cli.ts` grew a
+`sync` verb — `--listen <port>` or `--connect <host:port>` — and
+`registry/scripts/acceptance-replication.mjs` runs two operating-system processes with their own
+logs, their own stores and their own state machines over a real TCP socket, severs the connection,
+writes a record on one side while there is no path between them, and heals it. They converge on
+identical registry state.
+
+Writing it produced this phase's **third** consensus-shaped defect, in the same way as the first
+two. `WANT.from` indexes the *remote* peer's log — 4.2 says "records of the remote's log" — and the
+driver passed its own log length. The two quantities coincide only when one log is a prefix of the
+other, which is the shape every test in the repository happened to use. Two peers each holding one
+different record therefore both had length 1, both announced `len` 1, and each concluded it needed
+nothing: permanently diverged over a connection that looked healthy from both ends. The
+session-level tests could not see it, because they passed the position in by hand.
+
+**Running it against peers on other machines is still what remains.** Two processes here share a
+kernel, a clock and a filesystem, and a second machine would additionally exercise a different
+network stack and a genuinely independent clock — which is what the whole `CLOCK_SKEW` deferral
+path exists for. The acceptance criterion below says "independent peers", and two OS processes are
+that; it does not say "two machines", and this line used to assert that it did. The gap between
+the code and its claims is closed. The phase is not.
 
 Writing the binding produced the phase's third consensus-shaped defect, and the same way as the
 first two. The first driver sent `HELLO`, answered what it was asked, and never called

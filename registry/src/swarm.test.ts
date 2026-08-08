@@ -730,3 +730,56 @@ test('AUDIT: joinSwarm refuses a peer over the connection cap without leaking a 
 
   await joined.leave();
 });
+
+test('AUDIT: two peers holding one different record each actually exchange them', () => {
+  // **`WANT.from` indexes the REMOTE peer's log, and the driver passed its own log length.**
+  //
+  // REPLICATION.md 4.2: "A peer that has fewer than `len` records **of the remote's log** MAY send
+  // `WANT` for any sub-range it lacks." The quantity that belongs there is how much of THIS remote's
+  // log this peer has fetched on this connection. `drivePeer` passed `sink.length()` — its own
+  // total — and the two coincide only when one log is a prefix of the other, which is the shape
+  // every test in this repository happened to use.
+  //
+  // So two peers each holding one DIFFERENT record both have length 1, both announce `len` 1, and
+  // each concludes it needs nothing. They stay permanently diverged while the connection looks
+  // healthy from both ends — the third time this phase has produced a defect of exactly that
+  // description, and the first two are written up in the roadmap.
+  //
+  // The session-level tests could not see it: they call `nextWant(0, NOW)` with the number written
+  // by hand, so the one decision the driver actually makes was never exercised.
+  const clock = { at: NOW };
+  const alice = fakeStream();
+  const bob = fakeStream();
+
+  // Each sink holds one record the other does not, and reports it as its own length.
+  const sinkFor = (mine: string, seen: string[]) => ({
+    append: (bytes: Uint8Array) => {
+      seen.push(new TextDecoder().decode(bytes));
+      return { outcome: 'accept' } as never;
+    },
+    length: () => 1,
+    encodingAt: (index: number) => (index === 0 ? new TextEncoder().encode(mine) : null),
+    treeRoot: () => new Uint8Array(32).fill(mine.charCodeAt(0)),
+  });
+  const aliceSeen: string[] = [];
+  const bobSeen: string[] = [];
+  drivePeer(alice, sinkFor('alice-record', aliceSeen), () => clock.at);
+  drivePeer(bob, sinkFor('bob-record', bobSeen), () => clock.at);
+
+  // Wire the two together: whatever one writes, the other receives.
+  const relay = (from: typeof alice, to: typeof bob): number => {
+    let moved = 0;
+    while (from.written.length > 0) {
+      to.feed(from.written.shift()!);
+      moved += 1;
+    }
+    return moved;
+  };
+  for (let round = 0; round < 8; round += 1) {
+    relay(alice, bob);
+    relay(bob, alice);
+  }
+
+  assert.deepEqual(aliceSeen, ['bob-record'], 'alice must receive what only bob had');
+  assert.deepEqual(bobSeen, ['alice-record'], 'bob must receive what only alice had');
+});
