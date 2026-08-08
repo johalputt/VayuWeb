@@ -10,7 +10,7 @@ The bar is deliberately "imported somewhere OR named in a test". Something exerc
 tests is not dead -- it is verified surface, and this project deliberately exports internals so
 they can be attacked directly.
 
-## Four ways this check was not doing its job
+## Five ways this check was not doing its job
 
 Every one was found by mutating it -- deliberately re-breaking the code after fixing the defect
 before it -- and none by reading it. That matters, because the previous version reads perfectly
@@ -38,6 +38,15 @@ definition. Re-exported names therefore require an external dependent.
 Fixing those three immediately surfaced a real one: `store.ts` re-exported `GRACE_SECONDS` and
 `QUARANTINE_SECONDS`, which every consumer imports from `lifecycle.ts` instead. The re-export and
 the import feeding it were both inert, and had been invisible the whole time.
+
+**A doc comment counted as a use.** The in-file rule asked whether the symbol's name appeared more
+than once in the defining file, over the raw text -- and a well-documented export names itself in
+its own doc comment, which is the second occurrence. `swarm.ts`'s `joinSwarm`, the sole entry point
+of the reference transport binding, was certified live on the strength of the sentence describing
+it; nothing imported it and no test named it. Comments and string literals are therefore blanked
+out before any name is counted. Import specifiers are strings, so the module-dependency test still
+reads the untouched source -- stripping both at once fails ninety-two live exports and looks, from
+the output alone, exactly like a real regression.
 
 **And there was no floor.** Narrowing the export pattern so `function`, `const`, `interface` and
 `type` were ignored dropped the corpus from 305 matches to 18 and still printed OK, because
@@ -73,6 +82,21 @@ EXPORT = re.compile(
 # `export { A, B as C };` and `export { A } from './m.ts';`. A separate pattern because the
 # declaration form above cannot express it, and its absence meant re-exports went unexamined.
 REEXPORT = re.compile(r"^export\s+(?:type\s+)?\{([^}]*)\}", re.M)
+
+
+COMMENTS_AND_STRINGS = re.compile(
+    r"""/\*[\s\S]*?\*/|//[^\n]*|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`""",
+    re.M,
+)
+
+
+def strip_noise(text):
+    """Blank out comments and string literals, preserving line numbers.
+
+    Replacement is space-for-character rather than deletion so that every reported line number
+    still points at the line it came from.
+    """
+    return COMMENTS_AND_STRINGS.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
 
 
 def read(path):
@@ -132,7 +156,11 @@ def main():
     consumers = list(sources)
     for extra in EXTRA_ROOTS:
         consumers.extend(ts_files(extra))
-    corpus = {path: read(path) for path in consumers}
+    # Two views of the same files. `corpus` has comments and string literals blanked, because a
+    # mention of a symbol in prose is not a use of it. `raw` is untouched, because an import
+    # specifier is a string literal and the dependency test below has to still see it.
+    raw = {path: read(path) for path in consumers}
+    corpus = {path: strip_noise(body) for path, body in raw.items()}
 
     unused = []
     total = 0
@@ -162,7 +190,7 @@ def main():
                 # half, a symbol whose name appears anywhere -- in an unrelated module, in a
                 # comment, in another module's export of the same name -- counts as used, and the
                 # check silently stops enforcing anything for that symbol.
-                if word.search(body) and depends_on(body, name):
+                if word.search(body) and depends_on(raw[other], name):
                     used = True
                     break
             if not used:

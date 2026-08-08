@@ -77,7 +77,7 @@ jobs:
 
           found = subprocess.run(
               ['git', 'grep', '-nE', r'\b[0-9a-fA-F]{64}\b',
-               '--', 'registry/src/*.ts', ':!*.test.ts'],
+               '--', 'registry/src/*.ts', 'client/src/*.rs', ':!*.test.ts'],
               capture_output=True, text=True).stdout.splitlines()
 
           hits = [line for line in found if line.split(':')[0] not in allow]

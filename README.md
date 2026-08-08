@@ -77,8 +77,8 @@ term, are recorded there as unresolved rather than quietly decided.
 
 | | |
 |---|---|
-| **Status** | Specification complete; implementation started at [Phase 1](docs/ROADMAP.md) |
-| **Code** | `registry/` holds the record format, verification, proof-of-work, lifecycle, merkle tree, convergence and the resolution algorithm, with a command-line tool. `proxy/` and `client/` are still placeholders |
+| **Status** | Specifications drafted and governing the work, with open gaps recorded rather than closed — Phase 0's done-when is **not satisfied today** ([ROADMAP](docs/ROADMAP.md)), and the record schema still carries no log anchor ([REGISTRY.md](docs/spec/REGISTRY.md)). Implementation started at [Phase 1](docs/ROADMAP.md) |
+| **Code** | `registry/` holds the record format, verification, proof-of-work, lifecycle, merkle tree, convergence and the resolution algorithm, with a command-line tool. `client/` holds a Rust crate (`lib.rs`, `secrets.rs`, `control.rs`) with tests and its own required CI leg. `proxy/` holds only a README; the proxy lives in `registry/src` |
 | **Charter** | [The VayuWeb Constitution](constitution/CONSTITUTION.md) — drafted and governing this work, but **not yet in force**: Article 60.3 makes commencement conditional on publishing the canonical digest of Article 1.7, and that anchor does not exist yet |
 | **Licence** | CC0 for the charter, specifications and artwork · MIT for code · no CLA |
 | **Home** | Long-term development moves to **Radicle**; GitHub is a temporary public mirror |
@@ -194,7 +194,7 @@ VayuWeb/
 ├── registry/           # Registry, replication, resolution, proxy  (built, no network)
 ├── conformance/        # vectors.json — the interoperability contract
 ├── proxy/              # Reserved; the proxy lives in registry/src (not started)
-├── client/             # Tauri desktop application                (not started)
+├── client/             # Tauri desktop client — Rust crate  (secrets, control)
 ├── scripts/            # Build, release and corpus-consistency gates
 └── assets/             # Brand artwork
 ```

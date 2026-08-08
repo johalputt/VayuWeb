@@ -287,3 +287,97 @@ test('the store directory is created private', () => {
   const mode = statSync(path).mode & 0o777;
   assert.equal(mode, 0o700, 'a blockstore is not world-readable');
 });
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT: a bound that counted blocks and never weighed them                   */
+/* -------------------------------------------------------------------------- */
+
+/** A raw-leaf CID over exactly these bytes, so the block is genuinely what its identifier says. */
+function rawCidFor(bytes: Uint8Array): string {
+  return encodeCid({ version: 1, codec: CID_PARAMETERS.codecRaw, digest: sha256(bytes) });
+}
+
+test('AUDIT: prefetch refuses an oversized block before it is resident', async () => {
+  // **`limits.blocks` bounds the COUNT and nothing bounded the SIZE.** `prefetch` awaited whatever
+  // the store returned, hashed it, and held it; `FETCH_LIMITS.blockBytes` is enforced only
+  // downstream in `fetchVerified`, which runs after the whole tree is already in memory. At a
+  // budget of 4,096 distinct blocks that is an unbounded memory commitment behind a bound whose
+  // own comment says it "bounds the network".
+  //
+  // **The integrity check does not save it, and that is the part worth being clear about.** It is
+  // the reason the module gives for the budget being meaningful — "a peer cannot fill this map
+  // with rubbish keyed by CIDs it does not own". True, and irrelevant here: an attacker publishing
+  // their own content computes a genuine CID over four megabytes as easily as over four hundred
+  // bytes. The bytes hash correctly, the check passes, and the memory is spent.
+  //
+  // Reproduced before the fix: a 4 MiB raw leaf with a real CID was accepted and held.
+  const oversize = new Uint8Array(CID_PARAMETERS.chunkBytes * 8);
+  for (let i = 0; i < oversize.length; i += 1) oversize[i] = (i * 7 + 3) & 0xff;
+  const cid = rawCidFor(oversize);
+  assert.ok(oversize.length > 1_048_576, 'the fixture must exceed the per-block limit');
+
+  const store = fakeStore();
+  store.contents.set(cid, oversize);
+  assert.equal(
+    await refusal(async () => prefetch(store, store.codec, cid, { blocks: 4096 })),
+    'RESPONSE_TOO_LARGE',
+  );
+
+  // A block at the limit is still fine, or the check has been drawn in the wrong place. This is
+  // the assertion that separates "bounded" from "broken".
+  const legal = new Uint8Array(CID_PARAMETERS.chunkBytes);
+  for (let i = 0; i < legal.length; i += 1) legal[i] = (i * 5 + 1) & 0xff;
+  const legalCid = rawCidFor(legal);
+  const okStore = fakeStore();
+  okStore.contents.set(legalCid, legal);
+  const held = await prefetch(okStore, okStore.codec, legalCid, { blocks: 4096 });
+  assert.deepEqual(held.get(legalCid), legal);
+});
+
+test('AUDIT: prefetch bounds the total it will hold, not only each block', async () => {
+  // Per-block bounding alone leaves the product. 4,096 blocks one byte under the limit is four
+  // gigabytes, every block individually legal, and the count budget never reached. A bound that
+  // can be multiplied is not a bound on memory.
+  //
+  // The tree is a chain of raw leaves reached through a dag-pb directory, so each block is
+  // genuinely referenced by the one before it and nothing here depends on the store colluding.
+  const chunk = CID_PARAMETERS.chunkBytes;
+  const store = fakeStore();
+  // **The content must be DISTINCT PER CHUNK, and two fixtures in a row were not.**
+  //
+  // The first was `new Uint8Array(chunk * 24)` — twenty-four chunks of zeros, which are one block
+  // with one CID, deduplicated by `seen` into a two-block tree no budget would ever stop.
+  //
+  // The second looked like a fix and was the same bug: `(i * 31 + 7) & 0xff` has period 256, and
+  // the chunk size is a multiple of 256, so every chunk was again byte-identical. A generator that
+  // varies *within* a chunk says nothing about whether chunks differ from each other, and the CID
+  // is computed over the chunk.
+  //
+  // So the chunk index goes into the bytes, and the test asserts the tree it got rather than the
+  // tree it meant — which is the assertion that would have caught both attempts.
+  const content = new Uint8Array(chunk * 24);
+  for (let i = 0; i < content.length; i += 1) {
+    content[i] = ((i * 31 + 7) ^ (Math.floor(i / chunk) * 97)) & 0xff;
+  }
+  const { blocks, cid: fileCid } = fileBlocks(content);
+  for (const block of blocks) store.contents.set(block.cid, block.bytes);
+  assert.equal(
+    new Set(blocks.map((b) => b.cid)).size,
+    blocks.length,
+    'every block in the fixture must be distinct, or `seen` collapses the tree',
+  );
+  assert.ok(blocks.length > 20, `the fixture must be a many-block tree, got ${blocks.length}`);
+
+  // A total far below what 24 chunks weigh, so the walk must stop part way.
+  const code = await refusal(async () =>
+    prefetch(store, store.codec, fileCid, { blocks: 4096, totalBytes: chunk * 4 }),
+  );
+  assert.equal(code, 'RESPONSE_TOO_LARGE', 'the running total must stop the walk');
+
+  // And the same tree completes when the total is generous, or the bound is just a broken fetch.
+  const all = await prefetch(store, store.codec, fileCid, {
+    blocks: 4096,
+    totalBytes: chunk * 64,
+  });
+  assert.ok(all.size > 1, 'the whole tree must still be reachable under a real budget');
+});

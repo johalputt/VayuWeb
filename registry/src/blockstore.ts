@@ -18,6 +18,14 @@
  * that referred it, and bounds the traversal. A library that returns the wrong bytes is caught
  * here exactly as a hostile peer is, because to this code they are the same thing.
  *
+ * **{@link prefetch} is the exception, and it used to be an unstated one.** It walks the tree
+ * itself, ahead of the traversal, because a `BlockSource` is synchronous and a network is not. So
+ * "every check in `fetch.ts` stays in front of the network" was true of the ordinary path and
+ * false of this one: `prefetch` bounded the NUMBER of distinct blocks and weighed none of them,
+ * while the byte limits it relies on are enforced downstream, after the whole tree is resident.
+ * It now applies the per-block and total byte bounds itself, before hashing and before keeping —
+ * a duplicated check, stated as one, because the alternative is a claim that is only mostly true.
+ *
  * ## Helia is not a dependency of this package, deliberately
  *
  * Nothing here imports it. The store arrives as {@link AsyncBlocks} and the CID codec as
@@ -45,7 +53,7 @@
 
 import { mkdirSync } from 'node:fs';
 
-import { FetchError, decodeNode, type BlockSource } from './fetch.ts';
+import { FETCH_LIMITS, FetchError, decodeNode, type BlockSource } from './fetch.ts';
 import { CID_PARAMETERS, decodeCid, sha256 } from './content.ts';
 import type { Block } from './unixfs.ts';
 
@@ -202,11 +210,13 @@ export async function prefetch(
   blocks: AsyncBlocks,
   codec: CidCodec,
   root: string,
-  limits: { blocks: number; timeoutMs?: number },
+  limits: { blocks: number; timeoutMs?: number; totalBytes?: number },
 ): Promise<Map<string, Uint8Array>> {
   const held = new Map<string, Uint8Array>();
   const queue: string[] = [root];
   const seen = new Set<string>();
+  const totalBytes = limits.totalBytes ?? FETCH_LIMITS.blocks * FETCH_LIMITS.blockBytes;
+  let weighed = 0;
 
   while (queue.length > 0) {
     const cid = queue.shift()!;
@@ -228,6 +238,34 @@ export async function prefetch(
       limits.timeoutMs ?? STORE_LIMITS.blockMs,
       cid,
     );
+
+    // **Weighed before it is hashed, and before it is kept.** The budget above counts DISTINCT
+    // BLOCKS and weighs none of them, so it bounded nothing that costs memory: `FETCH_LIMITS`
+    // .blockBytes was enforced only downstream in `fetchVerified`, which runs once the whole tree
+    // is already resident. Measured before this check existed, a four-megabyte raw leaf carrying a
+    // genuine CID was accepted and held.
+    //
+    // The integrity check below is not a defence against this and it is worth saying why, because
+    // it is the reason this module gives for the count budget being meaningful. "A peer cannot
+    // fill this map with rubbish keyed by CIDs it does not own" is true and beside the point: an
+    // attacker publishing their own content computes a real CID over four megabytes as easily as
+    // over four hundred bytes. The bytes hash correctly and the memory is spent either way.
+    if (bytes.length > FETCH_LIMITS.blockBytes) {
+      throw new FetchError(
+        'RESPONSE_TOO_LARGE',
+        `block for ${cid} is ${bytes.length} bytes, over the ${FETCH_LIMITS.blockBytes} limit`,
+      );
+    }
+    // And a running total, because per-block bounding alone leaves the product: four thousand
+    // blocks each one byte under the limit is four gigabytes, every block individually legal and
+    // the count budget never reached. A bound that can be multiplied is not a bound on memory.
+    weighed += bytes.length;
+    if (weighed > totalBytes) {
+      throw new FetchError(
+        'RESPONSE_TOO_LARGE',
+        `this tree weighs more than the ${totalBytes}-byte budget`,
+      );
+    }
 
     // The same check the traversal makes, applied here so the budget above counts real blocks
     // rather than whatever a peer chose to return.

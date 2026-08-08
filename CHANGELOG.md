@@ -10,6 +10,69 @@ it.
 
 ## [Unreleased]
 
+### Fixed — prefetch counted blocks and weighed none of them
+
+`prefetch` bounded the NUMBER of distinct blocks and nothing bounded their size, so
+`FETCH_LIMITS.blockBytes` was enforced only downstream in `fetchVerified` — after the whole tree was
+already resident. At a budget of 4,096 blocks that is an unbounded memory commitment behind a bound
+whose own comment said it "bounds the network". Measured: a four-megabyte raw leaf carrying a
+genuine CID was accepted and held.
+
+The integrity check is not a defence against this, and it is the reason the module gave for the
+count budget being meaningful. "A peer cannot fill this map with rubbish keyed by CIDs it does not
+own" is true and beside the point: an attacker publishing their own content computes a real CID over
+four megabytes as easily as over four hundred bytes.
+
+Both bounds now apply before hashing and before keeping — the per-block limit, and a running total,
+because per-block bounding alone leaves the product. The module header claimed every check in
+`fetch.ts` "stays in front of the network"; that was true of the ordinary path and false of this
+one, which walks the tree itself because a `BlockSource` is synchronous and a network is not. It now
+says so.
+
+**Two fixtures in a row failed to be distinct.** The first was 24 chunks of zeros — one block with
+one CID, deduplicated into a two-block tree no budget would stop. The second looked like a fix and
+was the same bug: `(i * 31 + 7) & 0xff` has period 256 and the chunk size is a multiple of 256, so
+every chunk was again byte-identical. A generator that varies *within* a chunk says nothing about
+whether chunks differ from each other. The test now asserts the tree it got rather than the tree it
+meant, which is the assertion that would have caught both attempts.
+
+### Fixed — the dead-code gate read prose as usage
+
+`check-deadcode.py` counted occurrences of an exported name with a word regex over the raw file
+text, comments included. So an export mentioned a second time in its own neighbouring doc comment
+was certified as used, and `joinSwarm` — the sole entry point of what the roadmap calls the
+reference transport binding — was unreachable production code the gate reported as live.
+
+Comments and string literals are now blanked before the count (the raw text is kept for the
+dependency test, whose import specifiers *are* string literals). Proved by probe: an export
+mentioned only in its own comment is now reported, and the old gate calls the same tree clean.
+
+Turning the gate on immediately reported `joinSwarm`. It is not deleted — it is the binding the
+roadmap describes — so it now has the tests it never had: that it joins the derived topic as both
+server and client, awaits the join, greets every peer that connects, releases a slot when a
+connection closes, and drops a peer over the cap without greeting it or leaking the slot. Everything
+needed is injected already; `SwarmOptions.swarm` exists so this module is not the place that decides
+a node must speak HyperDHT, and that same injection is what makes the binding checkable with no
+network at all.
+
+### Fixed — four claims in shipped documents that the code contradicted
+
+- **`README.md` said "Specification complete"**, contradicted by ROADMAP.md's own Phase 0 row ("it
+  is not satisfied today") and by REGISTRY.md's recorded gap ("**No field carries a log anchor**").
+  It also called `client/` a placeholder and annotated it "(not started)" while `client/src` holds
+  three modules under a required CI job. `proxy/` genuinely does hold only a README, so that half
+  stands.
+- **`check-status-claims.py` could not have caught it.** Every pattern in both of its lists asks for
+  the word "implemented" or "code exists" — and "are still placeholders" is what somebody actually
+  writes when annotating a directory listing. The phrasing is added to both lists. Deliberately not
+  added: a "not started" pattern, which would fire on the true sentence about `proxy/`.
+- **The Ed25519 key-literal scan searched `registry/src/*.ts` only**, while its own comment reasons
+  about the client keeping keys in the OS keychain. A 64-hex literal committed into `client/src/`
+  was invisible to it; proved by probe, and by the same probe being found once the path is added.
+- **Phase 1's acceptance test was quoted with a clause removed** in `cli.ts` and `store.ts` — both
+  dropped "and a second tool written from the specification agrees on every vector", the half no
+  work in this repository can satisfy. Restored, with the limit named.
+
 ### Fixed — one throw anywhere took the whole resolver down
 
 `serveConnection` called its handler with nothing around it, and no module in the registry installs

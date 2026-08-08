@@ -6,9 +6,11 @@
  * ## What this is not, stated first
  *
  * This is **not** Hypercore and **not** Hyperbee. It is a single-writer, file-backed log with an
- * in-memory index rebuilt by replay, and it exists so that Phase 1 can be finished and tested —
- * "a command-line tool can register a name into a local log, resolve it back, and reject every
- * malformed and replayed record" — without dragging the peer-to-peer stack in first.
+ * in-memory index rebuilt by replay, and it exists so that Phase 1's tooling can be built and
+ * tested — "a command-line tool can register a name into a local log, resolve it back, reject
+ * every malformed and replayed record in the test-vector set, and a second tool written from the
+ * specification agrees on every vector" — without dragging the peer-to-peer stack in first. The
+ * second tool is not in this repository, so the phase is not finished by this code.
  *
  * The difference matters and is not cosmetic. A Hypercore log is a merkle tree whose entries are
  * self-authenticating, which is what lets a light client verify a record without replaying

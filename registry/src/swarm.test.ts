@@ -13,7 +13,9 @@ import {
   drivePeer,
   frame,
   replicationTopic,
+  joinSwarm,
   type PeerStream,
+  type SwarmOptions,
 } from './swarm.ts';
 import { LIMITS, PROTOCOL_VERSION, decodeMessage, encodeMessage } from './replicate.ts';
 import { Store } from './store.ts';
@@ -612,4 +614,119 @@ test('AUDIT: a deferred record is actually retried, not merely held', () => {
     appended > afterArrival,
     'the deferred record was never re-offered, so the skew cost a loss rather than a retry',
   );
+});
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT: the reference transport binding, which nothing exercised             */
+/* -------------------------------------------------------------------------- */
+
+/** A Hyperswarm-shaped double. Satisfies `SwarmOptions['swarm']` structurally, with no cast. */
+function fakeSwarm(): {
+  swarm: SwarmOptions['swarm'];
+  connect: (stream: PeerStream) => void;
+  joined: Uint8Array[];
+  options: { server?: boolean; client?: boolean }[];
+  destroyed: number;
+  flushes: number;
+} {
+  const listeners: ((stream: PeerStream, info: unknown) => void)[] = [];
+  const self = {
+    joined: [] as Uint8Array[],
+    options: [] as { server?: boolean; client?: boolean }[],
+    destroyed: 0,
+    flushes: 0,
+    connect: (stream: PeerStream) => {
+      for (const l of listeners) l(stream, { publicKey: new Uint8Array(32).fill(0xbe) });
+    },
+    swarm: {
+      on(_event: 'connection', listener: (stream: PeerStream, info: unknown) => void) {
+        listeners.push(listener);
+      },
+      join(topic: Uint8Array, options?: { server?: boolean; client?: boolean }) {
+        self.joined.push(topic);
+        self.options.push(options ?? {});
+        return {
+          flushed: async () => {
+            self.flushes += 1;
+          },
+        };
+      },
+      destroy: async () => {
+        self.destroyed += 1;
+      },
+    },
+  };
+  return self;
+}
+
+test('AUDIT: joinSwarm joins the specified topic and drives every peer that connects', async () => {
+  // **`joinSwarm` had no caller and no test.** It is the sole entry point of what the roadmap
+  // calls the reference transport binding, and the dead-code gate certified it as live — because
+  // that gate counted occurrences of the name over the raw file text, and the name appears a
+  // second time in its own neighbouring doc comment. A gate that reads prose as usage will
+  // certify any export that mentions itself.
+  //
+  // So this is the test the gate was standing in for. Everything it needs is injected already:
+  // `SwarmOptions.swarm` exists so that this module is not the place that decides a VayuWeb node
+  // must speak HyperDHT, and that same injection is what makes the binding checkable with no
+  // network at all.
+  const fake = fakeSwarm();
+  const joined = await joinSwarm({ swarm: fake.swarm, sink: emptySink(), now: () => NOW });
+
+  // The topic is the derived one, not a literal — the same value `replicationTopic()` computes
+  // from the string the specification names.
+  assert.equal(fake.joined.length, 1);
+  assert.deepEqual(fake.joined[0], replicationTopic());
+  // Server AND client: a node that only dialled would never be findable, and a node that only
+  // listened would never find anyone. Both halves are what makes a peer set rather than a service.
+  assert.deepEqual(fake.options[0], { server: true, client: true });
+  // The join is awaited, so a caller that gets a Swarm back has actually joined.
+  assert.equal(fake.flushes, 1);
+
+  // A connecting peer is driven, which is observable as the HELLO this end sends unprompted.
+  const stream = fakeStream();
+  fake.connect(stream);
+  assert.equal(joined.peers, 1);
+  assert.equal(stream.written.length, 1, 'a connected peer must be greeted');
+  assert.equal(decodeMessage(stream.written[0]!.subarray(SWARM_LIMITS.prefixBytes)).t, 'HELLO');
+
+  // And the count follows the connection rather than only counting up.
+  stream.destroy();
+  assert.equal(joined.peers, 0);
+
+  await joined.leave();
+  assert.equal(fake.destroyed, 1, 'leaving must destroy the swarm, not merely stop counting');
+});
+
+test('AUDIT: joinSwarm refuses a peer over the connection cap without leaking a slot', async () => {
+  // The cap is the only thing bounding how much memory a stranger can make this node hold, and
+  // the refusal path is where the sibling cap in serve.ts leaked a slot on every refusal. Here the
+  // refused stream must be destroyed and must not be driven — a greeted peer is a peer this node
+  // is talking to, cap or no cap.
+  const fake = fakeSwarm();
+  const joined = await joinSwarm({ swarm: fake.swarm, sink: emptySink(), now: () => NOW });
+
+  const accepted: FakeStream[] = [];
+  for (let i = 0; i < SWARM_LIMITS.connections; i += 1) {
+    const s = fakeStream();
+    fake.connect(s);
+    accepted.push(s);
+  }
+  assert.equal(joined.peers, SWARM_LIMITS.connections);
+
+  const overflow = fakeStream();
+  fake.connect(overflow);
+  assert.equal(overflow.destroyed, true, 'the peer over the cap is dropped');
+  assert.equal(overflow.written.length, 0, 'and never greeted');
+  assert.equal(joined.peers, SWARM_LIMITS.connections, 'the refusal took no slot');
+
+  // Closing one makes room again, so the cap is a cap and not a lifetime quota.
+  accepted[0]!.destroy();
+  assert.equal(joined.peers, SWARM_LIMITS.connections - 1);
+  const later = fakeStream();
+  fake.connect(later);
+  assert.equal(later.destroyed, false);
+  assert.equal(later.written.length, 1, 'and the new peer is greeted');
+
+  await joined.leave();
 });

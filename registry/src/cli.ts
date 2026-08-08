@@ -2,8 +2,10 @@
  * `vayuweb-registry` — the Phase 1 command-line tool.
  *
  * docs/ROADMAP.md Phase 1 is done when "a command-line tool can register a name into a local
- * log, resolve it back, reject every malformed and replayed record in the test-vector set".
- * This is that tool.
+ * log, resolve it back, reject every malformed and replayed record in the test-vector set, and a
+ * second tool written from the specification agrees on every vector". This is the first of those
+ * two tools; the second must come from someone working only from the specification, so this tool
+ * cannot on its own satisfy the phase.
  *
  * Two things it deliberately does not do:
  *

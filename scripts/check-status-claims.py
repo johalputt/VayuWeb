@@ -42,6 +42,11 @@ CLAIMS = [
     # fetch.ts -- a pattern that is exact about a sentence nobody writes twice the same way.
     re.compile(r"nothing (?:\w+ )?(?:here |below |in this document )?(?:has been |is )implemented", re.I),
     re.compile(r"no (?:registry|proxy|client) code exists", re.I),
+    # "still placeholders" said of a component that has source and a CI leg. README.md carried
+    # this about `client/` while client/src held lib.rs, secrets.rs and control.rs behind a
+    # required job -- the earlier patterns all asked for the word "implemented", which is not
+    # the word anybody reaches for when annotating a directory listing.
+    re.compile(r"(?:is|are) still (?:a |mere )?placeholders?", re.I),
 ]
 
 # Documents whose text is deliberately frozen, and why. An exemption is a written reason or it is
@@ -89,6 +94,7 @@ PROJECT_CLAIMS = [
     re.compile(r"nothing (?:\w+ )?(?:here |below |in this document )?(?:has been |is )implemented", re.I),
     re.compile(r"no code to write", re.I),
     re.compile(r"not yet implemented", re.I),
+    re.compile(r"(?:is|are) still (?:a |mere )?placeholders?", re.I),
 ]
 
 
