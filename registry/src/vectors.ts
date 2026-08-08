@@ -965,7 +965,19 @@ export interface ResolutionVector {
   readonly hasVerifiedHead: boolean;
   readonly now: number;
   readonly expect:
-    | { readonly outcome: 'ok'; readonly source: string }
+    | {
+        readonly outcome: 'ok';
+        readonly source: string;
+        /**
+         * The selected entry's value in hex, where naming the type is not enough.
+         *
+         * The suite could only say *which type* won, so a record carrying two `cid` entries had
+         * no expressible answer — and that is precisely the case in which two conforming
+         * implementations fetch different content from the same signed record. A vector set that
+         * cannot state the disagreement cannot catch it.
+         */
+        readonly value?: string;
+      }
     | { readonly outcome: 'error'; readonly code: string };
 }
 
@@ -1089,6 +1101,28 @@ export function buildResolutionVectors(): ResolutionVector[] {
   // wrong by passing the base32 text and being refused as BAD_RECORD_ENTRY.
   const CID = Uint8Array.from([0x01, 0x55, 0x12, 0x20, ...new Uint8Array(32).fill(0xab)]);
   return [
+    {
+      // Two entries of one type, which the selection rule ordered across types and never within
+      // one. First in record order wins; deterministic CBOR fixes that order on the wire.
+      name: 'resolve/first-of-two-same-type',
+      rule: 'RESOLUTION.md: with more than one entry of the selected type, take the first in record order',
+      host: 'atlas.vayu',
+      record: toHex(withEntries([entry('cid', CID), entry('cid', new Uint8Array(36).fill(0xee))])),
+      hasVerifiedHead: true,
+      now: VECTOR_NOW + 60,
+      expect: { outcome: 'ok', source: 'cid', value: toHex(CID) },
+    },
+    {
+      // The same record with the entries reversed must select the other one, or the vector above
+      // passes against an implementation that happened to prefer those bytes.
+      name: 'resolve/first-of-two-same-type-reversed',
+      rule: 'RESOLUTION.md: record order is what decides, not the value',
+      host: 'atlas.vayu',
+      record: toHex(withEntries([entry('cid', new Uint8Array(36).fill(0xee)), entry('cid', CID)])),
+      hasVerifiedHead: true,
+      now: VECTOR_NOW + 60,
+      expect: { outcome: 'ok', source: 'cid', value: toHex(new Uint8Array(36).fill(0xee)) },
+    },
     {
       name: 'resolve/pointer-beats-snapshot',
       rule: 'RESOLUTION.md: with several content entries present, select ipns before cid',

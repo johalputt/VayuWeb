@@ -504,3 +504,37 @@ test("AUDIT: attestation verification cannot be aimed at the reader's own networ
   assert.match(spec, /Redirects MUST NOT be followed/);
   assert.match(spec, /8 KiB/);
 });
+
+test('AUDIT: two entries of the same type resolve the same way in every implementation', () => {
+  // **A fork, and the kind this project exists to hunt.** Uniqueness is imposed on exactly one
+  // entry type: `alias` is at most one and must not coexist with anything. `cid`, `ipns`, `peer`
+  // and `txt` may each appear up to `MAX_RECORD_ENTRIES` — thirty-two — times in one signed record.
+  //
+  // RESOLUTION.md's selection rule orders the TYPES ("ipns, cid, alias") and says nothing about
+  // which entry wins when a record carries two of the chosen one. `selectSource` takes the first
+  // in record order; an implementer who sorted by value, or took the last, or preferred the
+  // shortest, would be equally conformant and would fetch **different content from the same signed
+  // record**. Nobody is attacking anything here: the owner signed both entries. Two readers simply
+  // see two different sites and neither can tell.
+  //
+  // The record is order-preserving on the wire — deterministic CBOR fixes the array — so first-in-
+  // record-order is well defined for everyone. It only had to be written down.
+  const other = new Uint8Array(32).fill(0xee);
+  const record = rec('atlas', [entry('cid', CID), entry('cid', other)]);
+  const chosen = selectSource(record);
+  assert.equal(chosen?.type, 'cid');
+  assert.deepEqual(chosen?.value, CID, 'the first cid in record order is the one selected');
+
+  // Order is what decides, so reversing the record reverses the answer. Without this line the
+  // assertion above would also pass against an implementation that happened to prefer `CID` by
+  // its bytes.
+  const reversed = selectSource(rec('atlas', [entry('cid', other), entry('cid', CID)]));
+  assert.deepEqual(reversed?.value, other);
+
+  // And a type ranked lower never wins on position: the cross-type order still binds first.
+  const mixed = selectSource(rec('atlas', [entry('cid', CID), entry('ipns', 'k51qzi5uqu5d')]));
+  assert.equal(mixed?.type, 'ipns');
+
+  const spec = readFileSync(new URL('../../docs/spec/RESOLUTION.md', import.meta.url), 'utf8');
+  assert.match(spec.replace(/\s+/g, ' '), /the \*\*first in record order\*\*/);
+});

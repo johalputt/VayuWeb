@@ -1189,6 +1189,32 @@
   ],
   "resolution": [
     {
+      "name": "resolve/first-of-two-same-type",
+      "rule": "RESOLUTION.md: with more than one entry of the selected type, take the first in record order",
+      "host": "atlas.vayu",
+      "record": "ad626f706852454749535445526373657100637369675840541c662dbde1bd8da2da516da910c3ea04ba80d4a5ffd87e27e8fed359bd9ea5b328a4ed6373a4534e85c73394ce9d1efcb6366e1bd79042e06499cca8100c0163746c646476617975646e616d656561746c617365737569746501677265636f72647382a26474797065636369646576616c7565582401551220ababababababababababababababababababababababababababababababababa26474797065636369646576616c75655824eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee6776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "hasVerifiedHead": true,
+      "now": 1782518460,
+      "expect": {
+        "outcome": "ok",
+        "source": "cid",
+        "value": "01551220abababababababababababababababababababababababababababababababab"
+      }
+    },
+    {
+      "name": "resolve/first-of-two-same-type-reversed",
+      "rule": "RESOLUTION.md: record order is what decides, not the value",
+      "host": "atlas.vayu",
+      "record": "ad626f7068524547495354455263736571006373696758401b086a51dc9a0829e28b3d23627b63617044384dd12f70c051d2072003a674c76925e3553f36195326eff0f7b3251680ef6e8c5fcf35b21f943e9770b2126f0d63746c646476617975646e616d656561746c617365737569746501677265636f72647382a26474797065636369646576616c75655824eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeea26474797065636369646576616c7565582401551220abababababababababababababababababababababababababababababababab6776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "hasVerifiedHead": true,
+      "now": 1782518460,
+      "expect": {
+        "outcome": "ok",
+        "source": "cid",
+        "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    },
+    {
       "name": "resolve/pointer-beats-snapshot",
       "rule": "RESOLUTION.md: with several content entries present, select ipns before cid",
       "host": "atlas.vayu",

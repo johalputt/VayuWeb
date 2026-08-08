@@ -191,6 +191,21 @@ With several content entries present the resolver SHALL select in this order:
 `ipns`, `cid`, `alias`. A `txt` entry is never a content source, and `alias` is
 last because it costs another full resolution.
 
+Where a record carries **more than one entry of the selected type**, the
+resolver SHALL take the **first in record order**. Deterministic CBOR fixes
+the array's order on the wire, so that is well defined for every
+implementation reading the same bytes.
+
+This was unstated, and unstated it is a fork. Uniqueness is imposed on
+exactly one entry type — `alias`, at most one and not coexisting with
+anything — while `cid`, `ipns`, `peer` and `txt` may each appear up to
+thirty-two times in one signed record. The rule above orders the *types*
+and said nothing about which entry wins within the chosen one, so an
+implementer taking the last, or the shortest, or sorting by value would be
+equally conformant and would fetch **different content from the same
+signed record**. No attacker is involved: the owner signed both entries.
+Two readers see two different sites and neither has any way to notice.
+
 A **`peer` entry is *not* a content source.** It is a **transport hint** — a host
 that may be asked for blocks — and the CID those blocks are checked against MUST
 still come from an `ipns` or `cid` entry. A record carrying only a `peer` entry

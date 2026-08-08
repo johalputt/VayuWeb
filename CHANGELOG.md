@@ -124,6 +124,30 @@ limit is 2.1 MB of hex zeros in the artifact, of which every byte after the firs
 information. The vectors file went from 159 KB to 2.25 MB before this was noticed. A runner builds
 the buffer from the stated length and tests exactly what one reading two million zeros would.
 
+### Fixed — two entries of one type were a fork, and the vector set could not express it
+
+Uniqueness is imposed on exactly one entry type: `alias` is at most one and must not coexist with
+anything. `cid`, `ipns`, `peer` and `txt` may each appear up to thirty-two times in one signed
+record.
+
+RESOLUTION.md's selection rule orders the **types** — "ipns, cid, alias" — and said nothing about
+which entry wins when a record carries two of the chosen one. `selectSource` takes the first in
+record order. An implementer taking the last, or the shortest, or sorting by value would be equally
+conformant and would fetch **different content from the same signed record**.
+
+No attacker is involved, which is what makes it the dangerous kind: the owner signed both entries,
+two readers see two different sites, and neither has any way to notice. Deterministic CBOR fixes
+the array's order on the wire, so *first in record order* was always well defined — it simply had
+never been written down.
+
+**And the conformance suite could not have caught it.** A `ResolutionVector`'s expectation carried
+only the source *type*, so "which of the two `cid` entries" had no expressible answer: the record
+would have been green in every implementation regardless of which one it picked. A vector set that
+cannot state a disagreement cannot catch it. `expect.value` now names the selected entry where the
+type is not enough, the runner compares it, and two vectors pin the rule — the second with the
+entries reversed, so the first cannot pass against an implementation that merely happened to prefer
+those bytes.
+
 ### Fixed — one postdated record could evict every other deferred record
 
 The deferral queue holds records that arrived slightly ahead of this peer's clock, so skew costs a

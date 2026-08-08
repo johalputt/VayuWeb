@@ -201,9 +201,19 @@ test('every resolution vector returns the outcome the specification requires', (
       { lookup: () => record, hasVerifiedHead: () => vector.hasVerifiedHead },
       vector.now,
     );
-    const actual = outcome.ok ? `ok:${outcome.entry.type}` : `error:${outcome.error}`;
+    // The VALUE is compared as well as the type, where the vector names one. Comparing only the
+    // type is why a record carrying two `cid` entries had no expressible answer here, and two
+    // conforming implementations could fetch different content from the same signed record with
+    // the whole suite green.
+    const selected =
+      outcome.ok && outcome.entry.value instanceof Uint8Array ? toHex(outcome.entry.value) : null;
+    const actual = outcome.ok
+      ? `ok:${outcome.entry.type}${vector.expect.outcome === 'ok' && vector.expect.value !== undefined ? `:${selected}` : ''}`
+      : `error:${outcome.error}`;
     const want =
-      vector.expect.outcome === 'ok' ? `ok:${vector.expect.source}` : `error:${vector.expect.code}`;
+      vector.expect.outcome === 'ok'
+        ? `ok:${vector.expect.source}${vector.expect.value !== undefined ? `:${vector.expect.value}` : ''}`
+        : `error:${vector.expect.code}`;
     if (actual !== want) {
       failures.push(
         `${vector.name}\n      rule:     ${vector.rule}` +
