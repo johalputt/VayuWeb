@@ -200,8 +200,48 @@ def is_denial(head):
     return DENIAL.search(clause) is not None
 
 
+TAG = re.compile(r"<[^>]*>", re.S)
+QUOTED = re.compile(r'"[^"]*"')
+
+
+def demarkup(text):
+    """Blank HTML tag syntax, keep what a reader actually reads, preserve every offset.
+
+    **Adding `.html` to the scan was not enough on its own, and the way it failed is the failure
+    this whole file is about: it walked the page and caught nothing.** `is_denial` cuts its window
+    at `[.;:!?]\\s`, and in markup a sentence-ending full stop is followed by `<`, never by
+    whitespace. So no sentence boundary is ever found, the clause window runs backwards across the
+    entire document, and any `no` anywhere above the match exempts it.
+
+    That is not a rare shape. The landing page's whole argument is "no registrar, no certificate
+    authority and no landlord" -- so on the one page this extension was written for, every match
+    was excused by the page's own thesis. Measured, not reasoned: a planted "your data is safe
+    forever" in `site/index.html` passed a green run.
+
+    Tags become spaces rather than being deleted, which fixes both halves at once. Equal-length
+    spaces keep every offset exact, so reported line numbers stay true; the run of whitespace
+    restores the sentence boundary that `</p>` was hiding; and a phrase split across an inline tag
+    -- `cannot be <em>taken down</em>` -- still flattens back into one string to match against.
+
+    Quoted attribute values are kept, because a reader meets some of them: the `content` of a
+    meta description is the search snippet, and `alt` text is what a screen reader is given.
+    """
+    out = list(text)
+    for tag in TAG.finditer(text):
+        start, end = tag.span()
+        keep = set()
+        for value in QUOTED.finditer(text, start, end):
+            keep.update(range(value.start() + 1, value.end() - 1))
+        for index in range(start, end):
+            if index not in keep:
+                out[index] = " "
+    return "".join(out)
+
+
 def scan(path, text, patterns):
     """Every forbidden claim in one document, as (path, line, why, quote)."""
+    if path.endswith(".html"):
+        text = demarkup(text)
     flat, offsets = flatten(text)
     found = []
     for pattern, why in patterns:
@@ -249,6 +289,26 @@ SELF_TESTS = [
         True,
         "the negation belongs to the previous sentence -- the first window's failure",
     ),
+    # Markup. Each of these passed a green run when `.html` was first added to the scan.
+    (
+        "<h1>A web with no registrar, no certificate authority and no landlord.</h1>\n"
+        "<p class=\"lede\">Your data is safe forever.</p>",
+        True,
+        "a claim in one element, exempted by a `no` in another -- markup hides the full stop",
+        "<self-test>.html",
+    ),
+    (
+        "<p>A site published here cannot be <em>taken down</em>.</p>",
+        True,
+        "a claim split across an inline tag, which must still read as one phrase",
+        "<self-test>.html",
+    ),
+    (
+        "<p>We never say your data is safe forever, because no such promise is true.</p>",
+        False,
+        "a genuine denial inside markup, which must stay exempt",
+        "<self-test>.html",
+    ),
 ]
 
 
@@ -270,8 +330,11 @@ def self_test():
     patterns += [(re.compile(p, re.I), why) for p, why in EQUIVALENTS]
 
     failures = 0
-    for text, expected, why in SELF_TESTS:
-        caught = len(scan("<self-test>", text, patterns)) > 0
+    for case in SELF_TESTS:
+        text, expected, why = case[0], case[1], case[2]
+        # A case may name itself, so that the markup cases exercise the .html path.
+        path = case[3] if len(case) > 3 else "<self-test>"
+        caught = len(scan(path, text, patterns)) > 0
         status = "ok  " if caught == expected else "FAIL"
         if caught != expected:
             failures += 1
