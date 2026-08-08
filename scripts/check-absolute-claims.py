@@ -62,6 +62,9 @@ EXEMPT = {
     "finding bodies after the fact, and a finding that quotes a violation is evidence of it.",
     "CHANGELOG.md": "records what was fixed, which means quoting the sentence that was wrong.",
     "scripts/check-absolute-claims.py": "this file.",
+    "site/assets/claims.js": "generated from Article 21.4 by site/tools/embed-claims.py so that the "
+    "landing page can show a reader which claims are forbidden. The quotation lives here, alone, "
+    "precisely so that site/index.html carries none of these words and needs no exemption of its own.",
 }
 
 # Equivalents under 21.5. Each was found in the corpus; the source is kept so that nobody has to
@@ -104,11 +107,23 @@ def charter_phrases():
     return phrases, None
 
 
+# Prose, tooling, and the published site.
+#
+# `.html` and `.js` are here because the marketing page was the one surface this
+# check could not see, and it is the surface where a forbidden claim is most
+# likely to be written. Article 21.4 forbids the claim "in any language" and
+# Article 21.5 judges it by what a reader who has read nothing else takes from
+# it — a reader of vayuweb.vayupress.com has, by definition, read nothing else.
+# The corpus was clean while the front page was unchecked, which measured the
+# documents rather than the claims.
+SCANNED = (".md", ".py", ".html", ".js")
+
+
 def documents():
     for base, dirs, files in os.walk(ROOT):
         dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "target", "dist", ".venv"}]
         for name in files:
-            if name.endswith(".md") or name.endswith(".py"):
+            if name.endswith(SCANNED):
                 yield os.path.relpath(os.path.join(base, name), ROOT)
 
 

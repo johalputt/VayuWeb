@@ -99,6 +99,14 @@ jobs:
         # few paragraphs of an honest caveat the author had in mind and the reader does not.
         run: python3 scripts/check-absolute-claims.py
 
+      - name: The published site's generated files match what they were generated from
+        # site/ carries the brand mark, the namespace and Article 21.4's forbidden
+        # claims, none of them written by hand. A stale copy is invisible -- the page
+        # still renders -- and the namespace one matters most: the Annex is normative,
+        # so a drifted copy on the project's own front page is a second namespace
+        # published with the project's authority.
+        run: python3 scripts/check-site-generated.py
+
       - name: Every VWIP carries the sections VWIP-0000 makes mandatory
         # VWIP-0000 section 3 says "an editor checks their presence, never their merit" -- a
         # mechanical check described in prose and performed by nobody. VWIP-0000 is itself Final
