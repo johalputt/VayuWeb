@@ -571,6 +571,27 @@ function openWithLedger(path: string, now: number): { store: Store; ledger: Equi
   return { store, ledger };
 }
 
+/**
+ * The detections written since a snapshot, as lines an operator can act on.
+ *
+ * **One spelling for "what did we just detect", because there were two callers and only one of
+ * them looked.** `finish` reported a detection the moment a registration produced one, on the
+ * reasoning that "a detection nobody is told about is the same defect as a detection nobody wrote
+ * down". `cmdSync` -- the surface where forks actually arrive, from peers -- reported none. Two
+ * peers holding one owner's two futures for one name detect the equivocation, write it to the
+ * ledger on both sides, and print `equivocations 0 (0 new)`, because those counters are about
+ * reports the PEER SENT and are accurate about that. The operator watching a sync sees a zero.
+ *
+ * Takes entries and a count rather than the ledger, so the decision is testable without minting
+ * signed evidence, and returns every new one rather than the last: a registration can only detect
+ * once, a connection can detect many, and `finish` read `entries[size - 1]` alone.
+ */
+export function detectionsSince(entries: readonly LedgerEntry[], before: number): string[] {
+  return entries
+    .slice(Math.max(before, 0))
+    .map((e) => `equivocation recorded  ${describeReport(e)}`);
+}
+
 /** One report, in one line an operator can act on without a hex editor. */
 function describeReport(entry: LedgerEntry): string {
   const [owner, tld, name, seq] = entry.key.split(' ');
@@ -596,10 +617,12 @@ function finish(
   // nobody wrote down. The operator asked for a registration and got a refusal; which refusal it
   // is — a name somebody else holds, or a second future they themselves signed for a name they
   // already hold — is the whole of what they need to know next.
-  if (ledger !== undefined && ledger.size > before) {
-    const recorded = ledger.entries()[ledger.size - 1]!;
-    err(`equivocation recorded  ${describeReport(recorded)}`);
-    err(`  written to ${ledger.path} — nothing is penalised by it; see REPLICATION.md 6.4`);
+  if (ledger !== undefined) {
+    const lines = detectionsSince(ledger.entries(), before);
+    for (const line of lines) err(line);
+    if (lines.length > 0) {
+      err(`  written to ${ledger.path} — nothing is penalised by it; see REPLICATION.md 6.4`);
+    }
   }
 
   if (verdict.outcome === 'accept') {
@@ -1586,7 +1609,7 @@ async function cmdSync(args: Args): Promise<number> {
   out(`log ${path} holds ${store.length} record(s)`);
 
   /** Report what a connection did, so an operator watching sees progress rather than silence. */
-  const report = (label: string, outcome: PeerOutcome): void => {
+  const report = (label: string, outcome: PeerOutcome, detectedBefore: number): void => {
     out(
       `${label}  applied ${outcome.applied}  rejected ${outcome.rejected}  ` +
         `deferred ${outcome.deferred}  duplicate ${outcome.duplicates}  ` +
@@ -1594,6 +1617,15 @@ async function cmdSync(args: Args): Promise<number> {
         `equivocations ${outcome.equivocations} (${outcome.recorded} new)  ` +
         `forwarded ${outcome.forwarded}${outcome.withheld > 0 ? ` (${outcome.withheld} withheld)` : ''}`,
     );
+    // Those two counters are about reports the PEER SENT, and are accurate about that. What this
+    // node worked out for ITSELF from a record the peer offered and it refused appears in neither,
+    // so a connection that detected a fork printed a zero and wrote the fact to a file nobody was
+    // told about. The most serious thing this protocol can observe must not be the quietest.
+    const detections = detectionsSince(ledger.entries(), detectedBefore);
+    for (const line of detections) out(`${label}  ${line}`);
+    if (detections.length > 0) {
+      out(`${label}  written to ${ledger.path} — nothing is penalised by it; REPLICATION.md 6.4`);
+    }
   };
 
   const sockets = new Set<Socket>();
@@ -1614,6 +1646,10 @@ async function cmdSync(args: Args): Promise<number> {
   const drive = (socket: Socket, label: string): void => {
     sockets.add(socket);
     socket.on('close', () => sockets.delete(socket));
+    // Snapshotted before the exchange, so the line names what THIS connection produced rather than
+    // everything the ledger has ever held. One ledger serves every connection; a count is only a
+    // fact about one of them if it is taken against the moment that one started.
+    const detectedBefore = ledger.size;
     const outcome = drivePeer(socket, sink, now, {
       ledger,
       forks,
@@ -1621,7 +1657,7 @@ async function cmdSync(args: Args): Promise<number> {
     });
     // Printed on close rather than per message: a line per record turns a sync of a real log into
     // a wall of output, and the totals are what an operator is actually asking about.
-    socket.on('close', () => report(label, outcome));
+    socket.on('close', () => report(label, outcome, detectedBefore));
   };
 
   if (listen !== undefined) {

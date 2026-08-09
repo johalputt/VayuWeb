@@ -10,6 +10,42 @@ it.
 
 ## [Unreleased]
 
+### Fixed — two peers detected a fork and both printed `equivocations 0 (0 new)`
+
+Give one key two futures for one name, sync the two logs, and both sides do the right thing: the
+second record is refused, and the equivocation is written to the ledger on each peer. Neither says
+so. The connection summary counts equivocation reports **the peer sent** — accurate about that, and
+silent about a fork a node worked out for itself from a record it refused, which is how a fork is
+normally found. The most serious thing this protocol can observe was the quietest thing it printed,
+and the fact went to a file nobody was told about.
+
+`finish` already did this for `register`, on the reasoning that "a detection nobody is told about is
+the same defect as a detection nobody wrote down". The surface where forks actually arrive had no
+such line. `detectionsSince` is now one spelling for "what did we just detect", used by both, and
+takes the entries rather than the last one: a registration can detect once, a connection can detect
+many, and `finish` read `entries[size - 1]` alone. `sync` snapshots the ledger per connection, so
+the line is a fact about that connection rather than about everything ever held.
+
+`registry/scripts/acceptance-equivocation-sync.sh` is new and is where this was found: two real
+Argon2id solves, two logs, one socket, nine checks. **The unit test could not have found it** — the
+reporting helper is a pure function that passes whether or not anything calls it, and nothing called
+it. Deleting the wiring leaves the unit test green and fails four of the live checks, which is the
+whole argument for the scenario existing.
+
+### Changed — ROADMAP.md says what is built and what is left, and the checker count is derived
+
+A "Where things stand" table summarises every phase against its own acceptance test, with what
+remains stated in one paragraph: the code has outrun what can be proved about it from inside one
+sandbox. Phase 1 wants a second implementation, Phase 2 a second machine, Phase 4 a machine that is
+a stranger to the content, Phase 5 a person, Phase 6 strangers — none of them a coding task. Phase 2
+and Phase 4 gain the work above.
+
+The first draft of that table put the number of mechanical checkers one too high, written from
+memory and wrong on the day it was typed, in the file whose entire subject is what is and is not
+done. That is the
+eighteen-endpoints defect again, so it is closed the same way: `check-counts.py` now derives the
+number from `scripts/check-*.py` and fails on a claim that disagrees. It caught this one.
+
 ### Changed — the inclusion verifier no longer looks as though it checks the leaf position
 
 `verifyInclusion` computed `index: flatIndex(proof.leafIndex, 1)` into the leaf node and then never

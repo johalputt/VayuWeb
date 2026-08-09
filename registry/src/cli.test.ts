@@ -23,6 +23,7 @@ import { join } from 'node:path';
 
 import {
   main,
+  detectionsSince,
   flushPorts,
   pinGated,
   pinPorts,
@@ -34,6 +35,7 @@ import {
 } from './cli.ts';
 import { PinSet } from './pins.ts';
 import { MANIFEST_PATH } from './resolve.ts';
+import type { LedgerEntry } from './equivocation.ts';
 import { ResolutionCache } from './cache.ts';
 import { contentCacheKey } from './proxy.ts';
 import type { ContentPort } from './proxy.ts';
@@ -1680,4 +1682,35 @@ test('AUDIT: a proxy that cannot bind takes the control socket down with it', as
     blocker.close();
     done();
   }
+});
+
+test('AUDIT: a connection reports every detection it made, not only the last and not none', () => {
+  // `finish` read `entries[size - 1]` — correct for a registration, which can only detect once, and
+  // wrong for a connection, which can detect many. `cmdSync` read nothing at all: `equivocations`
+  // and `recorded` count reports the PEER SENT, so two peers that each work out a fork for
+  // themselves from a record they refused both print `equivocations 0 (0 new)` while writing the
+  // fact to disk. Verified on the wire before this was written — two real logs, one key, one name,
+  // one seq, two CIDs; both ledgers ended with one `(detected)` report and both summaries said 0.
+  const entry = (name: string, seq: number): LedgerEntry => ({
+    key: `1603b8aa0784439bdeadbeef ${'vayu'} ${name} ${seq}`,
+    origin: 'detected',
+    evidence: { a: Uint8Array.of(0), b: Uint8Array.of(1) },
+  });
+  const held = [entry('atlasobservatory', 0), entry('alphaobservatory', 3), entry('beta', 7)];
+
+  // Nothing new is silence, which is what makes the noisy case readable.
+  assert.deepEqual(detectionsSince(held, 3), []);
+  assert.deepEqual(detectionsSince([], 0), []);
+
+  // Every entry after the snapshot, in order — not just the newest.
+  const two = detectionsSince(held, 1);
+  assert.equal(two.length, 2, 'a connection can detect more than once');
+  assert.match(two[0] as string, /equivocation recorded {2}alphaobservatory\.vayu {2}seq 3/);
+  assert.match(two[1] as string, /beta\.vayu {2}seq 7/);
+  assert.match(two[0] as string, /detected/, 'the origin is part of what an operator needs');
+
+  // A snapshot taken before anything existed reports everything, and a nonsensical one does not
+  // throw or reach backwards past the start.
+  assert.equal(detectionsSince(held, 0).length, 3);
+  assert.equal(detectionsSince(held, -5).length, 3);
 });

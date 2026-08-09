@@ -21,6 +21,7 @@ check people learn to override is worse than no check.
 
 Exits non-zero listing every disagreement.
 """
+import glob
 import json
 import os
 import re
@@ -84,6 +85,22 @@ def count_control_endpoints():
     if not rows:
         return None, "the `Endpoints:` block matched no endpoint rows"
     return len(rows), None
+
+
+def count_mechanical_checkers():
+    """The `check-*.py` gates, counted from the directory that holds them.
+
+    Added when a "fourteen mechanical checkers" appeared in ROADMAP.md, written from memory and
+    wrong by one on the day it was typed -- the same defect as the eighteen-endpoints claim, in the
+    file whose entire subject is what is and is not done. A count of the project's own gates is
+    exactly the number nobody re-counts after adding a gate.
+
+    Counted from the filenames rather than from a list, so adding a checker is what moves it.
+    """
+    names = sorted(glob.glob(os.path.join(ROOT, "scripts", "check-*.py")))
+    if not names:
+        return None, "no check-*.py scripts found -- the layout changed"
+    return len(names), None
 
 
 def count_launch_tlds():
@@ -532,6 +549,15 @@ RULES = [
             re.compile(r"\bRESOLUTION\.md lists ([\w]+) endpoints\b", re.I),
             re.compile(r"\bendpoint count to [\w]+ of ([\w]+)\b", re.I),
             re.compile(r"\bRESOLUTION\.md's ([\w]+) endpoints\b", re.I),
+        ],
+    },
+    {
+        "label": "mechanical checkers",
+        "derive": count_mechanical_checkers,
+        "source": "scripts/check-*.py",
+        "patterns": [
+            re.compile(r"\b([\w]+) mechanical checkers\b", re.I),
+            re.compile(r"\b([\w]+) checkers refuse\b", re.I),
         ],
     },
     {

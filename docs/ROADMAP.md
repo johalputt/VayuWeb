@@ -23,6 +23,31 @@ check without asking anyone whether the phase is done.
 Phases are ordered by dependency. A later phase may start early where it does not depend on an
 earlier one, but it cannot *finish* early.
 
+## Where things stand
+
+A summary of the sections below, not a substitute for them. Each phase's own prose says what is
+built, what is not, and why — and where a phase is held open by a condition this project cannot
+meet for itself, the reason is stated there rather than hidden behind a percentage.
+
+| Phase | Built | Acceptance test |
+|---|---|---|
+| **0** Charter and specification | Every document drafted; the improvement process, the threat model and the namespace annex are settled. Seven conformance suites cover the wire-visible rules. Thirteen mechanical checkers refuse the drift classes that produced most past defects | **Not met, and not meetable here.** Article 44.6 wants a competent implementer reading the specifications alone. The party that wrote them cannot be that reader |
+| **1** Registry core | **Effectively complete.** The log, the record schema, deterministic CBOR, Ed25519, Argon2id, all six operations with their validation ordering, and the lifecycle state machine including grace and quarantine. Sixteen commands drive it | Half met: the tool does everything the row asks. The second tool written from the specification does not exist |
+| **2** Peer replication | **Mostly done.** Transport-agnostic state machine, the reference binding, discovery topic and framing, and a `sync` verb. Two OS processes over a real socket converge, partition and heal. Equivocation is detected on both sides of a real fork and now *reported to the operator* rather than only written to a file | Partly met. "Independent peers" — two processes are that. Two machines, two network stacks and two genuinely independent clocks are not yet exercised |
+| **3** Resolution proxy | **Complete on one machine.** The browsing proxy, the fifteen-endpoint control API on a 0600 Unix socket, the resolution cache with bounded and now *ceilinged* sizes, the manifest path mapping, and the security header profile. Thirty-seven live checks plus an executable browser criterion | **Met on one machine** — the first acceptance test here to pass at all |
+| **4** Hosting | **Started, and the publish path is real.** Fixed import parameters pinned against published IPFS reference CIDs, the full tree-to-root-CID encoder, and a publish walk whose exclusion rules are enforced rather than described | Not met. It wants a second machine that was never told where the content came from |
+| **5** Desktop client | Scaffolded in Rust | Not met. It wants a person who has never opened a terminal |
+| **6** Independent implementations | Nothing, by design | **Out of reach from inside this repository.** It requires an implementation by parties with no common employer or funder. It cannot be self-delivered, and will never be reported as done here |
+| **7** Convenience layers | Not started | Deliberately last |
+
+**What is left, in one paragraph.** The code has outrun the things that can be proved about it
+from inside a single sandbox. Phase 1 wants a second implementation; Phase 2 wants a second
+machine; Phase 4 wants a second machine that is a stranger to the content; Phase 5 wants a person;
+Phase 6 wants strangers. None of those is a coding task, and none of them is close to being met by
+writing more code here. The work that *is* still ours is Phase 0's — settling the specifications
+well enough that the second implementer in Phase 1 and the strangers in Phase 6 can do their part
+— and the steady removal of the defects that only appear when something is run rather than read.
+
 ## Phase 0 — Charter and specification
 
 **Goal:** settle the rules before writing code that would make them expensive to change.
@@ -163,6 +188,20 @@ different record therefore both had length 1, both announced `len` 1, and each c
 nothing: permanently diverged over a connection that looked healthy from both ends. The
 session-level tests could not see it, because they passed the position in by hand.
 
+**A real fork between two real peers is now exercised, and it found a silence.**
+`registry/scripts/acceptance-equivocation-sync.sh` gives one key two futures for one name — two
+genuine Argon2id solves, two logs, one socket — and checks what the operator is told. Both sides
+refuse the second record and both write the equivocation to their ledger, which was already true.
+Neither said so: the connection summary counts equivocation reports *the peer sent*, accurately,
+and a fork a node works out for itself from a record it refused appeared in no counter. Two peers
+detected the most serious thing this protocol can observe and printed `equivocations 0 (0 new)`.
+The detection is now named on the connection that produced it, with the name, the seq and
+REPLICATION.md 6.4's "nothing is penalised by this" beside it.
+
+That defect was invisible to unit testing by construction: the reporting helper is a pure function
+that passes whether or not anything calls it, and nothing called it. Only two processes and a
+socket could show it, which is the argument for this phase carrying a live scenario at all.
+
 **Running it against peers on other machines is still what remains.** Two processes here share a
 kernel, a clock and a filesystem, and a second machine would additionally exercise a different
 network stack and a genuinely independent clock — which is what the whole `CLOCK_SKEW` deferral
@@ -293,6 +332,18 @@ find; only an external vector catches that.
 `registry/src/unixfs.ts` completes the tree-to-root-CID path: dag-pb nodes, UnixFS directory and
 file messages, raw-leaf files, multi-chunk file nodes, and recursive directory building. Six
 vectors from the reference importer are pinned, including a nested tree.
+
+**What a publish EXCLUDES is enforced rather than described, which took three attempts.** HOSTING.md
+forbids a leading dot for anything served, and the walk originally applied no rule at all: an
+ordinary working directory published `.env` and `.git/config` into an immutable, world-fetchable
+CID. The fix exempted `.vayu` so the manifest could be published — and wrote the exemption on the
+*directory*, so everything a publisher left beside their manifest went in instead. The fix for
+that matched the path and not the kind, so a bare `.vayu` *file* — the shape a tool puts its local
+config in — went in as well. Each round was found by publishing a hostile directory, never by
+re-reading the rule that had just been written. The exemption is now the one path PUBLISHING.md 2
+defines, derived from the resolver's own constant so the publisher cannot write somewhere the
+resolver does not read; an entry that is neither file nor directory is reported rather than
+silently dropped; and every exclusion is named to the publisher at publish time.
 
 The refusal to guess at this was justified within the hour. Written from a *description* of the
 format, the first encoder put the UnixFS `Data` field at protobuf field 2 and produced a
