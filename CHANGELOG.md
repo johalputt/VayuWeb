@@ -10,6 +10,37 @@ it.
 
 ## [Unreleased]
 
+### Fixed — flushing one name reported success and left the entry making it fail
+
+The sibling of the re-pin defect, one endpoint over, and found the same way: `DELETE /v1/cache/…`
+against a running resolver. Unpin a site, request it so a `CONTENT_UNAVAILABLE` is cached, then
+flush the name. The answer was `{"flushed":1}` — it dropped the positive record — and
+`GET /v1/cache/stats` still reported `negative: 1`. The operator flushed their own name to clear a
+stale failure, was told it worked, and nothing changed. **A success report that changes nothing is
+worse than an error.**
+
+Same cause. A content failure is keyed by the *source* it is a fact about, which `proxy.ts` did
+deliberately and correctly: keyed by name it was unreachable for lookups, because step 5 answers
+from the record cache and skips the step that would consult it. What went unnoticed is the other
+half — keyed by source, it is unreachable for every **name-keyed flush**. RESOLUTION.md calls the
+endpoint "flush one name", and a content failure the name currently depends on is part of that
+name's answer.
+
+The limitation is stated rather than papered over: this drops the sources the name resolves to
+*now*. A record updated since the failure was cached leaves the previous CID's entry unreached,
+because nothing maps a name to sources it used to have. `DELETE /v1/cache` remains the answer for
+that.
+
+Five mutations. Three died at once; two survived, and both because the first version of the test
+**flushed the very name a hardcoded implementation would reach for, with a fixture that ignored the
+TLD**. A test that asks about the one input a wrong implementation happens to agree on cannot see
+the difference. Rewritten to flush a *different* name and to distinguish `atlasobservatory.vayu`
+from `atlasobservatory.site`, both die — and the property they pin is worth having on a shared
+resolver, where a flush that reached another name's answer would be a denial of service spelled as
+a cache flush.
+
+`acceptance-control-lifecycle.sh` grows the sequence that found it and now runs twenty-six checks.
+
 ### Fixed — unpinning a site took effect at once; re-pinning it did not
 
 **Found by driving a running resolver, not by testing one.** Unpin the published root, request the

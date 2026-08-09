@@ -84,6 +84,19 @@ case "$R" in *not_held*409) ok "a stranger CID is 409 not_held";; *) bad "not_he
 R=$(ctl POST /v1/pin "{\"cid\":\"$ROOT\"}"); case "$R" in *'"outcome":"pinned"'*200) ok "re-pinning the held root succeeds";; *) bad "re-pin" "$R";; esac
 C=$(proxy); [ "$C" = 200 ] && ok "proxy serves again after re-pin" || bad "re-pin has no effect" "got $C"
 
+echo; echo "=== DELETE /v1/cache/{name} clears the entry actually making the site fail ==="
+# The sibling of the re-pin defect. A content failure is keyed by the SOURCE it is a fact about,
+# so every NAME-keyed flush used to miss it: the operator was told {"flushed":1} and got no change.
+ctl DELETE "/v1/pin/$ROOT" >/dev/null; proxy >/dev/null
+R=$(ctl GET /v1/cache/stats)
+case "$R" in *'"negative":0'*) bad "fixture" "no content failure was cached: $R";; *) ok "a content failure is cached after the request";; esac
+R=$(ctl DELETE "/v1/cache/$NAME")
+case "$R" in *'"flushed":2'*200) ok "flushing the name drops its entry AND the content answer";; *) bad "per-name flush" "$R";; esac
+R=$(ctl GET /v1/cache/stats)
+case "$R" in *'"negative":0'*) ok "no negative entry survives the flush";; *) bad "negative survived a name flush" "$R";; esac
+ctl POST /v1/pin "{\"cid\":\"$ROOT\"}" >/dev/null
+C=$(proxy); [ "$C" = 200 ] && ok "the site is serving again" || bad "restore" "got $C"
+
 echo; echo "=== POST /v1/resolve, the body-carrying endpoint ==="
 R=$(ctl POST /v1/resolve "{\"name\":\"$NAME\"}"); case "$R" in *"\"name\":\"$NAME\""*200) ok "POST /v1/resolve answers from a body";; *) bad "resolve body" "$R";; esac
 R=$(ctl POST /v1/resolve '{"name":"../../etc/passwd"}'); case "$R" in *bad_name*400) ok "a traversal name is 400 bad_name";; *) bad "resolve traversal" "$R";; esac

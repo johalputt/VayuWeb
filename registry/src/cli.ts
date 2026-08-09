@@ -1251,6 +1251,47 @@ export function rotatingToken(): { current: () => string; rotate: () => string }
 }
 
 /**
+ * What a name currently resolves to, as `{type, value}` pairs a content key can be built from.
+ *
+ * A function rather than the `Store` itself so the flush below can be exercised without one.
+ */
+export type SourcesOf = (
+  label: string,
+  tld: string,
+) => ReadonlyArray<{ type: string; value: string }>;
+
+/**
+ * Flush one name — including the content answer that name currently depends on.
+ *
+ * **`DELETE /v1/cache/{name}` reported success and left the entry making the site fail.** A content
+ * failure is keyed by the SOURCE it is a fact about, which `proxy.ts` did deliberately and
+ * correctly: keyed by name it was unreachable for lookups, because step 5 answers from the record
+ * cache and skips the step that would have consulted it. What went unnoticed is the other half —
+ * keyed by source, it is unreachable for every NAME-keyed flush. An operator clearing their own
+ * name was told `{"flushed":1}` and got no change, which is worse than an error.
+ *
+ * RESOLUTION.md calls this endpoint "flush one name", and a content failure the name currently
+ * depends on is part of that name's answer.
+ *
+ * **The limit, stated rather than papered over:** this drops the sources the name resolves to
+ * *now*. If the record has been updated since the failure was cached, the previous CID's entry is
+ * not reached — nothing here maps a name to sources it used to have. `DELETE /v1/cache` remains
+ * the answer for that, and it clears everything.
+ */
+export function flushPorts(
+  sources: SourcesOf,
+  cache: ResolutionCache,
+): (name: { label: string; tld: string }) => number {
+  return (name) => {
+    let gone = cache.forget(`${name.label}.${name.tld}`);
+    for (const source of sources(name.label, name.tld)) {
+      gone += cache.forget(contentCacheKey(source.type, source.value));
+    }
+    return gone;
+  };
+}
+
+/**
  * The pin and unpin ports, with the cache invalidation that makes them symmetric.
  *
  * **Unpinning took effect at once and re-pinning did not**, which is the defect this exists to
@@ -1573,6 +1614,18 @@ async function cmdServe(args: Args): Promise<number> {
     cacheSizes: cache.limits,
   });
 
+  // The sources a name resolves to right now, read from the log the resolver is serving from.
+  const flushName = flushPorts((label, tld) => {
+    const held = store.lookup(label, tld);
+    if (held === null) return [];
+    const out: Array<{ type: string; value: string }> = [];
+    for (const entry of held.current.record.entries) {
+      const value = sourceValueOf(entry);
+      if (value !== null) out.push({ type: entry.type, value });
+    }
+    return out;
+  }, cache);
+
   const control = await serveControl({
     path: socketPath,
     token: token.current,
@@ -1629,8 +1682,7 @@ async function cmdServe(args: Args): Promise<number> {
         manifests: cache.manifestSize,
         ...cache.counts,
       }),
-      flushCache: (name) =>
-        name === null ? cache.clear() : cache.forget(`${name.label}.${name.tld}`),
+      flushCache: (name) => (name === null ? cache.clear() : flushName(name)),
       // Honest and dull: this command serves, it does not sync. `vayuweb-registry sync` is where a
       // peer connection lives, and reporting a peer count from a process that never opens one
       // would be reporting a zero that reads like a measurement.

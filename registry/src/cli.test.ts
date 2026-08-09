@@ -21,6 +21,7 @@ import { join } from 'node:path';
 
 import {
   main,
+  flushPorts,
   pinGated,
   pinPorts,
   pointerFor,
@@ -1135,4 +1136,87 @@ test('MUTATION: a REFUSED pin flushes nothing, because it has undone nothing', (
   // Unpinning something that was not pinned is the same story from the other side.
   assert.equal(ports.unpin(CID), false);
   assert.equal(cache.negative(contentCacheKey('cid', CID), 1), 'CONTENT_UNAVAILABLE');
+});
+
+test('AUDIT: flushing a name reported success and left the entry making it fail', () => {
+  // The sibling of the re-pin defect, one endpoint over, and confirmed against a running resolver
+  // before it was written down: unpin a site, request it so a CONTENT_UNAVAILABLE is cached, then
+  // `DELETE /v1/cache/atlasobservatory.vayu`. The answer is `{"flushed":1}` — it dropped the
+  // positive record — and `GET /v1/cache/stats` still reports `negative: 1`. The operator flushed
+  // their own name to clear a stale failure, was told it worked, and nothing changed.
+  //
+  // The cause is the same one: a content failure is keyed by the SOURCE it is a fact about, which
+  // proxy.ts did deliberately and correctly — keyed by name it was unreachable for lookups. What
+  // went unnoticed is the other half: keyed by source it is unreachable for every NAME-keyed
+  // flush. RESOLUTION.md calls this endpoint "flush one name", and a content failure the name
+  // currently depends on is part of that name's answer.
+  const CID = 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e';
+  const cache = new ResolutionCache({});
+  const flush = flushPorts(
+    // Stands in for the store: this name currently resolves to that one CID.
+    (label: string, tld: string) =>
+      label === 'atlasobservatory' && tld === 'vayu' ? [{ type: 'cid', value: CID }] : [],
+    cache,
+  );
+
+  cache.putNegative('atlasobservatory.vayu', 'NAME_NOT_FOUND', 1);
+  cache.putNegative(contentCacheKey('cid', CID), 'CONTENT_UNAVAILABLE', 1);
+
+  const gone = flush({ label: 'atlasobservatory', tld: 'vayu' });
+  assert.equal(gone, 2, 'the name entry AND the content answer it depends on');
+  assert.equal(cache.negative('atlasobservatory.vayu', 1), null);
+  assert.equal(
+    cache.negative(contentCacheKey('cid', CID), 1),
+    null,
+    'the entry actually making the site fail must go too',
+  );
+
+  // A name that resolves to nothing flushes only its own entries, and says so honestly.
+  cache.putNegative('other.vayu', 'NAME_NOT_FOUND', 1);
+  assert.equal(flush({ label: 'other', tld: 'vayu' }), 1);
+});
+
+test('MUTATION: a flush asks for the sources of the name it was GIVEN', () => {
+  // Two mutations survived the first attempt at this test, both for the same reason: it flushed
+  // the very name a hardcoded implementation would reach for, and its fixture ignored the TLD. A
+  // test that asks about the one name a wrong implementation happens to agree on cannot see it.
+  //
+  // The property matters on a shared resolver: `DELETE /v1/cache/{name}` flushes ONE name, and an
+  // operator clearing a stale answer for their own site must not drop the cached answer for
+  // somebody else's — that is a denial of service spelled as a cache flush.
+  const ATLAS = 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e';
+  const OTHER = 'bafkreiaxlvczbcuvhwjrwqmz2s6lrx3zjrxpjnpbcvi3ohbrhkuuwqmxbe';
+  const OTHER_TLD = 'bafkreih4tqvlzqzqzqzqzqzqzqzqzqzqzqzqzqzqzqzqzqzqzqzqzqzqza';
+  const sources = (label: string, tld: string): Array<{ type: string; value: string }> => {
+    if (label === 'atlasobservatory' && tld === 'vayu') return [{ type: 'cid', value: ATLAS }];
+    if (label === 'atlasobservatory') return [{ type: 'cid', value: OTHER_TLD }];
+    return [{ type: 'cid', value: OTHER }];
+  };
+  const seeded = (): ResolutionCache => {
+    const cache = new ResolutionCache({});
+    for (const cid of [ATLAS, OTHER, OTHER_TLD]) {
+      cache.putNegative(contentCacheKey('cid', cid), 'CONTENT_UNAVAILABLE', 1);
+    }
+    return cache;
+  };
+
+  // Flush a DIFFERENT name than the one a hardcoded implementation would reach for.
+  const byName = seeded();
+  assert.equal(flushPorts(sources, byName)({ label: 'observatory', tld: 'vayu' }), 1);
+  assert.equal(byName.negative(contentCacheKey('cid', OTHER), 1), null, 'the named one went');
+  assert.equal(
+    byName.negative(contentCacheKey('cid', ATLAS), 1),
+    'CONTENT_UNAVAILABLE',
+    "another name's cached answer must survive a flush that did not name it",
+  );
+
+  // Same label, different TLD: a flush that dropped the tld would reach the wrong site entirely.
+  const byTld = seeded();
+  assert.equal(flushPorts(sources, byTld)({ label: 'atlasobservatory', tld: 'site' }), 1);
+  assert.equal(byTld.negative(contentCacheKey('cid', OTHER_TLD), 1), null);
+  assert.equal(
+    byTld.negative(contentCacheKey('cid', ATLAS), 1),
+    'CONTENT_UNAVAILABLE',
+    'atlasobservatory.vayu is a different name from atlasobservatory.site',
+  );
 });
