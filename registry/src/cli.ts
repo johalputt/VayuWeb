@@ -46,7 +46,13 @@ import { treeOf } from './merkle.ts';
 import { TOKEN_BYTES } from './control.ts';
 import { EquivocationLedger, ledgerPathFor, type LedgerEntry } from './equivocation.ts';
 import { CheckpointLedger } from './checkpoint.ts';
-import { OBSERVATION_STALE_SECONDS, onlyThisNodeHoldsIt, report, summarise } from './pins.ts';
+import {
+  OBSERVATION_STALE_SECONDS,
+  UNPUBLISH_EFFECTS,
+  onlyThisNodeHoldsIt,
+  report,
+  summarise,
+} from './pins.ts';
 
 const toHex = (bytes: Uint8Array): string =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
@@ -410,6 +416,11 @@ function cmdSuccessor(op: string, args: Args): number {
 
   const ownerKey = op === 'TRANSFER' ? fromHex(required(args, 'to')) : prev.ownerKey;
 
+  // Computed once rather than inside `build`, which RENEW calls twice: the entries are an input to
+  // the record and also the thing that decides whether this command is an unpublishing, and a
+  // value read twice is a value that can be two things.
+  const entries = entriesForSuccessor(op, args, prev);
+
   const build = (proof: CborValue): CborMap =>
     new Map<string | Uint8Array, CborValue>([
       ['version', 1],
@@ -421,7 +432,7 @@ function cmdSuccessor(op: string, args: Args): number {
       ['seq', prev.seq + 1],
       ['notBefore', now],
       ['notAfter', notAfter],
-      ['records', entriesForSuccessor(op, args, prev)],
+      ['records', entries],
       ['powProof', proof],
       ['prevHash', held.current.hash],
     ]);
@@ -457,7 +468,56 @@ function cmdSuccessor(op: string, args: Args): number {
     return 1;
   }
 
-  return finish(store, build(powProof), secret, coSecret, now, ledger);
+  const code = finish(store, build(powProof), secret, coSecret, now, ledger);
+  if (code === 0 && unpublishes(op, entries)) statePublicationCeasedNotErased(op);
+  return code;
+}
+
+/**
+ * Whether this command is one of the acts Constitution Article 19 calls unpublishing.
+ *
+ * `RELINQUISH` gives the name up and `REVOKE` withdraws the key's authority, both by definition.
+ * `UPDATE` is included **when it leaves no entries**, because that is Article 19.2's third
+ * guaranteed act — "break the name-to-content binding" — and a rule that fired on the verb rather
+ * than on the outcome would let the one spelling an operator reaches for by habit go unannounced.
+ *
+ * `TOMBSTONE`, 19.2's fourth act, is not here because it does not exist: REGISTRY.md's operation
+ * table records it as absent, and `update --clear` breaks the binding without carrying 19.4's cache
+ * bound or 19.3's signing rule. The statement below still names it, since 19.2 says a registrant
+ * can always publish one — trimming the line to match what is implemented would be editing the
+ * Article to fit the code.
+ */
+function unpublishes(op: string, entries: readonly CborValue[]): boolean {
+  return op === 'RELINQUISH' || op === 'REVOKE' || (op === 'UPDATE' && entries.length === 0);
+}
+
+/**
+ * Say, at the moment of unpublishing, what it did and what it cannot do.
+ *
+ * **Article 19.8 is a MUST and it is specific about where**: an implementation "MUST state the
+ * distinction in clause 19.7 at the point where unpublishing is offered, in the interface itself
+ * rather than only in a manual". PUBLISHING.md section 4 says the same thing in the same words —
+ * "at the moment of unpublishing rather than in documentation nobody reads". Both sentences were
+ * written; neither was executed. `release`, `revoke` and `update --clear` printed an acceptance
+ * line and stopped, and an interface that says nothing at that moment is an interface implying the
+ * erasure 19.7 forbids implying.
+ *
+ * `UNPUBLISH_EFFECTS` is where the two lists live and it existed for exactly this. Its own comment
+ * says they are data rather than prose "so that a user interface has to render both or
+ * deliberately drop one", and until now nothing that ships imported it at all.
+ *
+ * **Both halves, always.** Printing only the limits reads as a warning about a failure; printing
+ * only the guarantees is the overstatement the Article is about. The rendering iterates the arrays
+ * rather than restating them, so a change to either list reaches this output without anyone
+ * remembering to come back here.
+ */
+function statePublicationCeasedNotErased(op: string): void {
+  out('');
+  out(`${op} accepted. Article 19.7: VayuWeb ends authorised publication, and does not erase.`);
+  out('  What you can always do — Article 19.2:');
+  for (const effect of UNPUBLISH_EFFECTS.guaranteed) out(`    - ${effect}`);
+  out('  What no implementation can do for you — Article 19.6:');
+  for (const limit of UNPUBLISH_EFFECTS.notGuaranteed) out(`    - ${limit}`);
 }
 
 /** Sign, append, and report the verdict in the same words the verifier uses. */
@@ -744,8 +804,18 @@ function merkleRootOf(store: Store, length: number): Uint8Array {
  * A literal rather than a read of `package.json`: the file is not present in every way this is
  * run, and a version string that sometimes reads `unknown` is a worse answer than one that is
  * simply kept in step with the release commit.
+ *
+ * **The reasoning held and the second half did not.** The package went to 0.2.1 and this stayed at
+ * 0.1.0, so `GET /v1/status` named a build that had shipped two releases earlier — worse than
+ * having no version field at all, because the field is disclosed past the token check on the
+ * stated grounds that a version string is a fingerprint and a vulnerability-matching aid. Its
+ * entire purpose is to identify the build, and an operator matching a bug report against 0.1.0
+ * was reading code that was not running.
+ *
+ * Still a literal, and `cli.test.ts` now compares it to `package.json`. The manifest is always
+ * present *there*, which is where "kept in step" needed something doing the keeping.
  */
-const RESOLVER_VERSION = '0.1.0';
+const RESOLVER_VERSION = '0.2.1';
 
 /**
  * The files a directory publishes, with HOSTING.md's package rules applied.

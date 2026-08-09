@@ -596,3 +596,147 @@ test('a resolver with an empty log has no verified head, whatever it used to cla
   assert.ok(resolverPortsFor(populated).lookup('atlasobservatory', 'vayu'));
   rmSync(directory, { recursive: true, force: true });
 });
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT: the interface that offers unpublishing says nothing about its limits  */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: release, revoke and update --clear stated none of Article 19.7', () => {
+  // Article 19.8 is a MUST and it is specific about WHERE: implementations "MUST state the
+  // distinction in clause 19.7 at the point where unpublishing is offered, **in the interface
+  // itself rather than only in a manual**". PUBLISHING.md 4 says the same thing in the same
+  // words — "at the moment of unpublishing rather than in documentation nobody reads".
+  //
+  // `UNPUBLISH_EFFECTS` exists for exactly this. Its own comment says the two lists are data
+  // rather than prose "so that a user interface has to render both or deliberately drop one".
+  // Nothing that ships imported it. The three commands that unpublish — `release` (RELINQUISH),
+  // `revoke` (REVOKE) and `update --clear` (breaking the binding) — each printed an
+  // acceptance line and stopped, which is an interface implying the erasure 19.7 forbids
+  // implying, by saying nothing at the one moment the Article names.
+  const { dir, done } = scratch();
+  try {
+    for (const argv of [['release'], ['revoke'], ['update', '--clear', 'y']]) {
+      const { log, key } = registeredLog(mkdtempSync(join(dir, 'case-')));
+      const result = run([
+        argv[0] as string,
+        '--log',
+        log,
+        '--key',
+        key,
+        '--name',
+        NAME,
+        ...argv.slice(1),
+        '--at',
+        // Past the 300s minimum between a record and its predecessor, or the append is refused
+        // and the assertions below would be about a rejection rather than about the interface.
+        String(NOW + 400),
+      ]);
+      const said = `${result.out}\n${result.err}`;
+      assert.equal(result.code, 0, said);
+      // The distinction itself: cessation of authorised publication, not erasure.
+      assert.match(said, /append-only|removes nothing/i, `${argv[0]}: 19.6.a`);
+      assert.match(said, /re-pinned|already (retrieved|hold)/i, `${argv[0]}: 19.6.b`);
+      assert.match(
+        said,
+        /cannot compel|will not pretend|no protocol mechanism/i,
+        `${argv[0]}: 19.6.c`,
+      );
+      // And it must not be the only half rendered: the guaranteed acts belong there too, or the
+      // interface reads as a warning rather than as what the operator just did.
+      assert.match(said, /stop serving/i, `${argv[0]}: 19.2`);
+      // 19.9's conformance test, applied to this interface's own strings.
+      assert.doesNotMatch(said, /right to be forgotten/i, `${argv[0]}: 19.8`);
+      assert.doesNotMatch(said, /permanently deleted|erased everywhere|gone for good/i, argv[0]);
+    }
+  } finally {
+    done();
+  }
+});
+
+test('an ordinary update or renew is not an unpublishing, and does not say it is', () => {
+  // The negative half, and it is not decoration: a rule that fired on every successor would put
+  // Article 19's limits under a routine republish, where they are false and would be read as
+  // noise. The statement has to be rare enough to mean something at the moment it appears.
+  const { dir, done } = scratch();
+  try {
+    const { log, key } = registeredLog(dir);
+    const updated = run([
+      'update',
+      '--log',
+      log,
+      '--key',
+      key,
+      '--name',
+      NAME,
+      '--cid',
+      CID_TEXT,
+      '--at',
+      String(NOW + 400),
+    ]);
+    assert.equal(updated.code, 0, updated.out + updated.err);
+    const said = `${updated.out}\n${updated.err}`;
+    assert.doesNotMatch(said, /Article 19/i, 'a republish is not an unpublishing');
+    assert.doesNotMatch(said, /append-only/i);
+  } finally {
+    done();
+  }
+});
+
+test('MUTATION: a refused unpublishing says nothing about Article 19, because nothing happened', () => {
+  // Dropping the `code === 0` guard survived the whole suite: every test above appends
+  // successfully, so nothing looked at what a REFUSED unpublishing prints. Without the guard it
+  // prints `RELINQUISH accepted. Article 19.7: …` after a rejection — telling an operator their
+  // name is relinquished when the log was never written to. A tool that reports an act it did not
+  // perform is the defect this whole file was written for.
+  const { dir, done } = scratch();
+  try {
+    const { log } = registeredLog(dir);
+    // A key that holds nothing, so the append is refused rather than accepted.
+    const stranger = join(dir, 'stranger');
+    assert.equal(run(['keygen', '--key', stranger]).code, 0);
+    const refused = run([
+      'release',
+      '--log',
+      log,
+      '--key',
+      stranger,
+      '--name',
+      NAME,
+      '--at',
+      String(NOW + 400),
+    ]);
+    assert.notEqual(refused.code, 0, 'the fixture must actually be refused');
+    const said = `${refused.out}\n${refused.err}`;
+    assert.doesNotMatch(said, /Article 19/i, 'a refusal is not an unpublishing');
+    assert.doesNotMatch(said, /accepted/i);
+  } finally {
+    done();
+  }
+});
+
+test('AUDIT: the version the control API discloses was two releases behind the package', () => {
+  // `RESOLVER_VERSION` is a literal, and its comment gives the reason — the package manifest "is
+  // not present in every way this is run, and a version string that sometimes reads `unknown` is a
+  // worse answer than one that is simply kept in step with the release commit". The reasoning is
+  // sound and the second half did not happen: the package went to 0.2.1 and the literal stayed at
+  // 0.1.0, so `GET /v1/status` named a build that shipped two releases ago.
+  //
+  // That is worse than having no version field. The field is disclosed only past the token check,
+  // on the stated grounds that a version string is a fingerprint and a vulnerability-matching aid
+  // — so its entire purpose is to identify the build, and an operator matching a bug report
+  // against 0.1.0 reads code that is not running.
+  //
+  // Kept as a literal and pinned by this test rather than read at runtime: the manifest is always
+  // present HERE, which is where "kept in step" needed something keeping it.
+  const manifest = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+  ) as { version: string };
+  const source = readFileSync(new URL('./cli.ts', import.meta.url), 'utf8');
+  const declared = /const RESOLVER_VERSION = '([^']+)'/.exec(source);
+  assert.ok(declared, 'RESOLVER_VERSION must be a plain literal this check can read');
+  assert.equal(
+    declared[1],
+    manifest.version,
+    'the disclosed version must equal the package version; bump both in the release commit',
+  );
+});

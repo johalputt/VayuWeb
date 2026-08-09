@@ -72,6 +72,25 @@ Deferral is a real third outcome, not a soft rejection. A record whose term star
 clock-skew tolerance is held rather than refused, because this machine's clock may be the wrong
 one.
 
+### Unpublishing says what it did and what it cannot do
+
+`release`, `revoke` and `update --clear` each print Constitution Article 19.2's guaranteed acts and
+Article 19.6's limits, at the moment the record is accepted. Article 19.8 requires the distinction
+in clause 19.7 — VayuWeb ends authorised publication and does not erase — "at the point where
+unpublishing is offered, in the interface itself rather than only in a manual", and PUBLISHING.md
+section 4 says the same. Both sentences were written and neither was executed: the commands printed
+an acceptance line and stopped, which is how an interface implies erasure without claiming it.
+
+The rule keys on the outcome rather than the verb, so `update --clear` counts and `update --cid …`
+does not. `TOMBSTONE` — Article 19.2's fourth guaranteed act — is still absent, as REGISTRY.md's
+operation table records; `update --clear` breaks the binding but carries neither 19.4's cache bound
+nor 19.3's signing rule. The statement still names it, because 19.2 says a registrant can always
+publish one; this implementation does not yet give them a record for it.
+
+Both halves are always rendered — the limits alone read as a warning about a failure, the guarantees
+alone are the overstatement the Article exists to prevent — and a *refused* append prints neither,
+because nothing happened.
+
 ### The proof of work is real
 
 `register` and `renew` solve Argon2id at 64 MiB per evaluation. Cost depends on label length: a

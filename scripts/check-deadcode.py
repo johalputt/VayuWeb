@@ -133,8 +133,11 @@ REACHED_ONLY_BY_TESTS = {
     "blockx.ts:BLOCK_MESSAGE_TYPES": "Policy record; the same coverage test reads it.",
     "namespace.generated.ts:NAMESPACE_ANNEX_SIZE": "Generated count; a test pins it against the Annex.",
 
-    # Unpublishing, waiting on a mutable pin set. See pins.ts.
-    "pins.ts:UNPUBLISH_EFFECTS": "Article 19's limits as data; DELETE /v1/pin/{cid} does not exist.",
+    # `UNPUBLISH_EFFECTS` was exempt here and is not any more: `release`, `revoke` and
+    # `update --clear` render it, which Article 19.8 requires at the point unpublishing is offered.
+    # The exemption was wrong about WHY it was waiting -- it named a missing pin endpoint, when what
+    # it actually lacked was any command willing to say what unpublishing does. This gate's second
+    # direction is what noticed, which is the whole argument for checking a table both ways.
 
     # **A second way to do something the shipping path does differently.** Not waiting on anything
     # — waiting on a decision. Each of these is a public function whose job is already done by

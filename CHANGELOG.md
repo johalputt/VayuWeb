@@ -10,6 +10,63 @@ it.
 
 ## [Unreleased]
 
+### Fixed — the interface that offers unpublishing said nothing about what unpublishing does
+
+Constitution Article 19.8 is a MUST and it is specific about *where*: an implementation "MUST state
+the distinction in clause 19.7 at the point where unpublishing is offered, **in the interface itself
+rather than only in a manual**". PUBLISHING.md section 4 says the same thing in the same words — "at
+the moment of unpublishing rather than in documentation nobody reads". Both sentences were written.
+Neither was executed.
+
+`release` (RELINQUISH), `revoke` (REVOKE) and `update --clear` (breaking the name-to-content
+binding — Article 19.2's third guaranteed act) each printed an acceptance line and stopped. Saying
+nothing at that moment is not neutral: 19.7 forbids stating *or implying* that VayuWeb erases, and
+an interface that reports "accepted RELINQUISH" and falls silent is the implying.
+
+`TOMBSTONE` — 19.2's fourth act — is still absent, as REGISTRY.md's operation table already records.
+The statement names it anyway, because 19.2 says a registrant can always publish one and this
+implementation does not yet give them a record for it. A rendering that quietly dropped the line
+would be editing the Article to match the code.
+
+The dead-code gate's second direction caught its own stale exemption on the way through: with
+`UNPUBLISH_EFFECTS` now reached by shipping code, the entry claiming it was waiting on a missing pin
+endpoint failed the run. It was wrong about *why* it was waiting — what it lacked was not an
+endpoint but any command willing to say what unpublishing does. That is the argument for checking a
+table in both directions rather than only for new islands.
+
+`UNPUBLISH_EFFECTS` existed for precisely this and nothing that ships imported it. Its own comment
+says the two lists are data rather than prose "so that a user interface has to render both or
+deliberately drop one" — the same shape as `pins.ts` before `GET /v1/pins`: a module built to stop
+an overstatement, connected to nothing that could overstate. All three commands now render both
+halves, iterating the arrays rather than restating them, so a change to either list reaches the
+output without anyone remembering to come back.
+
+**The rule fires on the outcome, not the verb.** `update --clear` is an unpublishing and `update
+--cid …` is not, so `unpublishes()` asks whether the successor leaves no entries. Keying on the verb
+would have let the spelling an operator reaches for by habit go unannounced, and firing on every
+successor would put Article 19's limits under a routine republish, where they are false and would be
+read as noise.
+
+Six mutations first, five killed and **one survivor**: dropping the `code === 0` guard changed
+nothing observable, because every test appended successfully. Without it a *refused* release prints
+"RELINQUISH accepted. Article 19.7: …" — telling an operator their name is relinquished when the log
+was never written to. A tool reporting an act it did not perform is the defect this whole file was
+written for, and it took a mutation to notice the tests only ever watched the happy path. With that
+test added, the re-run is seven mutations and seven kills.
+
+### Fixed — the resolver disclosed a version that had not been current for two releases
+
+`GET /v1/status` answered `0.1.0`; the package has been `0.2.1` since. The literal's own comment
+explains why it is a literal rather than a read of `package.json` — the manifest "is not present in
+every way this is run" — and then says it is "simply kept in step with the release commit", which is
+the half that had nothing keeping it.
+
+Worse than having no version field. The field is withheld from unauthenticated callers on the stated
+grounds that a version string is a fingerprint and a vulnerability-matching aid, so identifying the
+build is its entire purpose, and an operator matching a bug report against `0.1.0` was reading code
+that was not running. It is still a literal — the runtime argument is sound — and a test now compares
+it to `package.json`, which is always present *there*.
+
 ### Added — a bounded request-body reader, and the endpoint that was waiting for it
 
 `serve.ts` read no request body on either surface, and gave a reason: a body reader is an unbounded
