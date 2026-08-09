@@ -31,7 +31,7 @@ for byte, is what this package is mostly made of.
 | Conformance vectors ([`../conformance/vectors.json`](../conformance/vectors.json)) | Registry rules only |
 | Hypercore log and Hyperbee index | Not started |
 | Peer replication (`src/replicate.ts`, `src/swarm.ts`, `vw sync`) | Implemented, tested over TCP; the Hyperswarm binding is injected and unexercised |
-| Checkpoints and light clients | Encoded and verified; nothing publishes or consumes one |
+| Checkpoints and light clients (`src/checkpoint.ts`) | Served, compared and forks surfaced; the light-client half has no client |
 
 `src/store.ts` is a single-writer, file-backed log with an index rebuilt by replay. It is enough
 to finish and test Phase 1 without pulling in the peer-to-peer stack, and the difference from
@@ -98,6 +98,24 @@ deliberately does not depend on; `IpnsPort` is the seam, the same shape Hyperswa
 `swarm.ts`. `serve --pointer <key>` declares one local answer — "the record I am testing carries
 this pointer, and it means the site I just published" — which is what a publisher checking that
 path before they publish actually has. Every other pointer resolves to null.
+
+### A fork is surfaced, and never resolved
+
+A peer states a `CHECKPOINT` over its own log at every multiple of `CHECKPOINT_INTERVAL`, and
+compares the ones it is told. Two that disagree at one length are a fork: REPLICATION.md 7.3 says a
+client that finds one **MUST surface it** and **MUST NOT pick one**, so `CheckpointLedger` has no
+method that could — no winner, no score, no preference for the longer chain or the first seen.
+
+**A checkpoint carries no signature**, which is the whole difference from equivocation evidence. It
+is four numbers and two hashes, and anyone can send any of them; there is nothing tying a checkpoint
+to the peer that produced the log it describes. So a fork report means "two peers told me different
+things" and no more — worth telling the operator, and never forwarded, because a relayed one is
+indistinguishable from an invented one. Equivocation evidence is checkable by a third party without
+trusting whoever passed it on, which is exactly why that one *is* forwarded.
+
+`verifyNameInclusion` and `greatestCorroboratedLength` are the client half — verifying one name
+against a claimed root without holding the log. They are implemented and tested and **nothing in
+this package calls them**, because a light client is a client, and this package is a node.
 
 ### Equivocation is recorded, and punished by nothing
 

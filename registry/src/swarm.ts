@@ -49,6 +49,7 @@ import {
   type ReplicationSink,
 } from './replicate.ts';
 import { EQUIVOCATION_LIMITS, type EquivocationReader } from './equivocation.ts';
+import type { Checkpoint, CheckpointLedger } from './checkpoint.ts';
 
 /** The discovery topic, per REPLICATION.md 2.2. */
 export const TOPIC_PREIMAGE = 'VayuWeb-Replication-v1';
@@ -262,6 +263,15 @@ export interface PeerOutcome {
   forwarded: number;
   /** Reports not handed over, because one connection's forwarding budget ran out. Never silent. */
   withheld: number;
+  /** Checkpoints this peer stated. */
+  checkpoints: number;
+  /**
+   * Lengths where two checkpoints disagreed — a fork, surfaced and never resolved.
+   *
+   * REPLICATION.md 7.3 says a client that finds one "MUST surface it. It MUST NOT pick one", so
+   * this is a count and there is deliberately no field saying which side won.
+   */
+  forks: number;
 }
 
 /**
@@ -312,6 +322,21 @@ export interface DriverOptions {
    * the only behaviour there is.
    */
   readonly ledger?: EquivocationReader;
+  /**
+   * What this peer would state about its own log, or null when its length is not one a peer may
+   * serve. Read once, when the remote introduces itself.
+   *
+   * REPLICATION.md 7.1 is a MAY and this is where the choice is made: a caller that supplies
+   * nothing serves no checkpoints, which is conforming. Nothing had ever constructed an outbound
+   * `CHECKPOINT` before this — the message had an encoder, a decoder and a conformance vector, and
+   * no sender, which is the third time that exact shape has turned up in this protocol.
+   */
+  readonly checkpoints?: () => Checkpoint | null;
+  /**
+   * Where checkpoints other peers state are compared. Shared across connections by the caller,
+   * because a fork is two peers disagreeing and one connection only ever hears one of them.
+   */
+  readonly forks?: CheckpointLedger;
 }
 
 /**
@@ -338,6 +363,7 @@ export function drivePeer(
 ): PeerOutcome {
   const timers = options.timers ?? REAL_TIMERS;
   const ledger = options.ledger;
+  const forks = options.forks;
   const session = new ReplicationSession(sink);
   const deframer = new Deframer();
   const outcome: PeerOutcome = {
@@ -349,6 +375,8 @@ export function drivePeer(
     recorded: 0,
     forwarded: 0,
     withheld: 0,
+    checkpoints: 0,
+    forks: 0,
   };
 
   const send = (message: Message): void => {
@@ -415,6 +443,29 @@ export function drivePeer(
     outcome.withheld += held.length - budget;
   };
 
+  /**
+   * State what this peer's log looks like, once, if it is at a length worth stating.
+   *
+   * Alongside the evidence offer and for the same reason: the remote has just said what it has, so
+   * this is the moment a claim about our own log is useful to it. Sent once — a peer that restated
+   * its checkpoint mid-session would be inviting the other end to reconcile against a moving
+   * target, which is the defect 3.3 closes for `HELLO`.
+   */
+  let stated = false;
+  const stateCheckpoint = (): void => {
+    if (stated || options.checkpoints === undefined || !session.ready) return;
+    stated = true;
+    const mine = options.checkpoints();
+    if (mine === null) return;
+    send({
+      t: 'CHECKPOINT',
+      len: mine.logLength,
+      treeRoot: mine.treeRoot,
+      indexRoot: mine.indexRoot,
+      liveNames: mine.liveNames,
+    });
+  };
+
   const record = (result: ReceiveOutcome): void => {
     outcome.applied += result.applied;
     outcome.rejected += result.rejected;
@@ -428,8 +479,22 @@ export function drivePeer(
     for (const evidence of result.equivocations) {
       if (ledger?.record(evidence, 'received') === 'recorded') outcome.recorded += 1;
     }
+    // Compared, never resolved. `observe` holds the first checkpoint seen at each length and says
+    // when a later one disagrees; there is no method on it that picks a side, because 7.3 forbids
+    // one and an absent method is the only kind that cannot be called by mistake.
+    outcome.checkpoints += result.checkpoints.length;
+    for (const stated of result.checkpoints) {
+      const verdict = forks?.observe({
+        logLength: stated.len,
+        treeRoot: stated.treeRoot,
+        indexRoot: stated.indexRoot,
+        liveNames: stated.liveNames,
+      });
+      if (verdict === 'FORK') outcome.forks += 1;
+    }
     for (const reply of result.replies) send(reply);
     offerEvidence();
+    stateCheckpoint();
     pump();
   };
 

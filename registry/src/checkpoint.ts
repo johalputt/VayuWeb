@@ -246,3 +246,118 @@ export function greatestCorroboratedLength(
   }
   return best;
 }
+
+/* -------------------------------------------------------------------------- */
+/* 7.3 — surfacing a fork, which nothing could do                             */
+/* -------------------------------------------------------------------------- */
+
+/** Bounds on what a peer's checkpoints may make this one hold. */
+export const CHECKPOINT_LIMITS = {
+  /** Distinct log lengths remembered. Bounded because a peer chooses the lengths it claims. */
+  lengths: 64,
+  /** Fork reports kept. A full ledger refuses rather than evicting; see {@link CheckpointLedger}. */
+  forks: 32,
+} as const;
+
+/** What observing a checkpoint did. */
+export type Observation = 'FIRST' | 'AGREES' | 'FORK' | 'NOT_A_CHECKPOINT_LENGTH' | 'FULL';
+
+/**
+ * Two checkpoints at one length that do not match, kept so somebody can be told.
+ *
+ * `first` and `other` rather than `mine` and `theirs`: this peer may hold neither, and naming one
+ * of them as ours would be the beginning of picking a side.
+ */
+export interface ForkReport {
+  readonly logLength: number;
+  readonly first: Checkpoint;
+  readonly other: Checkpoint;
+  readonly difference: ComparisonResult;
+}
+
+/**
+ * What this peer has been told about the log at each checkpoint length.
+ *
+ * 7.3 is a MUST — "a client comparing two checkpoints at the same length that differ has detected
+ * a fork and MUST surface it. It MUST NOT pick one" — and nothing could satisfy it, because
+ * nothing kept a checkpoint long enough for a second one to be compared against it. The session
+ * returned `EMPTY` for a `CHECKPOINT` and the message went out of scope, so a fork was not merely
+ * unreported: it was undetectable.
+ *
+ * ## Why this is recorded and never forwarded, unlike equivocation evidence
+ *
+ * A `CHECKPOINT` carries no signature. It is four numbers and two hashes, and **anyone can send
+ * any of them** — there is nothing in the message that ties it to the peer that produced the log
+ * it describes. Equivocation evidence is the opposite: two signed records, checkable by a third
+ * party without trusting whoever passed them on, which is exactly what makes forwarding it safe.
+ *
+ * So a fork report here means "two peers told me different things", and no more. It is worth
+ * telling the operator, because a real fork looks exactly like this. It is not worth handing to a
+ * third peer, because a forwarded one is indistinguishable from an invented one and forwarding it
+ * would make this peer a repeater for whatever a stranger felt like claiming. The asymmetry is not
+ * an oversight in either direction; it follows from what each message can prove about itself.
+ *
+ * **Nothing here picks a side**, and there is no method that could. The ledger has no "correct"
+ * field, no score, no preference for the longer chain and no preference for the first seen. It
+ * holds what it was told and says they disagree.
+ */
+export class CheckpointLedger {
+  private readonly seen = new Map<number, Checkpoint>();
+  private readonly disagreements: ForkReport[] = [];
+  private refusedCount = 0;
+
+  /**
+   * Take one checkpoint and say what it did.
+   *
+   * A length that is not a multiple of {@link CHECKPOINT_INTERVAL} is refused outright. 7.1 says a
+   * peer serves checkpoints "for any log length that is a multiple of `CHECKPOINT_INTERVAL`", so
+   * one at any other length is out of specification — and accepting them would hand an attacker
+   * one entry per integer they feel like naming, where the rule as written leaves them one entry
+   * per ten thousand.
+   */
+  observe(checkpoint: Checkpoint): Observation {
+    if (!isCheckpointLength(checkpoint.logLength)) {
+      this.refusedCount += 1;
+      return 'NOT_A_CHECKPOINT_LENGTH';
+    }
+    const held = this.seen.get(checkpoint.logLength);
+    if (held === undefined) {
+      if (this.seen.size >= CHECKPOINT_LIMITS.lengths) {
+        this.refusedCount += 1;
+        return 'FULL';
+      }
+      this.seen.set(checkpoint.logLength, checkpoint);
+      return 'FIRST';
+    }
+    const difference = compareCheckpoints(held, checkpoint);
+    if (difference === 'IDENTICAL') return 'AGREES';
+    if (this.disagreements.length < CHECKPOINT_LIMITS.forks) {
+      this.disagreements.push({
+        logLength: checkpoint.logLength,
+        first: held,
+        other: checkpoint,
+        difference,
+      });
+    } else {
+      // Refused rather than evicted, for the reason the equivocation ledger gives: eviction would
+      // let whoever is filling it flush the report that mattered.
+      this.refusedCount += 1;
+    }
+    return 'FORK';
+  }
+
+  /** Every disagreement seen, in the order they were found. */
+  get forks(): readonly ForkReport[] {
+    return this.disagreements;
+  }
+
+  /** Lengths this peer has been told about. */
+  get lengths(): number {
+    return this.seen.size;
+  }
+
+  /** Checkpoints turned away: out-of-specification lengths, and anything past a bound. */
+  get refused(): number {
+    return this.refusedCount;
+  }
+}

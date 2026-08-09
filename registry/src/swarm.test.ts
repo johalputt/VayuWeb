@@ -17,7 +17,14 @@ import {
   type PeerStream,
   type SwarmOptions,
 } from './swarm.ts';
-import { LIMITS, PROTOCOL_VERSION, decodeMessage, encodeMessage } from './replicate.ts';
+import {
+  LIMITS,
+  PROTOCOL_VERSION,
+  decodeMessage,
+  encodeMessage,
+  type Message,
+} from './replicate.ts';
+import { CHECKPOINT_INTERVAL, CheckpointLedger } from './checkpoint.ts';
 import { Store } from './store.ts';
 import { encode, type CborMap, type CborValue } from './cbor.ts';
 import { signingInput } from './domain.ts';
@@ -788,4 +795,136 @@ test('AUDIT: two peers holding one different record each actually exchange them'
 
   assert.deepEqual(aliceSeen, ['bob-record'], 'alice must receive what only bob had');
   assert.deepEqual(bobSeen, ['alice-record'], 'bob must receive what only alice had');
+});
+
+/* -------------------------------------------------------------------------- */
+/* REPLICATION.md 7.1 and 7.3 — a message with a decoder and no sender         */
+/* -------------------------------------------------------------------------- */
+
+/** Every CHECKPOINT a driver put on the wire, decoded rather than pattern-matched. */
+function statedCheckpoints(stream: { written: Uint8Array[] }): Message[] {
+  const out: Message[] = [];
+  for (const written of stream.written) {
+    try {
+      const message = decodeMessage(written.subarray(4));
+      if (message.t === 'CHECKPOINT') out.push(message);
+    } catch {
+      /* not a message; the framing tests cover that */
+    }
+  }
+  return out;
+}
+
+const CHECKPOINT = {
+  logLength: CHECKPOINT_INTERVAL,
+  treeRoot: new Uint8Array(32).fill(3),
+  indexRoot: new Uint8Array(32).fill(4),
+  liveNames: 7,
+};
+
+test('7.1 a peer states its checkpoint once, after the remote has introduced itself', () => {
+  // Nothing had ever constructed an outbound CHECKPOINT. The type had an encoder, a decoder and a
+  // conformance vector, and no sender — the third time that exact shape has turned up here, after
+  // `retryDeferred` and `EQUIVOCATION`.
+  const stream = fakeStream();
+  drivePeer(stream, emptySink(), () => NOW, {
+    checkpoints: () => CHECKPOINT,
+    timers: { setInterval: () => 'handle', clearInterval: () => undefined },
+  });
+  assert.equal(statedCheckpoints(stream).length, 0, 'nothing before the remote has spoken');
+
+  stream.feed(
+    frame(encodeMessage({ t: 'HELLO', v: PROTOCOL_VERSION, len: 0, root: new Uint8Array(32) })),
+  );
+  const stated = statedCheckpoints(stream);
+  assert.equal(stated.length, 1);
+  assert.equal(stated[0]?.t === 'CHECKPOINT' && stated[0].len, CHECKPOINT_INTERVAL);
+  assert.equal(stated[0]?.t === 'CHECKPOINT' && stated[0].liveNames, 7);
+
+  stream.feed(
+    frame(encodeMessage({ t: 'HELLO', v: PROTOCOL_VERSION, len: 0, root: new Uint8Array(32) })),
+  );
+  assert.equal(
+    statedCheckpoints(stream).length,
+    1,
+    'restating invites reconciling against a moving target',
+  );
+});
+
+test('7.1 a log at no checkpoint length states nothing, and neither does a peer with no provider', () => {
+  // 7.1 is a MAY, and this is where the choice is made. A driver given nothing serves nothing,
+  // which conforms; a driver whose log is between intervals has nothing legal to say.
+  for (const checkpoints of [undefined, () => null]) {
+    const stream = fakeStream();
+    drivePeer(stream, emptySink(), () => NOW, {
+      ...(checkpoints === undefined ? {} : { checkpoints }),
+      timers: { setInterval: () => 'handle', clearInterval: () => undefined },
+    });
+    stream.feed(
+      frame(encodeMessage({ t: 'HELLO', v: PROTOCOL_VERSION, len: 0, root: new Uint8Array(32) })),
+    );
+    assert.equal(statedCheckpoints(stream).length, 0);
+  }
+});
+
+test('7.3 a checkpoint from a peer reaches the ledger, and a disagreement is counted', () => {
+  const stream = fakeStream();
+  const forks = new CheckpointLedger();
+  const outcome = drivePeer(stream, emptySink(), () => NOW, {
+    forks,
+    timers: { setInterval: () => 'handle', clearInterval: () => undefined },
+  });
+  stream.feed(
+    frame(encodeMessage({ t: 'HELLO', v: PROTOCOL_VERSION, len: 0, root: new Uint8Array(32) })),
+  );
+
+  const state = (tree: number): void => {
+    stream.feed(
+      frame(
+        encodeMessage({
+          t: 'CHECKPOINT',
+          len: CHECKPOINT_INTERVAL,
+          treeRoot: new Uint8Array(32).fill(tree),
+          indexRoot: new Uint8Array(32).fill(4),
+          liveNames: 7,
+        }),
+      ),
+    );
+  };
+  state(3);
+  assert.equal(outcome.checkpoints, 1);
+  assert.equal(outcome.forks, 0, 'one claim is not a disagreement');
+
+  state(9);
+  assert.equal(outcome.checkpoints, 2);
+  assert.equal(outcome.forks, 1);
+  assert.equal(forks.forks.length, 1, 'and it is on the shared ledger, not only in a counter');
+});
+
+test('7.3 a checkpoint is not an instruction: it moves nothing in the session', () => {
+  // The property the session was already right about, pinned now that the message is handed out
+  // rather than dropped. A peer that could set our idea of the remote's length by asserting a
+  // checkpoint would have found a second way to say `HELLO`, without the once-only rule 3.3 puts
+  // on that one.
+  const stream = fakeStream();
+  drivePeer(stream, emptySink(), () => NOW, {
+    forks: new CheckpointLedger(),
+    timers: { setInterval: () => 'handle', clearInterval: () => undefined },
+  });
+  stream.feed(
+    frame(encodeMessage({ t: 'HELLO', v: PROTOCOL_VERSION, len: 0, root: new Uint8Array(32) })),
+  );
+  const before = stream.written.length;
+  stream.feed(
+    frame(
+      encodeMessage({
+        t: 'CHECKPOINT',
+        len: 5_000_000,
+        treeRoot: new Uint8Array(32).fill(1),
+        indexRoot: new Uint8Array(32).fill(2),
+        liveNames: 1,
+      }),
+    ),
+  );
+  assert.equal(stream.written.length, before, 'no WANT, no reply, nothing');
 });

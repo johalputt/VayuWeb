@@ -211,6 +211,16 @@ export interface ReceiveOutcome {
   readonly duplicates: number;
   /** Equivocation evidence this message produced or confirmed, for the caller to record. */
   readonly equivocations: readonly EquivocationMessage[];
+  /**
+   * Checkpoints this peer stated, for the caller to compare.
+   *
+   * Surfaced rather than acted on, which is the same division `equivocations` makes and for a
+   * sharper reason: 7.3 says a client that finds two checkpoints differing at one length "MUST
+   * surface it. It MUST NOT pick one." A session that compared them would be one refactor away
+   * from a session that preferred one, and the shortest route to a de facto root runs through a
+   * peer that quietly decides which history is real.
+   */
+  readonly checkpoints: readonly CheckpointMessage[];
 }
 
 const EMPTY: ReceiveOutcome = {
@@ -220,6 +230,7 @@ const EMPTY: ReceiveOutcome = {
   deferred: 0,
   duplicates: 0,
   equivocations: [],
+  checkpoints: [],
 };
 
 /* -------------------------------------------------------------------------- */
@@ -556,7 +567,12 @@ export class ReplicationSession {
         // A checkpoint is evidence for a light client to weigh, not an instruction to this
         // session. Comparing it against local state is checkpoint.ts's job and a caller's
         // decision; accepting it here would make a remote assertion part of our state.
-        return EMPTY;
+        //
+        // It is now handed OUT rather than dropped. "A caller's decision" was true of the design
+        // and false of the codebase: there was no caller, so 7.3's MUST — surface a fork — could
+        // not be satisfied by anything, because nothing kept a checkpoint long enough for a second
+        // one to be compared against it.
+        return { ...EMPTY, checkpoints: [message] };
     }
   }
 

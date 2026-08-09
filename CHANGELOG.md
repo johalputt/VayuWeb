@@ -10,6 +10,51 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a fork was not unreported, it was undetectable
+
+REPLICATION.md 7.3: "a client comparing two checkpoints at the same length that differ has detected
+a fork and MUST surface it. It MUST NOT pick one." Nothing could satisfy that MUST.
+`ReplicationSession.receive` returned `EMPTY` for a `CHECKPOINT` — with a comment saying comparing
+it "is checkpoint.ts's job and a caller's decision", which was true of the design and false of the
+codebase, because there was no caller. Nothing kept a checkpoint long enough for a second one to be
+compared against it.
+
+Nor had anything ever constructed an **outbound** `CHECKPOINT`: encoder, decoder, conformance
+vector, no sender. That is the third time this exact shape has turned up in this protocol, after
+`retryDeferred` and `EQUIVOCATION`, and `checkpoint.ts` was an island — imported by nothing that
+ships, importing `keys.ts`, which was therefore imported by nothing that ships either.
+
+A peer now states a checkpoint over its own log at the lengths 7.1 permits, and compares what it is
+told. `CheckpointLedger` holds the first checkpoint seen at each length and says when a later one
+disagrees. **It has no method that picks a side** — no winner, no score, no preference for the
+longer chain or the first seen — and a test asserts the absence, because a resolver with a
+`winner()` is one refactor away from a resolver that calls it, and the shortest route to a de facto
+root runs through a peer that quietly decides which history is real.
+
+**A checkpoint carries no signature**, and that is the whole difference from equivocation evidence.
+It is four numbers and two hashes; anyone can send any of them, and nothing ties one to the peer
+that produced the log it describes. So a fork report means "two peers told me different things" and
+no more: worth telling the operator, never forwarded, because a relayed one is indistinguishable
+from an invented one. Equivocation evidence is two signed records checkable by a third party without
+trusting whoever passed them on, which is exactly why *that* one is forwarded. The asymmetry follows
+from what each message can prove about itself.
+
+The bounds follow the same rule: a checkpoint at a length that is not a multiple of
+`CHECKPOINT_INTERVAL` is refused outright, which turns 7.1's sentence into a bound — one entry per
+ten thousand rather than one per integer an attacker feels like naming.
+
+`Store.indexSnapshot` exists so that the conversion inside `Store.checkpoint` can be tested at all.
+The interval is 10,000 and every record in a test log costs a real proof of work, so only the
+null-returning branch is reachable — and the conversion is not obvious (`nameKey` is `tld name`,
+`indexRoot` takes `label.tld`), with an error there producing a wrong index root rather than a
+crash. A wrong index root looks exactly like a fork. Lowering the interval to make it testable was
+the other option and is worse: a protocol constant with a test-only value is a constant two
+implementations can disagree about.
+
+Still not done, and stated rather than implied: `verifyNameInclusion` and
+`greatestCorroboratedLength` are the *client* half, and nothing in this package calls them, because
+a light client is a client and this package is a node.
+
 ### Fixed — every site with client-side routing 404s on every deep link
 
 PUBLISHING.md 2.3 is a **SHALL** and names its own symptom in the sentence before it: "a site with

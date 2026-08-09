@@ -60,6 +60,7 @@ import {
 import { verifyPow, rateWindow, requiredBits, EPOCH_SECONDS } from './pow.ts';
 import { lifecycleOf, isFullyReleased } from './lifecycle.ts';
 import { treeOf } from './merkle.ts';
+import { checkpointOf, isCheckpointLength, type Checkpoint } from './checkpoint.ts';
 import { signedByNamedOwner, type ReplicationSink } from './replicate.ts';
 import type { EquivocationRecorder } from './equivocation.ts';
 
@@ -671,6 +672,56 @@ export class Store implements RegistryView {
 
   entryAt(index: number): LogEntry | null {
     return this.entries[index] ?? null;
+  }
+
+  /**
+   * A checkpoint over this log, or null when its length is not one a peer may serve.
+   *
+   * REPLICATION.md 7.1: "a peer MAY serve `CHECKPOINT` for any log length that is a multiple of
+   * `CHECKPOINT_INTERVAL`". Returning null at every other length is what makes that a rule rather
+   * than a suggestion — a caller cannot serve one it was never given.
+   *
+   * Here rather than in `checkpoint.ts` because the index it commits to is private to this class,
+   * and exposing the index to build one outside would expose it to everything else as well.
+   */
+  checkpoint(now: number): Checkpoint | null {
+    if (!isCheckpointLength(this.entries.length)) return null;
+    const snapshot = this.indexSnapshot();
+    return checkpointOf(
+      this.entries.map((entry) => entry.bytes),
+      snapshot.current,
+      snapshot.records,
+      now,
+    );
+  }
+
+  /**
+   * The index as a checkpoint commits to it: `label.tld` to the hash of the record that holds it.
+   *
+   * **Separate from {@link checkpoint} so it can be tested at all.** `CHECKPOINT_INTERVAL` is
+   * 10,000 and every record in a test log costs a real proof of work, so the only branch of
+   * `checkpoint` a test can reach is the one that returns null — which would have left the
+   * conversion below unexercised until somebody had a ten-thousand-record log. The conversion is
+   * not obvious: `nameKey` is `tld name`, and `indexRoot` takes `label.tld` because it derives the
+   * keyspace entry itself rather than being handed one, so an error here is a wrong index root
+   * rather than a crash, and a wrong index root looks exactly like a fork.
+   *
+   * Lowering the interval to make it testable was the other option and is the worse one: a
+   * protocol constant with a test-only value is a constant two implementations can disagree about.
+   */
+  indexSnapshot(): {
+    current: ReadonlyMap<string, Uint8Array>;
+    records: ReadonlyMap<string, RegistryRecord>;
+  } {
+    const current = new Map<string, Uint8Array>();
+    const records = new Map<string, RegistryRecord>();
+    for (const [key, held] of this.names) {
+      const space = key.indexOf(' ');
+      const readable = `${key.slice(space + 1)}.${key.slice(0, space)}`;
+      current.set(readable, held.current.hash);
+      records.set(readable, held.current.record);
+    }
+    return { current, records };
   }
 
   /** Difficulty currently required to register this label in this TLD. */

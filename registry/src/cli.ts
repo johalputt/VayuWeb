@@ -43,6 +43,7 @@ import { fetchPath, FetchError } from './fetch.ts';
 import { treeOf } from './merkle.ts';
 import { TOKEN_BYTES } from './control.ts';
 import { EquivocationLedger, ledgerPathFor, type LedgerEntry } from './equivocation.ts';
+import { CheckpointLedger } from './checkpoint.ts';
 
 const toHex = (bytes: Uint8Array): string =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
@@ -927,6 +928,9 @@ async function cmdSync(args: Args): Promise<number> {
 
   const { store, ledger } = openWithLedger(path, Math.floor(Date.now() / 1000));
   const sink = sinkOver(store);
+  // One ledger across every connection, because a fork is two peers disagreeing and a single
+  // connection only ever hears one of them. Nothing in it picks a side; see REPLICATION.md 7.3.
+  const forks = new CheckpointLedger();
   const now = (): number => Math.floor(Date.now() / 1000);
   out(`log ${path} holds ${store.length} record(s)`);
 
@@ -935,6 +939,7 @@ async function cmdSync(args: Args): Promise<number> {
     out(
       `${label}  applied ${outcome.applied}  rejected ${outcome.rejected}  ` +
         `deferred ${outcome.deferred}  duplicate ${outcome.duplicates}  ` +
+        `checkpoints ${outcome.checkpoints}${outcome.forks > 0 ? ` — ${outcome.forks} FORK(S)` : ''}  ` +
         `equivocations ${outcome.equivocations} (${outcome.recorded} new)  ` +
         `forwarded ${outcome.forwarded}${outcome.withheld > 0 ? ` (${outcome.withheld} withheld)` : ''}`,
     );
@@ -958,7 +963,11 @@ async function cmdSync(args: Args): Promise<number> {
   const drive = (socket: Socket, label: string): void => {
     sockets.add(socket);
     socket.on('close', () => sockets.delete(socket));
-    const outcome = drivePeer(socket, sink, now, { ledger });
+    const outcome = drivePeer(socket, sink, now, {
+      ledger,
+      forks,
+      checkpoints: () => store.checkpoint(now()),
+    });
     // Printed on close rather than per message: a line per record turns a sync of a real log into
     // a wall of output, and the totals are what an operator is actually asking about.
     socket.on('close', () => report(label, outcome));
@@ -1008,6 +1017,22 @@ async function cmdSync(args: Args): Promise<number> {
 
   await closed;
   out(`log ${path} now holds ${store.length} record(s)`);
+  // Printed after the connections close, because a fork found on one is a fact about the run and
+  // not about that peer. Never resolved and never ranked: 7.3 says surface it and do not pick one,
+  // so this says what was claimed and stops.
+  for (const fork of forks.forks) {
+    err(`FORK at log length ${fork.logLength}: two peers disagree (${fork.difference})`);
+    err(
+      `  tree  ${toHex(fork.first.treeRoot).slice(0, 16)}… vs ${toHex(fork.other.treeRoot).slice(0, 16)}…`,
+    );
+    err(
+      `  index ${toHex(fork.first.indexRoot).slice(0, 16)}… vs ${toHex(fork.other.indexRoot).slice(0, 16)}…`,
+    );
+  }
+  if (forks.forks.length > 0) {
+    err('A checkpoint carries no signature, so this means "two peers told me different things"');
+    err('and no more. It is not evidence a third party can check, and is never forwarded.');
+  }
   return 0;
 }
 

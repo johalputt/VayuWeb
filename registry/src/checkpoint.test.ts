@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 import {
   CHECKPOINT_INTERVAL,
+  CHECKPOINT_LIMITS,
+  CheckpointLedger,
   isCheckpointLength,
   indexRoot,
   checkpointOf,
@@ -238,4 +240,106 @@ test('with nothing corroborated it fails toward staleness rather than trust', ()
   assert.equal(greatestCorroboratedLength([500]), null);
   assert.equal(greatestCorroboratedLength([]), null);
   assert.deepEqual(greatestCorroboratedLength([500], 1), { length: 500, peersAgreeing: 1 });
+});
+
+/* -------------------------------------------------------------------------- */
+/* 7.3 — a fork MUST be surfaced, and MUST NOT be resolved                     */
+/* -------------------------------------------------------------------------- */
+
+const at = (length: number, tree: number, index: number, live = 1) => ({
+  logLength: length,
+  treeRoot: h(tree),
+  indexRoot: h(index),
+  liveNames: live,
+});
+
+test('7.3 two peers tell me different histories at one length, and I say so', () => {
+  // The MUST that nothing could satisfy. `ReplicationSession.receive` returned `EMPTY` for a
+  // `CHECKPOINT` and the message went out of scope — so a fork was not merely unreported, it was
+  // undetectable: nothing kept a checkpoint long enough for a second one to be compared against it.
+  const ledger = new CheckpointLedger();
+  assert.equal(ledger.observe(at(CHECKPOINT_INTERVAL, 1, 2)), 'FIRST');
+  assert.equal(ledger.observe(at(CHECKPOINT_INTERVAL, 9, 2)), 'FORK');
+
+  const [fork] = ledger.forks;
+  assert.ok(fork);
+  assert.equal(fork.logLength, CHECKPOINT_INTERVAL);
+  assert.equal(fork.difference, 'DIVERGED');
+  // **Both sides, kept verbatim.** A report that summarised them, or kept one, would be the first
+  // step toward picking one — and a reader shown a single root has been given an answer rather
+  // than a disagreement.
+  assert.deepEqual(fork.first.treeRoot, h(1));
+  assert.deepEqual(fork.other.treeRoot, h(9));
+});
+
+test('7.3 nothing in the ledger picks a side, and there is no method that could', () => {
+  // Written as an assertion about the SHAPE because that is where the rule lives. A resolver with
+  // a `winner()` is one refactor away from a resolver that calls it, and the shortest route to a
+  // de facto root runs through a peer that quietly decides which history is real.
+  const ledger = new CheckpointLedger();
+  ledger.observe(at(CHECKPOINT_INTERVAL, 1, 2));
+  ledger.observe(at(CHECKPOINT_INTERVAL, 9, 2));
+
+  const surface = new Set(
+    Object.getOwnPropertyNames(Object.getPrototypeOf(ledger)).concat(Object.keys(ledger)),
+  );
+  for (const forbidden of ['winner', 'resolve', 'prefer', 'longest', 'best', 'trust', 'pick']) {
+    assert.equal(surface.has(forbidden), false, `a ledger with .${forbidden}() has picked a side`);
+  }
+  const [fork] = ledger.forks;
+  assert.deepEqual(
+    Object.keys(fork ?? {}).sort(),
+    ['difference', 'first', 'logLength', 'other'],
+    'a report names two checkpoints and how they differ, and ranks neither',
+  );
+});
+
+test('7.3 an index that diverges while the tree agrees is still a fork', () => {
+  // Two peers holding the same records in the same order must derive the same index. If they do
+  // not, one of them is applying the rules differently — which is the more interesting fork,
+  // because the logs look identical to anyone comparing only history.
+  const ledger = new CheckpointLedger();
+  ledger.observe(at(CHECKPOINT_INTERVAL, 1, 2));
+  assert.equal(ledger.observe(at(CHECKPOINT_INTERVAL, 1, 8)), 'FORK');
+  assert.equal(ledger.forks[0]?.difference, 'INDEX_DIVERGED');
+});
+
+test('7.3 agreement is not a fork, however many times it is repeated', () => {
+  const ledger = new CheckpointLedger();
+  assert.equal(ledger.observe(at(CHECKPOINT_INTERVAL, 1, 2)), 'FIRST');
+  for (let i = 0; i < 10; i += 1) {
+    assert.equal(ledger.observe(at(CHECKPOINT_INTERVAL, 1, 2)), 'AGREES');
+  }
+  assert.equal(ledger.forks.length, 0);
+  assert.equal(ledger.lengths, 1);
+});
+
+test('I claim a checkpoint at every length I can think of and fill your memory', () => {
+  // 7.1 says a peer serves checkpoints "for any log length that is a multiple of
+  // CHECKPOINT_INTERVAL". Accepting any other length would hand an attacker one entry per integer
+  // they feel like naming; the rule as written leaves them one per ten thousand, and this is what
+  // turns that sentence into a bound.
+  const ledger = new CheckpointLedger();
+  for (let i = 1; i <= 500; i += 1) {
+    assert.equal(ledger.observe(at(i, 1, 2)), 'NOT_A_CHECKPOINT_LENGTH', `length ${i}`);
+  }
+  assert.equal(ledger.lengths, 0);
+  assert.equal(ledger.refused, 500);
+
+  // And the lengths that ARE legal are bounded too, because there are still plenty of them.
+  for (let i = 1; i <= CHECKPOINT_LIMITS.lengths + 10; i += 1) {
+    ledger.observe(at(i * CHECKPOINT_INTERVAL, 1, 2));
+  }
+  assert.equal(ledger.lengths, CHECKPOINT_LIMITS.lengths);
+});
+
+test('a full fork ledger refuses rather than forgetting the report that mattered', () => {
+  const ledger = new CheckpointLedger();
+  for (let i = 1; i <= CHECKPOINT_LIMITS.forks + 5; i += 1) {
+    ledger.observe(at(i * CHECKPOINT_INTERVAL, 1, 2));
+    assert.equal(ledger.observe(at(i * CHECKPOINT_INTERVAL, 9, 2)), 'FORK');
+  }
+  assert.equal(ledger.forks.length, CHECKPOINT_LIMITS.forks);
+  assert.equal(ledger.forks[0]?.logLength, CHECKPOINT_INTERVAL, 'the first found is still there');
+  assert.ok(ledger.refused >= 5, 'and the ones turned away are counted');
 });

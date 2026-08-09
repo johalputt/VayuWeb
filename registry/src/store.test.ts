@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { Store, StoreError, frame, sinkOver, unframe, writeLog } from './store.ts';
+import { indexRoot, isCheckpointLength } from './checkpoint.ts';
 import { treeOf } from './merkle.ts';
 import { encode, type CborMap, type CborValue } from './cbor.ts';
 import { signingInput } from './domain.ts';
@@ -458,4 +459,45 @@ test('AUDIT: a sink over a real store reports the real merkle root', () => {
     assert.deepEqual(sink.encodingAt(0), record);
     assert.equal(sink.encodingAt(1), null);
   }
+});
+
+/* -------------------------------------------------------------------------- */
+/* REPLICATION.md 7.1 — what this peer may state about its own log             */
+/* -------------------------------------------------------------------------- */
+
+test('a log that is not at a checkpoint length states nothing', () => {
+  // 7.1: "a peer MAY serve CHECKPOINT for any log length that is a multiple of
+  // CHECKPOINT_INTERVAL". Returning null everywhere else is what makes that a rule rather than a
+  // suggestion — a driver cannot serve a checkpoint it was never given.
+  const store = Store.open(scratch(), NOW);
+  assert.equal(store.checkpoint(NOW), null, 'an empty log is not a checkpoint length either');
+  assert.equal(store.append(registration(), NOW).outcome, 'accept');
+  assert.equal(isCheckpointLength(store.length), false);
+  assert.equal(store.checkpoint(NOW), null);
+});
+
+test('the index a checkpoint commits to is keyed the way indexRoot expects', () => {
+  // **The branch a test could not otherwise reach.** `CHECKPOINT_INTERVAL` is 10,000 and every
+  // record costs a real proof of work, so only the null path of `checkpoint()` is reachable — and
+  // the conversion below would have gone unexercised until somebody had a ten-thousand-record log.
+  //
+  // It is not obvious: `nameKey` is `tld name` and `indexRoot` takes `label.tld`, because it
+  // derives the keyspace entry itself rather than being handed one. Getting it wrong is not a
+  // crash, it is a wrong index root — which looks exactly like a fork to every peer.
+  const store = Store.open(scratch(), NOW);
+  const bytes = registration();
+  assert.equal(store.append(bytes, NOW).outcome, 'accept');
+
+  const snapshot = store.indexSnapshot();
+  assert.deepEqual([...snapshot.current.keys()], [`${LABEL}.vayu`], 'label.tld, not "vayu label"');
+  assert.deepEqual([...snapshot.records.keys()], [`${LABEL}.vayu`]);
+  assert.deepEqual(
+    snapshot.current.get(`${LABEL}.vayu`),
+    store.lookup(LABEL, 'vayu')?.current.hash,
+    'and it points at the hash of the record that holds the name',
+  );
+
+  // The proof that the key shape is right rather than merely plausible: `indexRoot` refuses a key
+  // that is not `label.tld`, so this call throwing is the failure this test exists to catch.
+  assert.equal(indexRoot(snapshot.current).length, 32);
 });
