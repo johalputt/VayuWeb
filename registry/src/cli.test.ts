@@ -24,6 +24,7 @@ import {
   flushPorts,
   pinGated,
   pinPorts,
+  relatedSourcesFor,
   pointerFor,
   resolverPortsFor,
   rotatingToken,
@@ -1095,7 +1096,7 @@ test('AUDIT: re-pinning brought the site back in the pin set but not on the wire
   const CID = 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e';
   const cache = new ResolutionCache({});
   const pinned = new PinSet(() => true);
-  const ports = pinPorts(pinned, cache);
+  const ports = pinPorts(pinned, cache, (cid: string) => [{ type: 'cid', value: cid }]);
 
   // A reader has already been told this content is unavailable, and that answer is cached.
   cache.putNegative(contentCacheKey('cid', CID), 'CONTENT_UNAVAILABLE', 1);
@@ -1123,7 +1124,9 @@ test('MUTATION: a REFUSED pin flushes nothing, because it has undone nothing', (
   // they can name, one 409 at a time.
   const CID = 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e';
   const cache = new ResolutionCache({});
-  const ports = pinPorts(new PinSet(() => false), cache);
+  const ports = pinPorts(new PinSet(() => false), cache, (cid: string) => [
+    { type: 'cid', value: cid },
+  ]);
 
   cache.putNegative(contentCacheKey('cid', CID), 'CONTENT_UNAVAILABLE', 1);
   assert.equal(ports.pin(CID), 'not_held', 'the node does not hold it, so the pin is refused');
@@ -1219,4 +1222,74 @@ test('MUTATION: a flush asks for the sources of the name it was GIVEN', () => {
     'CONTENT_UNAVAILABLE',
     'atlasobservatory.vayu is a different name from atlasobservatory.site',
   );
+});
+
+test('AUDIT: re-pinning did not restore the POINTER path, and I had written that off', () => {
+  // Found by driving a resolver with `--pointer` and a name carrying only an `ipns` entry — the
+  // arrangement HOSTING.md recommends. Unpin: 504, correct. Re-pin: still 504.
+  //
+  // The failure is cached against the source the RECORD names, which for that name is
+  // `content:ipns:<pointer>`, not `content:cid:<root>`. The pin path drops the CID key and cannot
+  // reach the pointer one — which I had already noticed, and written into `pinPorts` as an
+  // acceptable limitation that "expires on the pointer cache's own bound". It is not acceptable:
+  // it is a hundred and twenty seconds of a site being down after the operator was told
+  // `{"outcome":"pinned"}`, on the path publishers are told to prefer, and it is strictly worse
+  // than the ten-second CID case that was treated as a defect. **Documenting a gap is not fixing
+  // one**, and stating a limitation is how this one survived a commit that was about exactly it.
+  //
+  // The reverse mapping exists after all: the `IpnsPort` knows what its pointer resolves to, so
+  // the caller can be asked rather than the cache guessed at.
+  const CID = 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e';
+  const POINTER = 'k51qzi5uqu5dlvj2baxnqndepeb86cbk3ng7n3i46uzyxzyqj2xjonzllnv0v8';
+  const cache = new ResolutionCache({});
+  const ports = pinPorts(new PinSet(() => true), cache, (cid: string) =>
+    cid === CID
+      ? [
+          { type: 'cid', value: CID },
+          { type: 'ipns', value: POINTER },
+        ]
+      : [{ type: 'cid', value: cid }],
+  );
+
+  cache.putNegative(contentCacheKey('cid', CID), 'CONTENT_UNAVAILABLE', 1);
+  cache.putNegative(contentCacheKey('ipns', POINTER), 'CONTENT_UNAVAILABLE', 1);
+
+  assert.equal(ports.pin(CID), 'pinned');
+  assert.equal(cache.negative(contentCacheKey('cid', CID), 1), null, 'the cid answer went');
+  assert.equal(
+    cache.negative(contentCacheKey('ipns', POINTER), 1),
+    null,
+    'and so did the pointer answer, which is the one the ipns-first path actually consults',
+  );
+
+  // Unpinning drops both too — the same symmetry, for the same reason.
+  cache.putNegative(contentCacheKey('ipns', POINTER), 'CONTENT_UNAVAILABLE', 1);
+  assert.equal(ports.unpin(CID), true);
+  assert.equal(cache.negative(contentCacheKey('ipns', POINTER), 1), null);
+});
+
+test('MUTATION: a pointer is a related source only when it resolves to the CID being pinned', () => {
+  // Dropping that check survived, because it lived in `cmdServe` where no test reaches — the same
+  // place `rotatingToken`'s wiring hid, and the same lesson twice. Without it, pinning ANY CID
+  // drops the pointer's cached answer, which on a resolver serving more than one publisher turns
+  // an endpoint a caller cannot otherwise use into a cache flush for somebody else's content.
+  const MINE = 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e';
+  const THEIRS = 'bafkreiaxlvczbcuvhwjrwqmz2s6lrx3zjrxpjnpbcvi3ohbrhkuuwqmxbe';
+  const POINTER = 'k51qzi5uqu5dlvj2baxnqndepeb86cbk3ng7n3i46uzyxzyqj2xjonzllnv0v8';
+  const ipns = { resolve: (asked: string) => (asked === POINTER ? MINE : null) };
+
+  const related = relatedSourcesFor(POINTER, ipns);
+  assert.deepEqual(related(MINE), [
+    { type: 'cid', value: MINE },
+    { type: 'ipns', value: POINTER },
+  ]);
+  assert.deepEqual(
+    related(THEIRS),
+    [{ type: 'cid', value: THEIRS }],
+    'a CID the pointer does not resolve to must not drag the pointer entry with it',
+  );
+
+  // No pointer declared, and a declared pointer with no port, are both just the CID.
+  assert.deepEqual(relatedSourcesFor(undefined, ipns)(MINE), [{ type: 'cid', value: MINE }]);
+  assert.deepEqual(relatedSourcesFor(POINTER, null)(MINE), [{ type: 'cid', value: MINE }]);
 });

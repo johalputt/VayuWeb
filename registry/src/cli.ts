@@ -1261,6 +1261,14 @@ export type SourcesOf = (
 ) => ReadonlyArray<{ type: string; value: string }>;
 
 /**
+ * Every content source that resolves to `cid`, so pinning it can drop each cached answer.
+ *
+ * Always includes the CID itself. A pointer is included only when it really resolves to this CID,
+ * which the `IpnsPort` is asked rather than assumed — nothing else in the process knows.
+ */
+export type RelatedSources = (cid: string) => ReadonlyArray<{ type: string; value: string }>;
+
+/**
  * Flush one name — including the content answer that name currently depends on.
  *
  * **`DELETE /v1/cache/{name}` reported success and left the entry making the site fail.** A content
@@ -1292,6 +1300,32 @@ export function flushPorts(
 }
 
 /**
+ * Which content sources resolve to a given CID, for the pin path to invalidate.
+ *
+ * **The pointer is included only when it really resolves to this CID**, and the `IpnsPort` is
+ * asked rather than assumed. Without that check, pinning *any* CID would drop the pointer's cached
+ * answer — which on a resolver serving more than one publisher is the same shape as the refused
+ * pin that flushed anyway: a caller turning an endpoint they cannot otherwise use into a cache
+ * flush for somebody else's content.
+ *
+ * Extracted from `cmdServe` because a survived mutation showed the check was untestable where it
+ * was. `rotatingToken` was extracted for the same reason, and this is the same lesson twice: the
+ * wiring inside a long-running command is exactly where a guard goes unexercised.
+ */
+export function relatedSourcesFor(
+  declared: string | undefined,
+  ipns: IpnsPort | null,
+): RelatedSources {
+  return (cid) => {
+    const sources = [{ type: 'cid', value: cid }];
+    if (declared !== undefined && ipns?.resolve(declared) === cid) {
+      sources.push({ type: 'ipns', value: declared });
+    }
+    return sources;
+  };
+}
+
+/**
  * The pin and unpin ports, with the cache invalidation that makes them symmetric.
  *
  * **Unpinning took effect at once and re-pinning did not**, which is the defect this exists to
@@ -1306,11 +1340,21 @@ export function flushPorts(
  * the entry, because a stale *positive* is as wrong after an unpin as a stale negative is after a
  * pin.
  *
+ * **`related` exists because the first fix reached only half the sites, and I wrote the other half
+ * off.** A content failure is keyed by the source the RECORD names, so a name carrying an `ipns`
+ * pointer caches under `content:ipns:<pointer>` and never under the CID — and re-pinning left that
+ * name down for the full pointer TTL, on the arrangement HOSTING.md tells publishers to prefer.
+ * The comment here used to call that an acceptable limitation that "expires on the pointer cache's
+ * own bound", which was a limitation invented in place of finding the reverse mapping. The mapping
+ * was never missing: an `IpnsPort` knows what its pointer resolves to, so the caller can be asked.
+ * **Documenting a gap is not fixing one.**
+ *
  * Grouped as a pair rather than written inline so the symmetry is a thing a test can hold.
  */
 export function pinPorts(
   pinned: PinSet,
   cache: ResolutionCache,
+  related: RelatedSources,
 ): { pin: (cid: string) => PinOutcome; unpin: (cid: string) => boolean } {
   // Only the `cid` key. This dropped an `ipns` one too until a surviving mutation showed nothing
   // could tell — and nothing could, because the two keyspaces do not overlap: an ipns entry is
@@ -1323,7 +1367,9 @@ export function pinPorts(
   // the pointer cache's own bound — `min(record validity, 120 seconds)` — which is the shortest
   // TTL in the table precisely because the pointer is the mutable half.
   const forget = (cid: string): void => {
-    cache.forget(contentCacheKey('cid', cid));
+    for (const source of related(cid)) {
+      cache.forget(contentCacheKey(source.type, source.value));
+    }
   };
   return {
     pin: (cid) => {
@@ -1703,7 +1749,7 @@ async function cmdServe(args: Args): Promise<number> {
               clock(),
             ),
           ),
-      ...pinPorts(pinned, cache),
+      ...pinPorts(pinned, cache, relatedSourcesFor(args.flags.get('pointer'), pointer)),
       // The new token is returned to the caller and goes nowhere else — not to stdout, which
       // already carries the startup one and would otherwise leave two live-looking tokens in one
       // terminal, and not to a file.

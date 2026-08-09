@@ -10,6 +10,37 @@ it.
 
 ## [Unreleased]
 
+### Fixed — the pointer path stayed down after a re-pin, and I had written that off as acceptable
+
+The third of the same family, and the one I am least pleased about. A name carrying only an `ipns`
+pointer — the arrangement HOSTING.md tells publishers to prefer — went down on unpin and **stayed
+down on re-pin**, because its cached failure lives under `content:ipns:<pointer>` and the pin path
+only ever dropped `content:cid:<root>`.
+
+I had already found that gap. The previous commit's own comment named it exactly: "if a pointer
+resolves to the CID being pinned, its cached answer is not invalidated here, because this path has
+no reverse mapping … that entry expires on the pointer cache's own bound". Every clause of that is
+true, and the conclusion was wrong. It is a hundred and twenty seconds of a site being down after
+the operator was told `{"outcome":"pinned"}` — **strictly worse than the ten-second CID case the
+same commit treated as a defect worth fixing.**
+
+The reverse mapping was never missing. An `IpnsPort` knows what its pointer resolves to, so the
+caller can be asked; `pinPorts` now takes a `RelatedSources` and `relatedSourcesFor` supplies it.
+**Documenting a limitation is not fixing it, and a stated limitation is a comfortable place for a
+defect to sit** — this one sat there through a commit that was about precisely this behaviour.
+
+Five mutations. The last survivor was the guard that only includes a pointer when it *really*
+resolves to the CID being pinned — and it survived because it sat in `cmdServe`, where no test
+reaches. That is the second time this session a guard hid in that command's wiring; `rotatingToken`
+was extracted for the same reason, and `relatedSourcesFor` is now extracted too. Without the guard,
+pinning *any* CID drops the pointer's cached answer, which on a resolver serving more than one
+publisher is a caller turning an endpoint they cannot use into a cache flush for someone else's
+content — the same shape as the refused pin that flushed anyway.
+
+`acceptance-control-lifecycle.sh` registers a second, pointer-only name and now runs thirty checks.
+It also asserts that `GET /v1/records/{name}` and `POST /v1/resolve` return the same answer, since
+two ways to ask one question is the shape that drifts.
+
 ### Fixed — flushing one name reported success and left the entry making it fail
 
 The sibling of the re-pin defect, one endpoint over, and found the same way: `DELETE /v1/cache/…`

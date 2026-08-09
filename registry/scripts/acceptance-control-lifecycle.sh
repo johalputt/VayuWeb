@@ -40,8 +40,15 @@ import("./src/unixfs.ts").then(async (u) => {
   process.stdout.write(built.root);
 });')" --at "$AT" >/dev/null 2>&1 || { echo "register failed"; exit 1; }
 
+# A second name carrying ONLY an `ipns` pointer — the arrangement HOSTING.md tells publishers to
+# prefer, and the one whose cached failure is keyed by the POINTER rather than by the CID.
+POINTER=k51qzi5uqu5dlvj2baxnqndepeb86cbk3ng7n3i46uzyxzyqj2xjonzllnv0v8
+POINTER_NAME=pointeronlyname.vayu
+"${VW[@]}" register --log "$D/log" --key "$D/owner.key" --name "$POINTER_NAME" \
+  --ipns "$POINTER" --at "$AT" >/dev/null 2>&1 || { echo "register(ipns) failed"; exit 1; }
+
 SOCK="$D/control.sock"
-"${VW[@]}" serve --log "$D/log" --site "$D/site" --port "${VW_PORT:-7799}" --socket "$SOCK" > "$D/serve.out" 2>&1 &
+"${VW[@]}" serve --log "$D/log" --site "$D/site" --pointer "$POINTER" --port "${VW_PORT:-7799}" --socket "$SOCK" > "$D/serve.out" 2>&1 &
 SERVE_PID=$!
 for _ in $(seq 1 40); do [ -S "$SOCK" ] && break; sleep 0.5; done
 sleep 1
@@ -83,6 +90,21 @@ R=$(ctl POST /v1/pin '{"cid":"bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei6
 case "$R" in *not_held*409) ok "a stranger CID is 409 not_held";; *) bad "not_held" "$R";; esac
 R=$(ctl POST /v1/pin "{\"cid\":\"$ROOT\"}"); case "$R" in *'"outcome":"pinned"'*200) ok "re-pinning the held root succeeds";; *) bad "re-pin" "$R";; esac
 C=$(proxy); [ "$C" = 200 ] && ok "proxy serves again after re-pin" || bad "re-pin has no effect" "got $C"
+
+echo; echo "=== the same symmetry on the POINTER path, whose key is not the CID ==="
+# A content failure is keyed by the source the RECORD names. For an ipns-only name that is
+# `content:ipns:<pointer>`, which a CID-keyed invalidation cannot reach — re-pinning left this
+# name down for the full pointer TTL until `pinPorts` was given the reverse mapping.
+ppx() { curl -sS -o /dev/null -w '%{http_code}' -H "Host: $POINTER_NAME" "http://127.0.0.1:${VW_PORT:-7799}/index.html"; }
+C=$(ppx); [ "$C" = 200 ] && ok "the ipns-first path serves" || bad "ipns path" "got $C"
+ctl DELETE "/v1/pin/$ROOT" >/dev/null; C=$(ppx)
+[ "$C" != 200 ] && ok "unpinning the root breaks the pointer path too (got $C)" || bad "pointer unpin" "still 200"
+ctl POST /v1/pin "{\"cid\":\"$ROOT\"}" >/dev/null; C=$(ppx)
+[ "$C" = 200 ] && ok "and re-pinning RESTORES it" || bad "re-pin does not restore the pointer path" "got $C"
+
+echo; echo "=== two ways to ask one question must give one answer ==="
+A=$(ctl GET "/v1/records/$POINTER_NAME"); B=$(ctl POST /v1/resolve "{\"name\":\"$POINTER_NAME\"}")
+[ "$A" = "$B" ] && ok "GET /v1/records/{name} and POST /v1/resolve agree" || bad "records vs resolve" "$A vs $B"
 
 echo; echo "=== DELETE /v1/cache/{name} clears the entry actually making the site fail ==="
 # The sibling of the re-pin defect. A content failure is keyed by the SOURCE it is a fact about,
