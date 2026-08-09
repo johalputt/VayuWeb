@@ -31,6 +31,7 @@ import {
   siteFilesFor,
 } from './cli.ts';
 import { PinSet } from './pins.ts';
+import { MANIFEST_PATH } from './resolve.ts';
 import { ResolutionCache } from './cache.ts';
 import { contentCacheKey } from './proxy.ts';
 import type { ContentPort } from './proxy.ts';
@@ -394,8 +395,10 @@ test('AUDIT: publishing a directory does not sweep .git or dotfiles into the CID
       'a dot-directory must not reach the CID',
     );
 
-    // `.vayu` is the one dot-entry that belongs: HOSTING.md puts the manifest there, and it is
-    // metadata rather than something served. Excluding it would break the manifest instead.
+    // `.vayu/manifest.json` is the one path under a dot-entry that belongs: PUBLISHING.md 2 puts
+    // the manifest there and has it "covered by the root CID", so excluding it would break the
+    // manifest instead. It is served like every other file in the tree — metadata by convention,
+    // not by mechanism. The exemption stops at that path; the AUDIT test below pins where.
     mkdirSync(join(site, '.vayu'), { recursive: true });
     writeFileSync(join(site, '.vayu', 'manifest.json'), '{"version":1}');
     const withManifest = siteFilesFor(site).map((f: { path: string }) => f.path);
@@ -1292,4 +1295,135 @@ test('MUTATION: a pointer is a related source only when it resolves to the CID b
   // No pointer declared, and a declared pointer with no port, are both just the CID.
   assert.deepEqual(relatedSourcesFor(undefined, ipns)(MINE), [{ type: 'cid', value: MINE }]);
   assert.deepEqual(relatedSourcesFor(POINTER, null)(MINE), [{ type: 'cid', value: MINE }]);
+});
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT: the one command that returns a promise threw past its own handler    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Run `main` for a command that returns a promise, capturing both streams.
+ *
+ * Deliberately does NOT catch: a rejection here is the defect, so letting it propagate is what
+ * makes the test fail rather than something the harness smooths over.
+ */
+async function runAsync(argv: string[]): Promise<{ code: number; out: string; err: string }> {
+  const written: string[] = [];
+  const errored: string[] = [];
+  const stdout = process.stdout.write.bind(process.stdout);
+  const stderr = process.stderr.write.bind(process.stderr);
+  process.stdout.write = ((chunk: string) => {
+    written.push(String(chunk));
+    return true;
+  }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string) => {
+    errored.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    const code = await main(argv);
+    return { code, out: written.join(''), err: errored.join('') };
+  } finally {
+    process.stdout.write = stdout;
+    process.stderr.write = stderr;
+  }
+}
+
+test('AUDIT: a misconfigured `serve` prints a usage line, not a stack trace', async () => {
+  // `main` has a try/catch whose whole job is to turn a `UsageError` into `usage: <message>` and
+  // exit 1. That catch is SYNCHRONOUS, and `serve` is the one command that returns a promise —
+  // so every refusal `cmdServe` raises went straight past it as an unhandled rejection. The
+  // operator's evidence for "--pointer needs --site too" was a node stack trace with the message
+  // buried in it, and the process exit code came from the runtime rather than from `main`.
+  //
+  // Found by running the binary wrong on purpose, which is the only way to see it: fifteen of the
+  // sixteen commands are synchronous, and every test of a refusal used one of those fifteen.
+  const { dir, done } = scratch();
+  try {
+    const refusal = await runAsync([
+      'serve',
+      '--log',
+      join(dir, 'log'),
+      '--pointer',
+      'k51qzi5uqu5dlvj2baxnqndepeb86cbk3ng7n3i46uzyxzyqj2xjonzllnv0v8',
+    ]);
+    assert.equal(refusal.code, 1, 'a refused `serve` exits 1 like every other refusal');
+    assert.match(refusal.err, /^usage: --pointer names what --site publishes/m);
+    assert.doesNotMatch(refusal.err, /at .*cli\.ts/, 'no stack frames reach the operator');
+
+    // The same holds for a failure that is not a `UsageError` at all: `--site` pointing at
+    // nothing throws ENOENT out of `node:fs`, and the operator should read the message rather
+    // than the trace.
+    const missing = await runAsync([
+      'serve',
+      '--log',
+      join(dir, 'log'),
+      '--site',
+      join(dir, 'no-such-directory'),
+    ]);
+    assert.equal(missing.code, 1);
+    assert.match(missing.err, /no-such-directory/);
+    assert.doesNotMatch(missing.err, /at .*cli\.ts/);
+  } finally {
+    done();
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT: the `.vayu` exception was a hole in the rule beside it               */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: only the root manifest gets through the dot-entry exclusion', () => {
+  // Every dot-entry is excluded because, as the rule beside it says, it is "build or tooling state
+  // that has no business in a public, immutable blob". `.vayu` is exempt so the manifest can be
+  // published — and the exemption was written on the DIRECTORY, not on the manifest, so the whole
+  // of `.vayu/` went into the root CID.
+  //
+  // That is the `.env` finding again through the door the fix for it opened. A publisher reading
+  // "`.vayu` carries the manifest and is not served" has been told the directory is private; it is
+  // neither private nor unserved. Anything they leave beside the manifest — a deploy key, a draft,
+  // an editor's session file — is content-addressed, immutable, served at 200 by the proxy, and
+  // fetchable forever by anyone holding the CID. Immutable is the part that has no remedy.
+  //
+  // PUBLISHING.md 2 defines exactly one path: `.vayu/manifest.json`, at the root of the published
+  // tree. Nothing else under `.vayu`, and no `.vayu` at any other depth, has a defined meaning —
+  // so nothing else is worth the risk of publishing.
+  const { dir, done } = scratch();
+  try {
+    const site = join(dir, 'site');
+    mkdirSync(join(site, '.vayu'), { recursive: true });
+    mkdirSync(join(site, 'docs', '.vayu'), { recursive: true });
+    writeFileSync(join(site, 'index.html'), '<h1>real</h1>');
+    writeFileSync(join(site, '.vayu', 'manifest.json'), '{"version":1}');
+    writeFileSync(join(site, '.vayu', 'deploy.key'), 'PRIVATE KEY MATERIAL');
+    writeFileSync(join(site, 'docs', '.vayu', 'manifest.json'), '{"version":1}');
+
+    const collected = siteFilesFor(site).map((f: { path: string }) => f.path);
+    assert.deepEqual(
+      [...collected].sort(),
+      ['.vayu/manifest.json', 'index.html'],
+      'the root manifest and the real site, and nothing else',
+    );
+    assert.equal(
+      collected.includes('.vayu/deploy.key'),
+      false,
+      'a file left beside the manifest must not be published with it',
+    );
+    assert.equal(
+      collected.includes('docs/.vayu/manifest.json'),
+      false,
+      'the manifest is defined at the root; a nested .vayu is just another dot-directory',
+    );
+
+    // The publisher keeps exactly the path the resolver fetches. Two literals, one absolute and
+    // one relative, is how the manifest would come to be published at a path nothing reads: the
+    // publish would still succeed, the site would still render, and every manifest field would
+    // silently stop applying. Derived rather than restated, and asserted here so it stays that way.
+    assert.equal(
+      `/${collected.find((path: string) => path.endsWith('manifest.json'))}`,
+      MANIFEST_PATH,
+    );
+  } finally {
+    done();
+  }
 });

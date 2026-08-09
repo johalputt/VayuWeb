@@ -58,7 +58,6 @@ were two names for one field. It now defers here; section 2.4 records what that 
 {
   "version": 1,
   "index": "index.html",
-  "fallback": "index.html",
   "notFound": "404.html",
   "title": "Atlas Observatory",
   "description": "Field notes",
@@ -69,6 +68,14 @@ were two names for one field. It now defers here; section 2.4 records what that 
   }
 }
 ```
+
+`fallback` is deliberately absent from that block, and its absence is the example's one piece of
+advice: section 2.3 serves `notFound` first, so a manifest declaring both can never reach the
+second. This block declared both for a period. A publisher with client-side routing who copied it
+got HTTP 404 on every deep link — precisely and only the failure section 2.3 exists to prevent —
+while the field they were relying on sat in their manifest looking as though it were doing
+something. A worked example is the part of a specification that gets copied, so an example that
+models a misconfiguration is worse than no example at all.
 
 Every field is optional except `version`. `title`, `description` and `generator` are descriptive
 and drive no resolver behaviour; they are here so a publisher has one place to put them rather
@@ -126,6 +133,17 @@ authoritative for both. This document declares them; it does not grant them.
 A site with client-side routing 404s on every deep link unless a fallback exists. On no path
 match the resolver SHALL serve `notFound` with HTTP 404 if present; otherwise, if `fallback` is
 declared, serve it with HTTP 200 so the site's own router can handle the path.
+
+**Declaring both leaves `fallback` unreachable.** That follows from the precedence above rather
+than adding to it, and it is stated here because it is the one reading a publisher gets wrong: the
+two fields look complementary — a 404 page *and* a router fallback — and they are alternatives. A
+resolver MUST NOT treat the combination as an error; a manifest that declares both is well-formed
+and is served by the rule above, with `fallback` never consulted. A publisher choosing between
+them is choosing what a deep link that the tree has no file for should mean: `notFound` says the
+link is wrong and answers 404, `fallback` says the site's own router will decide and answers 200.
+A site with client-side routing wants the second. Its cost is that a genuinely missing asset also
+answers 200, with the router's shell in place of the image — which is why the choice is the
+publisher's and not the resolver's.
 
 [RESOLUTION.md](RESOLUTION.md) step 13 implements this. It did not for a period — it mapped
 directories to `index.html` and returned `1414 PATH_NOT_FOUND` on no match, consulting no

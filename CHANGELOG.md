@@ -10,6 +10,84 @@ it.
 
 ## [Unreleased]
 
+### Fixed — `.vayu` was exempt as a directory, so everything beside the manifest was published
+
+Every dot-entry is kept out of the root CID because, as the rule beside it says, it is "build or
+tooling state that has no business in a public, immutable blob". `.vayu` was exempt so the manifest
+could be published — and **the exemption was written on the directory rather than on the manifest**,
+so the whole of `.vayu/` went into the CID, along with any `.vayu` at any depth.
+
+That is the `.env` and `.git/config` finding again, through the door its own fix opened. A publisher
+who leaves a deploy key, a draft or an editor's session file beside their manifest gets it
+content-addressed, immutable, served at 200 by the proxy, and fetchable by anyone holding the CID.
+Immutable is the part with no remedy. The comment above the walk told that publisher `.vayu` "is not
+served", which was a second defect of its own kind: the directory is in the signed tree like every
+other file and the proxy answers 200 for it. The manifest is metadata by convention, not by
+mechanism, and the comment now says so.
+
+PUBLISHING.md 2 defines exactly one path, `.vayu/manifest.json`, at the root of the tree. The
+exclusion is now path-shaped and stops there. Excluded entries are still listed at publish time, so
+a publisher sees `.vayu/deploy.key` and `docs/.vayu` named rather than silently dropped.
+
+The first fix carried an explicit `.vayu/` rejection as well. It **survived its own mutation**: with
+that line deleted the test still passed, because anything under `.vayu` other than the manifest
+still carries a dotted segment and the general rule already caught it. Per the standing rule a
+surviving mutation means the test is wrong or the code is redundant — here it was the code, and the
+line came out rather than staying in as unreachable belt-and-braces.
+
+The same fix also introduced a second `MANIFEST_PATH` — a module-local `.vayu/manifest.json` beside
+`resolve.ts`'s exported `/.vayu/manifest.json`, one relative and one a request path. That is the
+two-spellings-of-one-rule family this project keeps finding, and it fails in the quietest way
+available: the publisher would keep the old path, the publish would succeed, the site would render,
+and every manifest field would silently stop applying because the resolver fetched somewhere else.
+The publish walk now derives both forms from the one declaration, and the test asserts that the
+path kept by the publisher is the path fetched by the resolver rather than restating either.
+
+### Fixed — `serve` printed a stack trace where every other command prints a usage line
+
+`main` has a try/catch whose whole job is to turn a `UsageError` into `usage: <message>` and exit 1.
+That catch is **synchronous**, and `serve` is the one command that returns a promise — so every
+refusal it raises went straight past it as an unhandled rejection. `serve --pointer` without
+`--site` answered the operator with a node stack trace carrying the message buried in it, and the
+exit code came from the runtime rather than from `main`. `--site` naming a directory that does not
+exist did the same with a raw `ENOENT`.
+
+Found by running the binary wrong on purpose, which is the only way to see it: fifteen of the
+sixteen commands are synchronous, and every existing test of a refusal used one of those fifteen.
+The command table is now a function and one reporter serves both shapes of failure, so `sync` is
+covered by the same change.
+
+### Fixed — the specification's own manifest example could not do what it showed
+
+PUBLISHING.md section 2 shows the canonical manifest, and it declared `"fallback": "index.html"` and
+`"notFound": "404.html"` together. Section 2.3, three paragraphs below, is the precedence: serve
+`notFound` with 404 if present, **otherwise** `fallback` with 200. `notFound` is present, so the
+`fallback` in the example can never be reached.
+
+A worked example is the part of a specification that gets copied — nobody reimplements a paragraph
+from memory — so a publisher with client-side routing who pastes that block and edits it gets HTTP
+404 on every deep link, which is precisely and only the failure section 2.3 exists to prevent, while
+the field they are relying on sits in their manifest looking as though it were doing something.
+
+The resolver was right and stays unchanged; this is a documentation defect and it is fixed in the
+document. The example drops `fallback` and says why its absence is the advice. Section 2.3 now
+states the interaction rather than leaving it to be derived: declaring both is well-formed and is
+**not** an error a resolver may report, and it leaves `fallback` unreachable. The two fields read as
+complementary and are alternatives — `notFound` says the link is wrong, `fallback` says the site's
+router will decide — and the cost of the second, that a genuinely missing asset also answers 200
+with the router's shell in place of the image, is why the choice belongs to the publisher.
+
+`scripts/check-examples.py` is new and stops it recurring: every fenced JSON block in the
+specification set must parse, and any block carrying manifest keys must satisfy 2.3's precedence. It
+carries a five-case self-test that runs first, for the reason the absolute-claims checker does — a
+checker narrowed by an edit reports "clean" in exactly the voice of one that works. It runs in `ci`
+and in the release preconditions.
+
+The proxy test for the precedence asserted only the status. It now asserts the body too: status
+alone also passes for a resolver that serves the *fallback* document under a 404 code, which tells a
+reader's browser and a link checker two different stories about one response. The old assertion
+survived that mutation; the new one does not.
+
 ### Fixed — a resolver with no content layer answered 200 and an empty body
 
 The most serious of the four, and the plainest. `serve` without `--site` bound a browsing proxy, and

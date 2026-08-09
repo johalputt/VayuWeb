@@ -121,6 +121,20 @@ jobs:
         # completeness bar was the one document never measured against it.
         run: python3 scripts/check-vwips.py
 
+      - name: No worked example contradicts the rule beside it
+        # An example is the part of a specification that gets copied: nobody reimplements a
+        # paragraph from memory, they paste the block and edit it. PUBLISHING.md's canonical
+        # manifest declared `notFound` and `fallback` together, and section 2.3 three paragraphs
+        # below serves `notFound` first -- so the field a publisher with client-side routing was
+        # relying on could never be reached, and the example produced a 404 on every deep link,
+        # which is the one failure that section exists to prevent.
+        #
+        # The self-test runs first for the same reason the absolute-claims one does: a checker
+        # narrowed by an edit reports "clean" in exactly the voice of a checker that works.
+        run: |
+          python3 scripts/check-examples.py --self-test
+          python3 scripts/check-examples.py
+
   # ---------------------------------------------------------------------------
   # The registry implementation. This is the gate the repository did not have.
   # ---------------------------------------------------------------------------

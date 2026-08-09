@@ -142,6 +142,8 @@ jobs:
           python3 scripts/check-status-claims.py
           python3 scripts/check-absolute-claims.py --self-test
           python3 scripts/check-absolute-claims.py
+          python3 scripts/check-examples.py --self-test
+          python3 scripts/check-examples.py
 
   tag:
     name: create tag and release

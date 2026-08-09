@@ -32,7 +32,7 @@ import { TERM_SECONDS, SETTLEMENT_SECONDS } from './verify.ts';
 import { stateAt } from './lifecycle.ts';
 import { buildVectors, fromHex } from './vectors.ts';
 import { verify, predecessorFrom, type RegistryView } from './verify.ts';
-import { RESOLVE_ERRORS, resolveName, type ResolverPorts } from './resolve.ts';
+import { MANIFEST_PATH, RESOLVE_ERRORS, resolveName, type ResolverPorts } from './resolve.ts';
 import { ResolutionCache } from './cache.ts';
 import { serveControl, serveProxy } from './serve.ts';
 import { drivePeer, SWARM_LIMITS, type PeerOutcome } from './swarm.ts';
@@ -1112,6 +1112,43 @@ function merkleRootOf(store: Store, length: number): Uint8Array {
 const RESOLVER_VERSION = '0.2.1';
 
 /**
+ * The one path inside a dot-directory that is published, and the directory holding it.
+ *
+ * **Derived from the resolver's own constant, not restated.** `MANIFEST_PATH` is a request path
+ * (`/.vayu/manifest.json`) and a publish walk works in relative paths, which is exactly the kind of
+ * near-miss that ends up as two literals: the publisher would keep writing the old path while the
+ * resolver fetched the new one, and the manifest would simply stop being found. Both forms now come
+ * from the one declaration in `resolve.ts`.
+ */
+const MANIFEST_RELATIVE = MANIFEST_PATH.replace(/^\//, '');
+const MANIFEST_DIRECTORY = MANIFEST_RELATIVE.split('/').slice(0, -1).join('/');
+
+/**
+ * Whether a relative path inside a published directory must be kept out of the root CID.
+ *
+ * **Path-shaped rather than name-shaped, and that is the whole point.** The exemption belongs to
+ * the manifest, not to the directory it sits in: a directory-wide exemption publishes whatever a
+ * publisher left beside it — a deploy key, a draft, an editor's session file — into content that
+ * is addressed, immutable, served, and fetchable forever by anyone holding the CID. Immutable is
+ * the part with no remedy.
+ *
+ * PUBLISHING.md 2 defines exactly one path, `.vayu/manifest.json`, at the root of the tree.
+ * Nothing else under `.vayu`, and no `.vayu` at any other depth, has a defined meaning, so nothing
+ * else is worth publishing.
+ */
+function excludedFromPublish(rel: string): boolean {
+  // The directory is walked so the manifest inside it can be reached; the manifest itself is the
+  // exemption. Nothing else needs naming — anything else under `.vayu` still carries a dotted
+  // segment, so the general rule below already catches it. An explicit `.vayu/` rejection was
+  // written here first and survived its own mutation, which is how it was found to be redundant.
+  if (rel === MANIFEST_DIRECTORY || rel === MANIFEST_RELATIVE) return false;
+  // Every segment, not just the last. That is what excludes `.vayu/deploy.key` and `docs/.vayu`
+  // by the same line that excludes `.env`, and what makes this predicate hold on its own rather
+  // than only because the walk happens to stop descending at an excluded directory.
+  return rel.split('/').some((segment) => segment.startsWith('.'));
+}
+
+/**
  * The files a directory publishes, with HOSTING.md's package rules applied.
  *
  * **A publish walk is a disclosure surface, and this one had no rules at all.** Measured against
@@ -1125,8 +1162,11 @@ const RESOLVER_VERSION = '0.2.1';
  *
  * Three rules, each from that document's package section:
  *
- * - **A leading dot is excluded.** `.vayu` is the one exception, because the manifest lives there
- *   and is metadata rather than something served.
+ * - **A leading dot is excluded.** The one exception is `.vayu/manifest.json` — the exact path
+ *   PUBLISHING.md 2 defines, at the root of the tree. The exemption used to be written on the
+ *   DIRECTORY, which published everything a publisher happened to leave beside the manifest, and
+ *   said in a comment that `.vayu` "is not served" while the proxy answered 200 for it. It is in
+ *   the signed tree like every other file; the manifest is metadata by convention, not by mechanism.
  * - **A symbolic link stops the publish.** It was already skipped, but by accident — `Dirent`
  *   methods are lstat-shaped, so a link is neither a file nor a directory and fell out of both
  *   branches. Silently omitting a file is neither "dereference" nor "refuse", and it publishes a
@@ -1158,9 +1198,7 @@ export function siteFilesFor(directory: string): SiteFile[] {
       if (Buffer.byteLength(entry.name, 'utf8') > 255) {
         throw new UsageError(`${rel}: a filename may not exceed 255 bytes`);
       }
-      // `.vayu` carries the manifest and is not served; everything else with a leading dot is
-      // build or tooling state that has no business in a public, immutable blob.
-      if (entry.name.startsWith('.') && entry.name !== '.vayu') {
+      if (excludedFromPublish(rel)) {
         excluded.push(rel);
         continue;
       }
@@ -1172,9 +1210,7 @@ export function siteFilesFor(directory: string): SiteFile[] {
   walk(directory, '');
 
   if (excluded.length > 0) {
-    err(
-      `excluded ${excluded.length} dot-entr${excluded.length === 1 ? 'y' : 'ies'} from the publish:`,
-    );
+    err(`excluded ${excluded.length} entr${excluded.length === 1 ? 'y' : 'ies'} from the publish:`);
     for (const path of excluded.slice(0, 8)) err(`  ${path}`);
     if (excluded.length > 8) err(`  … and ${excluded.length - 8} more`);
   }
@@ -1893,6 +1929,22 @@ namespace is one more copy that can drift from it.
 token in a backup or a screenshot is not a thing that can happen. No other command touches a
 socket. Keys are files; back them up yourself.`;
 
+/**
+ * Turn anything thrown out of a command into the operator's exit code.
+ *
+ * Separate from `main` because it has to be reachable from two places: a synchronous `throw` and
+ * a rejected promise. It used to exist only as the body of `main`'s catch, which meant `serve` —
+ * the one command that returns a promise — had no error handling at all.
+ */
+function reportError(error: unknown): number {
+  if (error instanceof UsageError) {
+    err(`usage: ${error.message}`);
+    return 1;
+  }
+  err(error instanceof Error ? error.message : String(error));
+  return 1;
+}
+
 export function main(argv: readonly string[]): number | Promise<number> {
   const [command, ...rest] = argv;
   if (command === undefined || command === '--help' || command === 'help') {
@@ -1903,53 +1955,57 @@ export function main(argv: readonly string[]): number | Promise<number> {
   try {
     const args = parseArgs(rest);
     assertKnownFlags(command, args);
-    switch (command) {
-      case 'keygen':
-        return cmdKeygen(args);
-      case 'register':
-        return cmdRegister(args);
-      case 'update':
-        return cmdSuccessor('UPDATE', args);
-      case 'renew':
-        return cmdSuccessor('RENEW', args);
-      case 'transfer':
-        return cmdSuccessor('TRANSFER', args);
-      case 'release':
-        return cmdSuccessor('RELINQUISH', args);
-      case 'revoke':
-        return cmdSuccessor('REVOKE', args);
-      case 'resolve':
-        return cmdResolve(args);
-      case 'prove':
-        return cmdProve(args);
-      case 'light-verify':
-        return cmdLightVerify(args);
-      case 'equivocations':
-        return cmdEquivocations(args);
-      case 'list':
-        return cmdList(args);
-      case 'difficulty':
-        return cmdDifficulty(args);
-      case 'verify':
-        return cmdVerify(args);
-      case 'vectors':
-        return cmdVectors();
-      case 'serve':
-        return cmdServe(args);
-      case 'sync':
-        return cmdSync(args);
-      default:
-        err(`unknown command: ${command}`);
-        err('');
-        err(USAGE);
-        return 1;
-    }
+    const result = dispatch(command, args);
+    // `serve` and `sync` are asynchronous, so their refusals arrive as a rejection rather than as
+    // a throw the block below can see. Routing both through the same reporter is what stops an
+    // operator's first wrong invocation being answered with a stack trace.
+    return typeof result === 'number' ? result : result.catch(reportError);
   } catch (error) {
-    if (error instanceof UsageError) {
-      err(`usage: ${error.message}`);
+    return reportError(error);
+  }
+}
+
+/** The command table. Split out of `main` so that one `catch` covers both shapes of failure. */
+function dispatch(command: string, args: Args): number | Promise<number> {
+  switch (command) {
+    case 'keygen':
+      return cmdKeygen(args);
+    case 'register':
+      return cmdRegister(args);
+    case 'update':
+      return cmdSuccessor('UPDATE', args);
+    case 'renew':
+      return cmdSuccessor('RENEW', args);
+    case 'transfer':
+      return cmdSuccessor('TRANSFER', args);
+    case 'release':
+      return cmdSuccessor('RELINQUISH', args);
+    case 'revoke':
+      return cmdSuccessor('REVOKE', args);
+    case 'resolve':
+      return cmdResolve(args);
+    case 'prove':
+      return cmdProve(args);
+    case 'light-verify':
+      return cmdLightVerify(args);
+    case 'equivocations':
+      return cmdEquivocations(args);
+    case 'list':
+      return cmdList(args);
+    case 'difficulty':
+      return cmdDifficulty(args);
+    case 'verify':
+      return cmdVerify(args);
+    case 'vectors':
+      return cmdVectors();
+    case 'serve':
+      return cmdServe(args);
+    case 'sync':
+      return cmdSync(args);
+    default:
+      err(`unknown command: ${command}`);
+      err('');
+      err(USAGE);
       return 1;
-    }
-    err(error instanceof Error ? error.message : String(error));
-    return 1;
   }
 }

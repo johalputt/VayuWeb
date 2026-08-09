@@ -858,12 +858,27 @@ test('a declared notFound is served, and with 404 rather than 200', () => {
 });
 
 test('notFound outranks fallback, because the specification orders them', () => {
+  // PUBLISHING.md 2.3 now says the consequence out loud — "declaring both leaves `fallback`
+  // unreachable" — because a publisher reads the two fields as complementary (a 404 page *and* a
+  // router fallback) when they are alternatives. The specification's own worked example declared
+  // both for a period, so the canonical manifest a publisher copies had an inert field in it and
+  // a site with client-side routing got a 404 on every deep link.
+  //
+  // The BODY is asserted and not only the status. Status alone also passes for a resolver that
+  // served the FALLBACK document under a 404 code, which is the combination that tells a reader's
+  // browser and a link checker two different stories about one response.
   const site = siteWith({
     '/404.html': 'nothing here',
     '/index.html': 'home',
     '/.vayu/manifest.json': manifest({ notFound: '404.html', fallback: 'index.html' }),
   });
-  assert.equal(request(site.port, '/gone').status, 404);
+  const gone = request(site.port, '/gone');
+  assert.equal(gone.status, 404);
+  assert.equal(
+    new TextDecoder().decode(gone.body),
+    'nothing here',
+    'the fallback is never consulted, so its document is never what arrives',
+  );
 });
 
 test('a declared index outranks index.html, and is read before the mapping rather than after', () => {
