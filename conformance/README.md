@@ -91,10 +91,26 @@ conforming peer can hold. It is unit-tested against a constructed predecessor, a
 activates a second suite must add the wire vector. A test also fails if an exempted code
 acquires a vector, so the excuse cannot outlive the reason for it.
 
-The file carries seven suites: `vectors` holds 73 record-verification vectors, and `convergence`,
+The file carries seven suites: `vectors` holds 91 record-verification vectors, and `convergence`,
 `resolution`, `replication`, `equivocation`, `pow` and `blockExchange` hold their own. Those six
 pin what implementations must *agree* about rather than what one of them accepts, which is where a
 fork lives.
+
+**The `lifecycle/term-*` vectors pin what an implementation must COMPUTE**, which is a direction
+the rest of `vectors` does not cover. Every other vector hands the verifier a finished record and
+asks for a verdict, so an implementation deriving a renewal's expiry by any rule at all — always
+from the renewal instant, always from the old expiry — passed the whole file. Two peers would then
+hold different expiries for one name, disagree about when it lapses, and therefore about whether it
+resolves and whether a stranger may take it: a fork neither side rejected anything to reach.
+
+Each case appears three times — the specified `notAfter` accepted, one second either side refused —
+because a rule that only rejects *downward* is one two implementations drift apart under, and
+because that is not hypothetical. Relaxing `notAfter !== base + 31536000` to `notAfter < base +
+31536000` survived every test in this repository before these vectors existed. For `RENEW` that
+equality is the only bound there is: the `notAfter - notBefore == 31536000` check belongs to the
+`REGISTER` branch, so a renewal could have claimed a decade — the exact defect
+[NAMES.md](../docs/spec/NAMES.md) names when it explains why the renewal window is only sixty days
+wide.
 
 **Every wire message has a vector that decodes**, in `replication` and in `blockExchange` alike,
 and a test derives that from the message types themselves rather than from a list. Three of the

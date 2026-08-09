@@ -10,6 +10,42 @@ it.
 
 ## [Unreleased]
 
+### Added — conformance vectors for the term a renewal must produce, not merely accept
+
+Every vector in the `vectors` suite hands the verifier a finished record carrying a `notAfter` and
+asks for a verdict. **None said which `notAfter` is the right one.** A second implementation could
+derive a renewal's expiry by any rule at all — always from the renewal instant, always from the old
+expiry — and pass the entire file. Two peers would then hold different expiries for one name,
+disagree about when it lapses, and therefore about whether it resolves and whether a stranger may
+take it: a permanent fork reached without either side rejecting anything.
+
+Eighteen new vectors under `lifecycle/term-*` state REGISTRY.md's rule as a computation —
+`notAfter == max(prev.notAfter, notBefore) + 31536000` — across both of its branches: renewing
+inside the window extends from the existing expiry, renewing inside grace restarts from the
+renewal instant, and the instant where the two coincide is pinned on the nose. Each case appears
+three times: the specified value accepted, one second either side refused.
+
+**That third form is not ceremony.** Relaxing the check from `notAfter !== base + 31536000` to
+`notAfter < base + 31536000` — accept anything at least as long as required — survived every test
+in this repository. For `RENEW` that equality is the only bound there is: the
+`notAfter - notBefore == 31536000` check lives in the `REGISTER` branch, so under that mutation a
+renewal could have claimed a decade or a century. It is the exact defect NAMES.md names when it
+explains why the renewal window is only sixty days wide — "early renewal would let a well-funded
+holder buy a decade of term at today's difficulty".
+
+Two other mutations of the same line — always extending from the renewal instant, always from the
+old expiry — were **already caught** by unit tests, and are said so here rather than counted as
+finds. What the vectors add for those is different and still worth having: a unit test protects
+this implementation, and the artifact is what a second one runs.
+
+The expectations are written out from the specification's arithmetic rather than obtained by
+calling the checker, because the `pow` suite's first version computed `expect` from the function
+under test and four of five mutations survived it. The two agreed on the first run, which is itself
+a result worth recording.
+
+Found by walking the lifecycle with `--at` against a running binary and measuring the exact seconds
+a renewal produced at each boundary — not by reading the suite, which looked complete.
+
 ### Fixed — two peers detected a fork and both printed `equivocations 0 (0 new)`
 
 Give one key two futures for one name, sync the two logs, and both sides do the right thing: the

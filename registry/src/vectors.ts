@@ -927,6 +927,55 @@ export function buildVectors(): Vector[] {
       state: HELD,
       expect: rejectWith('TOO_SOON'),
     },
+    /* -- the term a renewal must PRODUCE ------------------------------------ */
+    //
+    // **The suite checked what an implementation accepts and never what it computes.** Every
+    // lifecycle vector above hands the verifier a finished record carrying a `notAfter` and asks
+    // for a verdict. None says which `notAfter` is the right one, so a second implementation could
+    // derive a renewal's expiry by any rule at all -- always from the renewal instant, always from
+    // the old expiry -- and pass the whole file. Two peers would then hold different expiries for
+    // one name, disagree about when it lapses, and therefore about whether it resolves and whether
+    // a stranger may take it: a permanent fork neither side ever rejected anything to reach.
+    //
+    // Found by measuring a running binary across the boundary, not by re-reading the suite. Each
+    // case is emitted three times -- the specified value accepted, one second either side refused
+    // -- because a rule that only rejects downward is one two implementations drift apart under.
+    ...((): Vector[] => {
+      const expiry = VECTOR_NOW + TERM_SECONDS;
+      // REGISTRY.md: `notAfter == max(prev.notAfter, notBefore) + 31536000`. Spelled out rather
+      // than imported from the checker, because a `pow` vector that computed its expectation by
+      // calling the function under test survived four of five mutations.
+      const required = (notBefore: number): number => Math.max(expiry, notBefore) + 31_536_000;
+      const cases: Array<[string, number, string]> = [
+        [
+          'sixty-days-early',
+          -RENEWAL_WINDOW_SECONDS,
+          'the window opens here, and the base is still the old expiry',
+        ],
+        ['one-day-early', -86_400, 'the base does not move toward the request'],
+        ['one-second-early', -1, 'still before the expiry, so still based on it'],
+        ['at-the-expiry-instant', 0, 'notBefore == prev.notAfter, where both readings coincide'],
+        ['one-second-into-grace', 1, 'past the expiry, the term restarts from the renewal instant'],
+        ['late-in-grace', 2_505_600, 'twenty-nine days in, and it still runs from that instant'],
+      ];
+      return cases.flatMap(([label, offset, why]): Vector[] => {
+        const notBefore = expiry + offset;
+        const at = required(notBefore);
+        const one = (suffix: string, notAfter: number, expect: Vector['expect']): Vector => ({
+          name: `lifecycle/term-${label}${suffix}`,
+          rule: `REGISTRY.md RENEW: notAfter == max(prev.notAfter, notBefore) + 31536000 — ${why}`,
+          record: toHex(successor({ op: 'RENEW', notBefore, notAfter, powProof: powProof() })),
+          now: notBefore,
+          state: HELD,
+          expect,
+        });
+        return [
+          one('', at, accept),
+          one('-a-second-short', at - 1, rejectWith('BAD_TERM')),
+          one('-a-second-long', at + 1, rejectWith('BAD_TERM')),
+        ];
+      });
+    })(),
     {
       name: 'lifecycle/renewal-cannot-buy-an-unbounded-term',
       rule: 'clock_check applies to every operation, not to REGISTER alone',
