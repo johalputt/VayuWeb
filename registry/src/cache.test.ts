@@ -386,3 +386,70 @@ test('a resolver with no verified head caches nothing, however often it is asked
   }
   assert.equal(cache.negativeSize, 0, 'a fact about the resolver is not a fact about a name');
 });
+
+/* -------------------------------------------------------------------------- */
+/* Flushing, and counting — added with GET /v1/cache/stats and DELETE /v1/cache */
+/* -------------------------------------------------------------------------- */
+
+test('a flush of everything leaves nothing, including the manifests', () => {
+  // Found by a surviving mutation: the methods shipped with the endpoints and without tests.
+  // `DELETE /v1/cache` is what an operator reaches for when they believe this resolver is wrong
+  // about something, and a flush that quietly keeps a third of what it holds leaves them
+  // believing it worked.
+  const cache = new ResolutionCache();
+  cache.putNegative('gone.vayu', 'NAME_NOT_FOUND', NOW);
+  cache.putPositive('atlas.vayu', rec('atlas'), NOW);
+  cache.rememberManifest('bafyroot', null);
+  assert.equal(cache.negativeSize + cache.positiveSize + cache.manifestSize, 3);
+
+  assert.equal(cache.clear(), 3, 'it reports what went, so a caller can say rather than assume');
+  assert.equal(cache.negativeSize, 0);
+  assert.equal(cache.positiveSize, 0);
+  assert.equal(cache.manifestSize, 0, 'a flush that keeps the manifests is not a flush');
+  assert.equal(cache.clear(), 0, 'and flushing an empty cache reports nothing rather than lying');
+});
+
+test('flushing one name takes that name and leaves the rest standing', () => {
+  const cache = new ResolutionCache();
+  cache.putNegative('gone.vayu', 'NAME_NOT_FOUND', NOW);
+  cache.putPositive('atlas.vayu', rec('atlas'), NOW);
+  cache.putPositive('borealis.vayu', rec('borealis'), NOW);
+  cache.rememberManifest('bafyroot', null);
+
+  assert.equal(cache.forget('atlas.vayu'), 1);
+  assert.equal(cache.positive('atlas.vayu', NOW), null);
+  assert.equal(
+    cache.positive('borealis.vayu', NOW) !== null,
+    true,
+    'a neighbour is not collateral',
+  );
+  assert.equal(cache.negative('gone.vayu', NOW), 'NAME_NOT_FOUND');
+  assert.equal(
+    cache.manifestSize,
+    1,
+    'manifests are keyed by CID, so no fact about one name can make one wrong',
+  );
+
+  // Both halves of one name go together, because they are two answers about the same thing.
+  cache.putNegative('atlas.vayu', 'NAME_EXPIRED', NOW);
+  cache.putPositive('atlas.vayu', rec('atlas'), NOW);
+  assert.equal(cache.forget('atlas.vayu'), 2);
+  assert.equal(cache.forget('never-cached.vayu'), 0);
+});
+
+test('a miss is counted as a miss, which is the only way a hit rate means anything', () => {
+  const cache = new ResolutionCache();
+  assert.deepEqual(cache.counts, { hits: 0, misses: 0 });
+
+  cache.positive('atlas.vayu', NOW);
+  cache.negative('atlas.vayu', NOW);
+  assert.deepEqual(cache.counts, { hits: 0, misses: 2 }, 'nothing held is two misses');
+
+  cache.putPositive('atlas.vayu', rec('atlas'), NOW);
+  cache.positive('atlas.vayu', NOW);
+  assert.deepEqual(cache.counts, { hits: 1, misses: 2 });
+
+  // An entry that has expired is a miss, not a hit: it was there and it was no use.
+  cache.positive('atlas.vayu', NOW + POSITIVE_TTL_SECONDS);
+  assert.deepEqual(cache.counts, { hits: 1, misses: 3 });
+});

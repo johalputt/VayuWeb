@@ -99,6 +99,28 @@ deliberately does not depend on; `IpnsPort` is the seam, the same shape Hyperswa
 this pointer, and it means the site I just published" — which is what a publisher checking that
 path before they publish actually has. Every other pointer resolves to null.
 
+### The control API answers about a name, and forgets what it remembers
+
+Thirteen of the eighteen endpoints RESOLUTION.md lists now exist: `GET /v1/records/{name}` (the
+record and what this resolver resolves it to), `GET /v1/cache/stats`, `DELETE /v1/cache`,
+`DELETE /v1/cache/{name}`, and `GET /v1/peers` — which answers `joined: false` from `serve`, because
+`sync` is where a peer connection lives and a zero that reads like a measurement is worse than a
+sentence.
+
+The name in a path is **the first value a user types that reaches this API's routing**; every other
+endpoint is a constant. It is validated against the grammar before it is echoed, keyed, logged or
+passed onward — LOCAL-SURFACE.md 3.1's ordering, applied here for the same reason — and the answer
+echoes the *validated* name rather than the bytes that arrived.
+
+`bytes` is missing from `GET /v1/cache/stats`, which the specification lists, and deliberately so:
+nothing measures the memory an entry occupies, and a figure derived from an encoding length would
+be a guess wearing the clothes of a measurement. An operator would size a cache with it.
+
+`POST /v1/resolve` is not implemented. It takes a request body, and neither surface reads one — the
+serving code says so, and says a route that needs one "has to add a bounded reader deliberately,
+which is the right amount of friction". `GET /v1/records/{name}` answers the same question without
+one.
+
 ### What is keeping your site alive, said without overstating it
 
 `GET /v1/pins` on the control API reports what this node holds, and `pins.ts` — the module whose

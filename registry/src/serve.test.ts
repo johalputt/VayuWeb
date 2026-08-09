@@ -155,6 +155,10 @@ const controlPorts: ControlPorts = {
   diagnostics: () => false,
   setDiagnostics: () => undefined,
   pins: () => [],
+  resolve: (label, tld) => ({ outcome: 'error', error: 'NAME_NOT_FOUND', name: `${label}.${tld}` }),
+  cacheStats: () => ({ negative: 1, positive: 2, manifests: 3, hits: 4, misses: 5 }),
+  flushCache: (name) => (name === null ? 6 : 1),
+  peers: () => ({ joined: false, peers: 0, detail: 'not joined' }),
 };
 
 async function withListener(make: () => Promise<Listener>, run: (l: Listener) => Promise<void>) {

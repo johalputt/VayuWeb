@@ -37,6 +37,7 @@
  */
 
 import { onlyThisNodeHoldsIt, summarise, type AvailabilityReport } from './pins.ts';
+import { isRatifiedTld, labelRejection } from './names.ts';
 import { timingSafeEqual } from 'node:crypto';
 
 /** The header a caller must send. RESOLUTION.md, "The control API". */
@@ -76,6 +77,27 @@ export interface ControlPorts {
    * not become the place one is invented.
    */
   pins(): readonly AvailabilityReport[];
+  /**
+   * What this resolver currently answers for one **already-validated** name.
+   *
+   * The validation happens in the router, before the name is used for anything at all — the same
+   * ordering LOCAL-SURFACE.md 3.1 imposes on the browsing proxy, for the same reason: a hostile
+   * name is the injection vector, and a check that runs after the value has been echoed, keyed or
+   * logged is a check that ran too late.
+   */
+  resolve(label: string, tld: string): unknown;
+  /** Entries held and how often they were used. */
+  cacheStats(): {
+    negative: number;
+    positive: number;
+    manifests: number;
+    hits: number;
+    misses: number;
+  };
+  /** Forget everything, or one validated name. Returns how many entries went. */
+  flushCache(name: { label: string; tld: string } | null): number;
+  /** Peer count and swarm state. */
+  peers(): { joined: boolean; peers: number; detail: string };
 }
 
 /**
@@ -174,6 +196,29 @@ export function handleControlRequest(
   const presented = authorisation.startsWith('Bearer ') ? authorisation.slice(7) : '';
   if (!tokenMatches(presented, token)) return deny(401, 'unauthorised');
 
+  // Routes carrying a name are matched before the exact-path switch, and the name is validated
+  // **before it is used for anything** — not echoed, not used as a cache key, not passed onward
+  // until the grammar has accepted it. That is LOCAL-SURFACE.md 3.1's rule; it is written for the
+  // browsing proxy and the reason applies here unchanged.
+  const named = namedRoute(request.method, request.path);
+  if (named !== null) {
+    if (named.name === null) return deny(400, 'bad_name');
+    switch (named.route) {
+      case 'records':
+        // The validated name is spread **last**, so a port returning a `name` of its own cannot
+        // overwrite it. The other order shipped first and hid a mutation: the test double happened
+        // to return `name`, so replacing the router's echo with the raw request path changed
+        // nothing observable. A field that can be silently overridden by a collaborator is a field
+        // whose value is decided somewhere other than where it is validated.
+        return ok({
+          ...(ports.resolve(named.name.label, named.name.tld) as object),
+          name: `${named.name.label}.${named.name.tld}`,
+        });
+      case 'cache':
+        return ok({ flushed: ports.flushCache(named.name) });
+    }
+  }
+
   switch (`${request.method} ${request.path}`) {
     case 'GET /v1/health':
       return ok({ ok: true });
@@ -203,6 +248,12 @@ export function handleControlRequest(
           onlyThisNodeHolds: onlyThisNodeHoldsIt(pin),
         })),
       });
+    case 'GET /v1/peers':
+      return ok(ports.peers());
+    case 'GET /v1/cache/stats':
+      return ok(ports.cacheStats());
+    case 'DELETE /v1/cache':
+      return ok({ flushed: ports.flushCache(null) });
     case 'GET /v1/diagnostics':
       return ok({ enabled: ports.diagnostics() });
     case 'POST /v1/diagnostics/on':
@@ -214,6 +265,54 @@ export function handleControlRequest(
     default:
       return deny(404, 'no_such_endpoint');
   }
+}
+
+/**
+ * Match the two routes that carry a name, and validate it before anything reads it.
+ *
+ * Returns `null` when the path is not one of them, and `{ name: null }` when it is one of them
+ * carrying something that is not a name — so the caller answers 400 rather than 404, which is the
+ * truthful distinction between "no such endpoint" and "that is not a name".
+ *
+ * **The grammar is what makes this safe, and decoding is not.** An earlier version of this comment
+ * said a percent-encoded traversal checked before decoding "is a traversal that was not checked",
+ * and that is false: `..%2f..` fails the label grammar exactly as `../..` does, because neither
+ * `%` nor `/` nor `.` is in it. Decoding is here so a legitimately encoded name — `atlas%2Dsite`,
+ * `atlasobservatory%2Evayu` — is accepted, which makes the check *more* permissive rather than
+ * less. Saying otherwise would have credited the safety to the wrong line, and the wrong line is
+ * the one somebody removes.
+ *
+ * `decodeURIComponent` throws on a malformed escape and the throw is caught: a bad escape is a bad
+ * name, not a 500.
+ */
+export function namedRoute(
+  method: string,
+  path: string,
+): { route: 'records' | 'cache'; name: { label: string; tld: string } | null } | null {
+  const routes = [
+    { prefix: '/v1/records/', method: 'GET', route: 'records' as const },
+    { prefix: '/v1/cache/', method: 'DELETE', route: 'cache' as const },
+  ];
+  for (const candidate of routes) {
+    if (method !== candidate.method || !path.startsWith(candidate.prefix)) continue;
+    const raw = path.slice(candidate.prefix.length);
+    if (raw.length === 0) return { route: candidate.route, name: null };
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(raw);
+    } catch {
+      return { route: candidate.route, name: null };
+    }
+    const dot = decoded.lastIndexOf('.');
+    if (dot <= 0 || dot === decoded.length - 1) return { route: candidate.route, name: null };
+    const label = decoded.slice(0, dot).toLowerCase();
+    const tld = decoded.slice(dot + 1).toLowerCase();
+    if (!isRatifiedTld(tld) || labelRejection(label) !== null) {
+      return { route: candidate.route, name: null };
+    }
+    return { route: candidate.route, name: { label, tld } };
+  }
+  return null;
 }
 
 /**

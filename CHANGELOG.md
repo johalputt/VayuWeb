@@ -10,6 +10,40 @@ it.
 
 ## [Unreleased]
 
+### Added — five more of the control API's endpoints, and the one value a user types
+
+RESOLUTION.md lists eighteen endpoints and eight existed. Five more do now: `GET /v1/records/{name}`,
+`GET /v1/cache/stats`, `DELETE /v1/cache`, `DELETE /v1/cache/{name}` and `GET /v1/peers`. They are
+the ones an operator reaches for when a name will not load — what does this resolver think, and
+forget what you remember — and they are the ones that need no request body, which is what makes them
+the honest set to add. Neither surface reads a body; the serving code says a route that needs one
+"has to add a bounded reader deliberately, which is the right amount of friction". `POST /v1/resolve`
+therefore waits, and `GET /v1/records/{name}` answers the same question meanwhile.
+
+**A name in a path is the first value a user types that reaches this API's routing** — every other
+endpoint is a constant, and the Rust client's whole request design exists so that stays true on its
+side. It is validated against the grammar before it is echoed, keyed, logged or passed onward, which
+is LOCAL-SURFACE.md 3.1's ordering applied to a second surface.
+
+Two things came out of mutating it, both corrections to what had just been written:
+
+The comment claiming a percent-encoded traversal "checked before decoding is a traversal that was
+not checked" was **false**. `..%2f..` fails the label grammar exactly as `../..` does — neither `%`
+nor `/` nor `.` is in it — so decoding is not what makes this safe; it is what lets a legitimately
+encoded name through, which makes the check *more* permissive. Crediting safety to the wrong line
+matters because the wrong line is the one somebody removes. A `raw.includes('/')` guard went with it,
+for the same reason: fully redundant with the grammar, and an unreachable branch reads as a defence.
+
+The validated name was spread **before** the port's answer, so a port returning a `name` of its own
+decided it. A mutation replacing the router's echo with the raw request path changed nothing
+observable, because the test double happened to return `name` too. A field that a collaborator can
+silently override is a field whose value is decided somewhere other than where it is validated.
+
+`GET /v1/cache/stats` reports entries and hit and miss counts, and **not** `bytes`, which the
+specification lists: nothing measures the memory an entry occupies, and a number derived from an
+encoding length would be a guess wearing the clothes of a measurement. The rate is not computed
+either — a caller that wants `hits / (hits + misses)` can take it and will know it made it.
+
 ### Fixed — a resolver with no registry told every visitor the name was free
 
 `hasVerifiedHead` was `() => true`, unconditionally, in the object literal `cmdServe` hands the

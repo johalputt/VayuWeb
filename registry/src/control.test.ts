@@ -31,6 +31,17 @@ const ports = (): ControlPorts => {
       diagnostics = on;
     },
     pins: () => [],
+    // Deliberately no `name` field: the router owns that one, and a double that returns it too
+    // masks whether the router's echo is the validated name or the bytes that were sent. It did,
+    // and a mutation replacing the echo with the raw path went unnoticed because of it.
+    resolve: (label, tld) => ({
+      outcome: 'error',
+      error: 'NAME_NOT_FOUND',
+      asked: `${label}/${tld}`,
+    }),
+    cacheStats: () => ({ negative: 1, positive: 2, manifests: 3, hits: 4, misses: 5 }),
+    flushCache: (name) => (name === null ? 6 : 1),
+    peers: () => ({ joined: false, peers: 0, detail: 'not joined' }),
   };
 };
 
@@ -329,4 +340,149 @@ test('the pins endpoint is behind the token like everything else', () => {
     TOKEN,
   );
   assert.equal(unauthenticated.status, 401);
+});
+
+/* -------------------------------------------------------------------------- */
+/* The routes that carry a name — an untrusted string reaching a router        */
+/* -------------------------------------------------------------------------- */
+
+test('I put a traversal, an encoded traversal and a control character in the path', () => {
+  // The first value a *user* types that reaches this API's routing. Every other endpoint is a
+  // constant. LOCAL-SURFACE.md 3.1 imposes the ordering the browsing proxy follows and the reason
+  // is unchanged here: validate against the grammar **before** the value is echoed, keyed, logged
+  // or passed onward, because a check that runs after any of those ran too late.
+  //
+  // Decoding happens first and the grammar decides second, deliberately: a percent-encoded
+  // traversal checked before decoding is a traversal that was not checked.
+  const hostile = [
+    '../../../etc/passwd',
+    '..%2f..%2fetc%2fpasswd',
+    '%2e%2e%2f.vayu',
+    'atlas.vayu/../secrets',
+    'atlas%00.vayu',
+    'atlas.vayu%0d%0aX-Injected:%201',
+    'atlas.notaratifiedtld',
+    'UPPER_CASE.vayu',
+    '.vayu',
+    'atlas.',
+    '%zz',
+    '',
+  ];
+  for (const name of hostile) {
+    const answered = handleControlRequest(request('GET', `/v1/records/${name}`), ports(), TOKEN);
+    assert.equal(
+      answered.status === 400 || answered.status === 404,
+      true,
+      `${name} -> ${answered.status}`,
+    );
+    assert.notEqual(answered.status, 200, `${name} must not resolve`);
+  }
+});
+
+test('a legitimately encoded name is accepted, which is what decoding is for', () => {
+  // Found by a mutation that survived, which showed the comment above this code was crediting the
+  // safety to the wrong line. `..%2f..` fails the label grammar exactly as `../..` does — neither
+  // `%` nor `/` nor `.` is in it — so decoding is not what stops a traversal. It is what lets an
+  // encoded name through, which makes the check MORE permissive, and that is the behaviour a test
+  // has to pin because it is the behaviour that would otherwise quietly disappear.
+  const encoded = handleControlRequest(
+    request('GET', '/v1/records/atlasobservatory%2Evayu'),
+    ports(),
+    TOKEN,
+  );
+  assert.equal(encoded.status, 200);
+  assert.equal((encoded.body as Record<string, unknown>)['name'], 'atlasobservatory.vayu');
+});
+
+test('the answer names the validated name, never the bytes that were sent', () => {
+  // Also a surviving mutation: the earlier test asked for a name that was already lowercase and
+  // unencoded, so echoing the raw path and echoing the validated name produced the same string.
+  // A test that cannot tell the two apart is a test that permits the wrong one.
+  const answered = handleControlRequest(
+    request('GET', '/v1/records/ATLASOBSERVATORY.VAYU'),
+    ports(),
+    TOKEN,
+  );
+  assert.equal(answered.status, 200);
+  assert.equal((answered.body as Record<string, unknown>)['name'], 'atlasobservatory.vayu');
+});
+
+test('a name that is a name is routed, and its answer names it back exactly once', () => {
+  const answered = handleControlRequest(
+    request('GET', '/v1/records/atlasobservatory.vayu'),
+    ports(),
+    TOKEN,
+  );
+  assert.equal(answered.status, 200);
+  const body = answered.body as Record<string, unknown>;
+  assert.equal(body['name'], 'atlasobservatory.vayu');
+  // Echoed from the VALIDATED parts, not from the request. A router that echoed the raw path
+  // would hand back whatever was sent, which is the shape every response-splitting bug has.
+  assert.equal(body['error'], 'NAME_NOT_FOUND');
+});
+
+test('/v1/cache/stats is a route and not a name', () => {
+  // `stats` sits on the same prefix as `DELETE /v1/cache/{name}`. A router that read it as a name
+  // would answer a flush for a site called "stats", and a router that read every name as `stats`
+  // would answer statistics for a flush.
+  const stats = handleControlRequest(request('GET', '/v1/cache/stats'), ports(), TOKEN);
+  assert.equal(stats.status, 200);
+  assert.deepEqual(stats.body, { negative: 1, positive: 2, manifests: 3, hits: 4, misses: 5 });
+  assert.equal(
+    'bytes' in (stats.body as object),
+    false,
+    'nothing measures bytes, so no number is reported for them',
+  );
+
+  // And the DELETE on the bare path is the flush-everything route, not a flush of nothing.
+  const all = handleControlRequest(request('DELETE', '/v1/cache'), ports(), TOKEN);
+  assert.deepEqual(all.body, { flushed: 6 });
+
+  const one = handleControlRequest(
+    request('DELETE', '/v1/cache/atlasobservatory.vayu'),
+    ports(),
+    TOKEN,
+  );
+  assert.deepEqual(one.body, { flushed: 1 });
+});
+
+test('the named routes are behind the token like every other one', () => {
+  // Worth its own assertion because these routes are matched BEFORE the exact-path switch, and a
+  // match that ran before the token check would be an endpoint anyone could reach.
+  for (const path of ['/v1/records/atlasobservatory.vayu', '/v1/cache/atlasobservatory.vayu']) {
+    const answered = handleControlRequest(
+      {
+        method: path.includes('records') ? 'GET' : 'DELETE',
+        path,
+        headers: new Map([[CONTROL_HEADER, '1']]),
+      },
+      ports(),
+      TOKEN,
+    );
+    assert.equal(answered.status, 401, path);
+  }
+});
+
+test('a peer count from a process that opens no connection says so', () => {
+  // A zero that reads like a measurement is worse than a sentence. This command serves; syncing is
+  // a different command, and the answer says which.
+  const answered = handleControlRequest(request('GET', '/v1/peers'), ports(), TOKEN);
+  assert.equal(answered.status, 200);
+  assert.deepEqual(answered.body, { joined: false, peers: 0, detail: 'not joined' });
+});
+
+test('a port cannot overwrite the name the router validated', () => {
+  // The ordering that let a mutation hide. With `{ name, ...port }` the collaborator is spread
+  // last and decides it — and the value a router echoes must be decided where it is validated,
+  // not by whatever happens to be spread over it.
+  const shouting: ControlPorts = {
+    ...ports(),
+    resolve: () => ({ name: 'something-else.entirely', outcome: 'ok' }),
+  };
+  const answered = handleControlRequest(
+    request('GET', '/v1/records/atlasobservatory.vayu'),
+    shouting,
+    TOKEN,
+  );
+  assert.equal((answered.body as Record<string, unknown>)['name'], 'atlasobservatory.vayu');
 });

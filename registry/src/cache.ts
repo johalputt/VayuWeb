@@ -155,6 +155,8 @@ export class ResolutionCache {
   private readonly positiveLimit: number;
   private readonly manifestLimit: number;
   private generation: number | null = null;
+  private hitCount = 0;
+  private missCount = 0;
 
   /**
    * The TTL table, injectable so a test can prove the *policy* is consulted rather than
@@ -190,6 +192,51 @@ export class ResolutionCache {
   }
 
   /**
+   * Hits and misses since this cache was made.
+   *
+   * RESOLUTION.md's `GET /v1/cache/stats` asks for "entries, hit rate, bytes". Two of those are
+   * counted here and **`bytes` is deliberately absent**: nothing measures the memory a record or a
+   * manifest occupies, and a number derived from an encoding length would be a guess wearing the
+   * clothes of a measurement. An operator reading a byte figure would size a cache with it.
+   *
+   * The rate itself is not computed either. `hits / (hits + misses)` is one division, and doing it
+   * here would put a single number where two are — a caller that wants the ratio can take it and
+   * will know it made it.
+   */
+  get counts(): { hits: number; misses: number } {
+    return { hits: this.hitCount, misses: this.missCount };
+  }
+
+  /**
+   * Forget everything. Returns how many entries went, so a caller can report rather than assume.
+   *
+   * Manifests go too, even though a CID's contents cannot change. `DELETE /v1/cache` is what an
+   * operator reaches for when they believe this resolver is wrong about something, and a flush
+   * that quietly keeps a third of what it holds is a flush that leaves them believing it worked.
+   */
+  clear(): number {
+    const held = this.negatives.size + this.positives.size + this.manifests.size;
+    this.negatives.clear();
+    this.positives.clear();
+    this.manifests.clear();
+    return held;
+  }
+
+  /**
+   * Forget one name. Returns how many entries went — 0, 1 or 2.
+   *
+   * Manifests are keyed by CID rather than by name and are deliberately untouched: a CID addresses
+   * its bytes, so nothing about one name can make a manifest wrong. Flushing them here would be
+   * flushing something the operator did not ask about because it happened to be nearby.
+   */
+  forget(key: string): number {
+    let gone = 0;
+    if (this.negatives.delete(key)) gone += 1;
+    if (this.positives.delete(key)) gone += 1;
+    return gone;
+  }
+
+  /**
    * Tell the cache what the registry looks like now.
    *
    * Any number that moves when the registry does. When it moves, every entry goes: a negative
@@ -214,11 +261,16 @@ export class ResolutionCache {
   /** The cached error for this name, or null. Expired entries are dropped as they are found. */
   negative(key: string, now: number): ResolveErrorName | null {
     const entry = this.negatives.get(key);
-    if (entry === undefined) return null;
-    if (entry.expires <= now) {
-      this.negatives.delete(key);
+    if (entry === undefined) {
+      this.missCount += 1;
       return null;
     }
+    if (entry.expires <= now) {
+      this.negatives.delete(key);
+      this.missCount += 1;
+      return null;
+    }
+    this.hitCount += 1;
     return entry.error;
   }
 
@@ -240,11 +292,16 @@ export class ResolutionCache {
   /** The cached record for this name, or null. */
   positive(key: string, now: number): RegistryRecord | null {
     const entry = this.positives.get(key);
-    if (entry === undefined) return null;
-    if (entry.expires <= now) {
-      this.positives.delete(key);
+    if (entry === undefined) {
+      this.missCount += 1;
       return null;
     }
+    if (entry.expires <= now) {
+      this.positives.delete(key);
+      this.missCount += 1;
+      return null;
+    }
+    this.hitCount += 1;
     return entry.record;
   }
 

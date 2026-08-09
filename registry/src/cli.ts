@@ -32,7 +32,8 @@ import { TERM_SECONDS, SETTLEMENT_SECONDS } from './verify.ts';
 import { stateAt } from './lifecycle.ts';
 import { buildVectors, fromHex } from './vectors.ts';
 import { verify, predecessorFrom, type RegistryView } from './verify.ts';
-import type { ResolverPorts } from './resolve.ts';
+import { RESOLVE_ERRORS, resolveName, type ResolverPorts } from './resolve.ts';
+import { ResolutionCache } from './cache.ts';
 import { serveControl, serveProxy } from './serve.ts';
 import { drivePeer, SWARM_LIMITS, type PeerOutcome } from './swarm.ts';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
@@ -1080,6 +1081,9 @@ async function cmdServe(args: Args): Promise<number> {
   // through the same VERIFIED traversal a peer's blocks would, so this is the content path rather
   // than a shortcut around it -- the only thing it skips is the network.
   const clock = (): number => Math.floor(Date.now() / 1000);
+  // One cache, shared by the two surfaces this command binds: the proxy reads it and the control
+  // API's `DELETE /v1/cache` empties it. A second cache would make the flush a lie.
+  const cache = new ResolutionCache();
   const site = siteContentOf(args.flags.get('site'));
   const pointer = pointerFor(args.flags.get('pointer'), site?.root ?? null);
 
@@ -1111,6 +1115,45 @@ async function cmdServe(args: Args): Promise<number> {
       // number: there is no block-exchange session — VWIP-0005 is a Draft — so no peer has been
       // asked anything, and `summarise` renders that as "nothing is known about who holds this"
       // rather than as a zero that reads like an answer.
+      // Everything below answers about a name the router has already validated against the
+      // grammar, so nothing here is the first thing to look at an untrusted string.
+      resolve: (label, tld) => {
+        const outcome = resolveName(`${label}.${tld}`, resolverPortsFor(store), clock(), cache);
+        return outcome.ok
+          ? {
+              outcome: 'ok',
+              seq: outcome.record.seq,
+              source: outcome.diagnostics.source,
+              resolvedFrom: outcome.diagnostics.resolvedFrom,
+              aliasHops: outcome.diagnostics.aliasHops,
+              value: sourceValueOf(outcome.entry),
+              notAfter: outcome.record.notAfter,
+              ownerKey: toHex(outcome.record.ownerKey),
+            }
+          : {
+              outcome: 'error',
+              code: RESOLVE_ERRORS[outcome.error].code,
+              error: outcome.error,
+              detail: outcome.detail,
+              resolvedFrom: outcome.diagnostics.resolvedFrom,
+            };
+      },
+      cacheStats: () => ({
+        negative: cache.negativeSize,
+        positive: cache.positiveSize,
+        manifests: cache.manifestSize,
+        ...cache.counts,
+      }),
+      flushCache: (name) =>
+        name === null ? cache.clear() : cache.forget(`${name.label}.${name.tld}`),
+      // Honest and dull: this command serves, it does not sync. `vayuweb-registry sync` is where a
+      // peer connection lives, and reporting a peer count from a process that never opens one
+      // would be reporting a zero that reads like a measurement.
+      peers: () => ({
+        joined: false,
+        peers: 0,
+        detail: 'this command does not join a swarm; replication is `vayuweb-registry sync`',
+      }),
       pins: () =>
         site === null
           ? []
@@ -1139,6 +1182,7 @@ async function cmdServe(args: Args): Promise<number> {
       ...(pointer === null ? {} : { ipns: pointer }),
     },
     ports: resolverPortsFor(store),
+    cache,
     // The log's length is the registry's generation: every operation that could change an answer
     // this resolver has cached is an append, so a length that has not moved is a registry whose
     // answers cannot have changed.

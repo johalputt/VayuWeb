@@ -411,6 +411,8 @@ export interface ProxyServerOptions {
    * RESOLUTION.md specifies and no less correct, only staler within its stated TTLs.
    */
   readonly generation?: () => number;
+  /** The resolution cache, when the caller needs to reach it too — see `DELETE /v1/cache`. */
+  readonly cache?: ResolutionCache;
 }
 
 /**
@@ -421,7 +423,10 @@ export interface ProxyServerOptions {
  * legitimate reason to want one. A caller wanting that has misunderstood what the proxy is.
  */
 export function serveProxy(options: ProxyServerOptions): Promise<Listener> {
-  const cache = new ResolutionCache();
+  // Supplied by the caller when one process serves both surfaces, because `DELETE /v1/cache` on
+  // the control API has to reach the cache the proxy is reading. A default is kept so an embedder
+  // binding only the proxy does not have to make one.
+  const cache = options.cache ?? new ResolutionCache();
   const clock = options.now;
 
   const server = withConnectionCap(
