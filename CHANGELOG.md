@@ -43,6 +43,30 @@ and every manifest field would silently stop applying because the resolver fetch
 The publish walk now derives both forms from the one declaration, and the test asserts that the
 path kept by the publisher is the path fetched by the resolver rather than restating either.
 
+### Fixed — a FILE named `.vayu` was published, and a socket vanished without a word
+
+Two more from the same walk, both found by publishing hostile directories rather than by rereading
+the predicate that had just been fixed.
+
+The exemption matched the **path** and never asked what kind of entry it was, so a publisher's bare
+`.vayu` file — the shape a tool puts its local config in — went into the root CID. That is `.env` a
+third time, through a door two commits wide. The exclusion now takes the entry's kind: `.vayu` is
+exempt only as a directory to descend into, and `.vayu/manifest.json` only as a file.
+
+Separately, an entry that is neither a file nor a directory — a socket, a fifo, a device node —
+fell out of both branches of the walk and disappeared with no line of output. That is precisely the
+outcome the symbolic-link refusal beside it exists to prevent, in its own words: "Silently omitting
+a file is neither 'dereference' nor 'refuse', and it publishes a site with a hole in it that the
+publisher is never told about." The rule had been written for links and applied to nothing else. It
+is now reported like any other exclusion.
+
+The `kind === 'file'` half **survived its own mutation**, because nothing in the suite created a
+directory where the manifest belongs. Per the standing rule that meant the test was wrong, not the
+fix: a case that distinguishes them is now written down — a directory at the manifest's path is
+named in the exclusion report itself rather than walked into and reported one useless file at a
+time, which is the difference between a message that points at the publisher's mistake and one that
+does not.
+
 ### Fixed — `serve` printed a stack trace where every other command prints a usage line
 
 `main` has a try/catch whose whole job is to turn a `UsageError` into `usage: <message>` and exit 1.

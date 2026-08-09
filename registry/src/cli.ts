@@ -1135,13 +1135,18 @@ const MANIFEST_DIRECTORY = MANIFEST_RELATIVE.split('/').slice(0, -1).join('/');
  * PUBLISHING.md 2 defines exactly one path, `.vayu/manifest.json`, at the root of the tree.
  * Nothing else under `.vayu`, and no `.vayu` at any other depth, has a defined meaning, so nothing
  * else is worth publishing.
+ *
+ * **The KIND matters as much as the path.** A publisher's bare `.vayu` FILE — the shape a tool
+ * puts its local config in — is a dotfile, not a directory to descend into, and matching the path
+ * alone published it. That is `.env` a third time. Found by publishing one, not by rereading this.
  */
-function excludedFromPublish(rel: string): boolean {
-  // The directory is walked so the manifest inside it can be reached; the manifest itself is the
-  // exemption. Nothing else needs naming — anything else under `.vayu` still carries a dotted
+function excludedFromPublish(rel: string, kind: 'file' | 'directory'): boolean {
+  // The directory is walked so the manifest inside it can be reached; the manifest file itself is
+  // the exemption. Nothing else needs naming — anything else under `.vayu` still carries a dotted
   // segment, so the general rule below already catches it. An explicit `.vayu/` rejection was
   // written here first and survived its own mutation, which is how it was found to be redundant.
-  if (rel === MANIFEST_DIRECTORY || rel === MANIFEST_RELATIVE) return false;
+  if (rel === MANIFEST_DIRECTORY && kind === 'directory') return false;
+  if (rel === MANIFEST_RELATIVE && kind === 'file') return false;
   // Every segment, not just the last. That is what excludes `.vayu/deploy.key` and `docs/.vayu`
   // by the same line that excludes `.env`, and what makes this predicate hold on its own rather
   // than only because the walk happens to stop descending at an excluded directory.
@@ -1198,13 +1203,19 @@ export function siteFilesFor(directory: string): SiteFile[] {
       if (Buffer.byteLength(entry.name, 'utf8') > 255) {
         throw new UsageError(`${rel}: a filename may not exceed 255 bytes`);
       }
-      if (excludedFromPublish(rel)) {
+      // A socket, a fifo or a device node is neither, and it used to fall out of both branches
+      // below with no line of output — the same silent hole the symbolic-link refusal above exists
+      // to prevent, applied to every other kind of entry there is. Reported rather than dropped.
+      if (!entry.isDirectory() && !entry.isFile()) {
+        excluded.push(rel);
+        continue;
+      }
+      if (excludedFromPublish(rel, entry.isDirectory() ? 'directory' : 'file')) {
         excluded.push(rel);
         continue;
       }
       if (entry.isDirectory()) walk(join(dir, entry.name), rel);
-      else if (entry.isFile())
-        files.push({ path: rel, content: readFileSync(join(dir, entry.name)) });
+      else files.push({ path: rel, content: readFileSync(join(dir, entry.name)) });
     }
   };
   walk(directory, '');

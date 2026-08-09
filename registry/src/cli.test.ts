@@ -17,6 +17,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:net';
 import { join } from 'node:path';
 
 import {
@@ -1423,6 +1424,108 @@ test('AUDIT: only the root manifest gets through the dot-entry exclusion', () =>
       `/${collected.find((path: string) => path.endsWith('manifest.json'))}`,
       MANIFEST_PATH,
     );
+  } finally {
+    done();
+  }
+});
+
+test('AUDIT: a FILE named .vayu is an ordinary dotfile, not a manifest directory', () => {
+  // The exemption exists so the walk can descend into `.vayu` and reach the manifest. A file with
+  // that name is not a directory to descend into — it is a dotfile, and it went straight into the
+  // root CID because the exclusion compared the path and never asked what kind of entry it was.
+  //
+  // Found by publishing one, not by reading the predicate. Bare `.vayu`-style dotfiles are what
+  // tools put their local config in, which is the same category as `.env` and `.git/config`, and
+  // the same consequence: content-addressed, immutable, served, and fetchable by anyone.
+  const { dir, done } = scratch();
+  try {
+    const site = join(dir, 'site');
+    mkdirSync(site, { recursive: true });
+    writeFileSync(join(site, 'index.html'), '<h1>real</h1>');
+    writeFileSync(join(site, '.vayu'), 'LOCAL TOOL CONFIG');
+
+    const collected = siteFilesFor(site).map((f: { path: string }) => f.path);
+    assert.deepEqual([...collected].sort(), ['index.html'], 'only the site');
+    assert.equal(
+      collected.includes('.vayu'),
+      false,
+      'a dotfile is a dotfile whatever it is called',
+    );
+  } finally {
+    done();
+  }
+});
+
+test('AUDIT: an entry that is neither file nor directory is reported, not silently dropped', () => {
+  // The rule the symbolic-link refusal is written on: "Silently omitting a file is neither
+  // 'dereference' nor 'refuse', and it publishes a site with a hole in it that the publisher is
+  // never told about." That rule was applied to links and to nothing else. A socket, a fifo or a
+  // device node fell out of both `isDirectory` and `isFile` and vanished with no line of output —
+  // the publisher gets a CID they believe is their site and a 404 they cannot explain.
+  const { dir, done } = scratch();
+  const site = join(dir, 'site');
+  mkdirSync(site, { recursive: true });
+  writeFileSync(join(site, 'index.html'), '<h1>real</h1>');
+
+  // A unix domain socket, because node can make one without shelling out to `mkfifo`.
+  const server = createServer();
+  try {
+    server.listen(join(site, 'live.sock'));
+    const errors: string[] = [];
+    const stderr = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string) => {
+      errors.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+    let collected: string[];
+    try {
+      collected = siteFilesFor(site).map((f: { path: string }) => f.path);
+    } finally {
+      process.stderr.write = stderr;
+    }
+    assert.deepEqual(collected, ['index.html'], 'a socket is not content');
+    assert.match(
+      errors.join(''),
+      /live\.sock/,
+      'and the publisher is told it was left out, rather than discovering it from a 404',
+    );
+  } finally {
+    server.close();
+    done();
+  }
+});
+
+test('AUDIT: a DIRECTORY where the manifest belongs is named in the report, not walked into', () => {
+  // The mirror of the previous case, and it exists because the previous fix's `kind === 'file'`
+  // guard survived its own mutation: nothing in the suite created a directory at the manifest's
+  // path, so the guard was never exercised. Without it the walk descends into the bogus directory
+  // and reports each file inside — telling a publisher about `inner.txt` when what they need to
+  // hear is that `.vayu/manifest.json` is a directory. Nothing is published either way; what is
+  // at stake is whether the message points at the mistake.
+  const { dir, done } = scratch();
+  try {
+    const site = join(dir, 'site');
+    mkdirSync(join(site, '.vayu', 'manifest.json'), { recursive: true });
+    writeFileSync(join(site, 'index.html'), '<h1>real</h1>');
+    writeFileSync(join(site, '.vayu', 'manifest.json', 'inner.txt'), 'x');
+
+    const errors: string[] = [];
+    const stderr = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string) => {
+      errors.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+    let collected: string[];
+    try {
+      collected = siteFilesFor(site).map((f: { path: string }) => f.path);
+    } finally {
+      process.stderr.write = stderr;
+    }
+
+    assert.deepEqual(collected, ['index.html'], 'a directory is never content');
+    const report = errors.join('');
+    assert.match(report, /\s\.vayu\/manifest\.json$/m, 'the directory itself is what is named');
+    assert.doesNotMatch(report, /inner\.txt/, 'not the files inside a directory nothing reads');
   } finally {
     done();
   }
