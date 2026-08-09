@@ -135,6 +135,13 @@ echo; echo "=== PATCH /v1/config ==="
 R=$(ctl PATCH /v1/config '{"cacheSizes":{"negativeEntries":16}}'); case "$R" in *'"negativeEntries":16'*200) ok "a cache size is set and read back";; *) bad "patch config" "$R";; esac
 R=$(ctl PATCH /v1/config '{"mode":"tor"}'); case "$R" in *unsupported_field*400) ok "mode is REFUSED by name, not ignored";; *) bad "patch mode" "$R";; esac
 R=$(ctl GET /v1/config); case "$R" in *redacted*) ok "GET /v1/config redacts the token";; *) bad "config redaction" "$R";; esac
+# A limit a request can raise without bound is not a limit. Both of these answered 200 on this
+# socket before the ceiling existed; the second is `1e+21`, a size the cache cannot count to.
+R=$(ctl PATCH /v1/config '{"cacheSizes":{"negativeEntries":1000000000}}')
+case "$R" in *bad_config*400) ok "a cache size past its ceiling is refused on the wire";; *) bad "unbounded cache size" "$R";; esac
+R=$(ctl PATCH /v1/config '{"cacheSizes":{"negativeEntries":999999999999999999999}}')
+case "$R" in *bad_config*400) ok "and so is one the cache cannot count to";; *) bad "1e21 cache size" "$R";; esac
+R=$(ctl GET /v1/config); case "$R" in *'"negativeEntries":16'*200) ok "a refused patch left the bound as it was";; *) bad "refused patch landed" "$R";; esac
 
 echo; echo "=== POST /v1/token/rotate — the old token must die ==="
 R=$(ctl POST /v1/token/rotate '{}'); NEW=$(printf '%s' "$R" | sed -n 's/.*"token":"\([A-Za-z0-9_-]*\)".*/\1/p')

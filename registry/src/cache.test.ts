@@ -20,6 +20,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  CACHE_CEILINGS,
+  CACHE_ENTRY_ALLOWANCE,
   CACHE_LIMITS,
   NEGATIVE_TTL_SECONDS,
   POSITIVE_TTL_SECONDS,
@@ -499,4 +501,60 @@ test('a bound that is not a usable size is refused rather than coerced', () => {
   }
   // An empty patch is not an error: it changes nothing, which is what it asked for.
   cache.setLimits({});
+});
+
+test('AUDIT: a bound cannot be raised past the memory the specification budgets for it', () => {
+  // **Found on a live socket, not here.** `PATCH /v1/config {"cacheSizes":{"negativeEntries":1e9}}`
+  // answered 200, and so did `999999999999999999999` — stored as `1e+21`, a number the cache cannot
+  // count to. An authenticated caller, or anything that can reach the control socket, could set the
+  // resolver's memory bound to a value that guarantees the process dies.
+  //
+  // LOCAL-SURFACE.md 3.4 is not vague about this. It budgets "record and negative caches, combined:
+  // 64 MiB", and says why the number is in the document at all: "Changing one is a VWIP, because a
+  // resolver that quietly raises a limit is a resolver whose denial-of-service surface differs from
+  // the one this document describes." An endpoint that raises it at runtime is exactly that
+  // resolver, and it shipped one commit after `CACHE_LIMITS`' own comment argued that "an unbounded
+  // map whose size is an argument rather than a limit is the shape LOCAL-SURFACE.md 3.4 asks not to
+  // exist". The setter handed back the argument the constant had taken away.
+  const cache = new ResolutionCache({});
+
+  for (const field of ['negativeEntries', 'positiveEntries', 'manifestEntries'] as const) {
+    const ceiling = CACHE_CEILINGS[field];
+    // At the ceiling is allowed: it is a limit, not a limit minus one.
+    cache.setLimits({ [field]: ceiling });
+    assert.equal(cache.limits[field], ceiling);
+    assert.throws(() => cache.setLimits({ [field]: ceiling + 1 }), /ceiling/i, field);
+    assert.throws(() => cache.setLimits({ [field]: 1e9 }), /ceiling/i, `${field} 1e9`);
+    // The value that made this visible: an integer by `Number.isInteger` and not a countable one.
+    assert.throws(() => cache.setLimits({ [field]: 1e21 }), /ceiling/i, `${field} 1e21`);
+  }
+
+  // And a refused patch changes nothing, which is the property the whole validate-then-apply
+  // ordering exists for — a caller naming three sizes and getting one wrong keeps all three.
+  const held = cache.limits;
+  assert.throws(() => cache.setLimits({ negativeEntries: 8, positiveEntries: 1e9 }));
+  assert.deepEqual(cache.limits, held, 'the good field must not land when a later one is refused');
+});
+
+test('AUDIT: the ceilings are derived from the budget rather than chosen beside it', () => {
+  // The numbers above are only worth anything if they add up to the document's. LOCAL-SURFACE.md
+  // 3.4 budgets 64 MiB for the record and negative caches COMBINED, so each half gets 32 MiB at a
+  // stated per-entry allowance. Asserted rather than commented, because a ceiling raised later
+  // without redoing the arithmetic is how a budget stops being one.
+  const MiB = 1024 * 1024;
+  assert.equal(
+    CACHE_CEILINGS.negativeEntries * CACHE_ENTRY_ALLOWANCE.negative +
+      CACHE_CEILINGS.positiveEntries * CACHE_ENTRY_ALLOWANCE.positive,
+    64 * MiB,
+    'record and negative caches, combined, at their ceilings, are exactly the budgeted 64 MiB',
+  );
+  // Manifests are in neither clause — RESOLUTION.md gives content its own 2 GiB LRU and a manifest
+  // is not content — so their ceiling is a judgement of the same size, and stated as one.
+  assert.equal(CACHE_CEILINGS.manifestEntries * CACHE_ENTRY_ALLOWANCE.manifest, 32 * MiB);
+
+  // Every default must sit under its own ceiling, or the constructor ships a configuration the
+  // setter would refuse.
+  for (const field of ['negativeEntries', 'positiveEntries', 'manifestEntries'] as const) {
+    assert.ok(CACHE_LIMITS[field] <= CACHE_CEILINGS[field], `${field} default exceeds its ceiling`);
+  }
 });

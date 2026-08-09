@@ -10,6 +10,33 @@ it.
 
 ## [Unreleased]
 
+### Fixed — `PATCH /v1/config` would raise a cache bound to any number at all
+
+`{"cacheSizes":{"negativeEntries":1000000000}}` answered **200**. So did
+`999999999999999999999`, stored as `1e+21` — a size the cache cannot count to. Found by sending
+both at a live socket; `Number.isInteger(1e21)` is true, so a validator written to reject `1.5`
+waved through the two values that guarantee the process dies.
+
+LOCAL-SURFACE.md 3.4 is specific about this. It budgets **64 MiB for the record and negative caches
+combined** and states why the figure is written down at all: "Changing one is a VWIP, because a
+resolver that quietly raises a limit is a resolver whose denial-of-service surface differs from the
+one this document describes." An endpoint that raises it over a socket is that resolver. It shipped
+one commit after `CACHE_LIMITS`' own comment argued that "an unbounded map whose size is an argument
+rather than a limit is the shape LOCAL-SURFACE.md 3.4 asks not to exist" — the setter handed back
+the argument the constant had taken away.
+
+`CACHE_CEILINGS` now bounds every field, derived by arithmetic from `CACHE_ENTRY_ALLOWANCE` and the
+document's 64 MiB rather than chosen beside it: the record and negative halves take 32 MiB each, and
+the manifest cache — in neither clause, since RESOLUTION.md gives content its own 2 GiB LRU and a
+manifest is not content — gets 32 MiB as a judgement named as one. A test asserts the arithmetic
+against the budget, so a ceiling raised later without redoing it fails rather than passes. The
+refusal message says the number and where it comes from, because a caller who reads only the message
+should still know what to do.
+
+Three checks on the wire in `acceptance-control-lifecycle.sh`: both values refused with 400, and the
+bound unchanged afterwards — validate-then-apply proven at the socket rather than at the setter.
+Thirty-seven checks.
+
 ### Fixed — `.vayu` was exempt as a directory, so everything beside the manifest was published
 
 Every dot-entry is kept out of the root CID because, as the rule beside it says, it is "build or
@@ -140,7 +167,7 @@ never reach it.
 
 `acceptance-control-lifecycle.sh` now starts a second, site-less resolver and checks all four
 claims: no proxy is listening, the control API still answers, `GET /v1/status` does not advertise a
-listener that does not exist, and the startup output explains itself. Thirty-four checks.
+listener that does not exist, and the startup output explains itself.
 
 One more thing that check caught, about the check: `curl` prints `000` on a connection failure *and*
 exits non-zero, so an `|| echo 000` appended a second one and the comparison never matched — the

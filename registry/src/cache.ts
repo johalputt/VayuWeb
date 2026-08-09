@@ -130,6 +130,49 @@ export const CACHE_LIMITS = {
   manifestEntries: 256,
 } as const;
 
+/**
+ * What one entry of each kind is budgeted at, in bytes.
+ *
+ * Allowances, not measurements: a JavaScript object's real footprint is an engine detail nobody
+ * should encode. Each is generously above the wire bound it derives from — a negative entry is a
+ * key string and two small fields; a positive entry holds a record bounded at
+ * {@link import('./record.ts').MAX_RECORD_BYTES} (4 KiB) and is allowed twice that for its parsed
+ * form and its key; a manifest is bounded at {@link import('./resolve.ts').MAX_MANIFEST_BYTES}
+ * (8 KiB) and gets the same doubling.
+ *
+ * Stated as constants because {@link CACHE_CEILINGS} is arithmetic over them, and arithmetic whose
+ * inputs live only in a comment is arithmetic nobody redoes when one of them moves.
+ */
+export const CACHE_ENTRY_ALLOWANCE = {
+  negative: 256,
+  positive: 8 * 1024,
+  manifest: 16 * 1024,
+} as const;
+
+/**
+ * The largest each bound may be set to through `PATCH /v1/config`.
+ *
+ * **A limit that a request can raise without bound is not a limit.** `PATCH /v1/config` accepted
+ * `{"negativeEntries": 1e9}` with 200, and `999999999999999999999` — stored as `1e+21`, a size the
+ * cache cannot count to. Found by sending it, not by reading the setter: `Number.isInteger(1e21)`
+ * is true, so a check written to reject `1.5` waved through a value that guarantees the process
+ * dies. The endpoint handed back exactly the argument {@link CACHE_LIMITS} exists to take away.
+ *
+ * LOCAL-SURFACE.md 3.4 budgets **64 MiB for the record and negative caches combined** and says
+ * plainly why the number is written down: "Changing one is a VWIP, because a resolver that quietly
+ * raises a limit is a resolver whose denial-of-service surface differs from the one this document
+ * describes." So the two share that budget, 32 MiB each at their allowance above.
+ *
+ * Manifests are in neither clause — RESOLUTION.md gives content its own 2 GiB LRU and a manifest is
+ * not content — so 32 MiB for them is an engineering judgement rather than a derivation, and is
+ * named as one. A resolver that wants more than any of these changes the document first.
+ */
+export const CACHE_CEILINGS = {
+  negativeEntries: (32 * 1024 * 1024) / CACHE_ENTRY_ALLOWANCE.negative,
+  positiveEntries: (32 * 1024 * 1024) / CACHE_ENTRY_ALLOWANCE.positive,
+  manifestEntries: (32 * 1024 * 1024) / CACHE_ENTRY_ALLOWANCE.manifest,
+} as const;
+
 interface NegativeEntry {
   readonly error: ResolveErrorName;
   readonly expires: number;
@@ -206,10 +249,22 @@ export class ResolutionCache {
     positiveEntries?: number;
     manifestEntries?: number;
   }): void {
-    const usable = (value: number | undefined, field: string): number | undefined => {
+    const usable = (
+      value: number | undefined,
+      field: keyof typeof CACHE_CEILINGS,
+    ): number | undefined => {
       if (value === undefined) return undefined;
       if (!Number.isInteger(value) || value < 1) {
         throw new CacheError(`${field} must be a positive integer, not ${String(value)}`);
+      }
+      // The ceiling, and the memory it stands for. A caller that reads only the message should be
+      // able to act on it, so it says the number and where the number comes from.
+      if (value > CACHE_CEILINGS[field]) {
+        throw new CacheError(
+          `${field} exceeds its ceiling of ${CACHE_CEILINGS[field]} entries; ` +
+            `LOCAL-SURFACE.md 3.4 budgets the caches a fixed amount of memory and says raising a ` +
+            `limit is a specification change, not a request`,
+        );
       }
       return value;
     };
