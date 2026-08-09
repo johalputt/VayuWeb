@@ -19,7 +19,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { main, siteFilesFor } from './cli.ts';
+import { main, pointerFor, siteFilesFor } from './cli.ts';
 import { CID_PARAMETERS, cidBytes, encodeCid, sha256 } from './content.ts';
 import { Store } from './store.ts';
 
@@ -529,4 +529,33 @@ test('update refuses to guess when no entry is named, rather than emptying the n
   } finally {
     done();
   }
+});
+
+/* -------------------------------------------------------------------------- */
+/* `serve --pointer` — a local declaration, not a network resolution           */
+/* -------------------------------------------------------------------------- */
+
+test('a declared pointer answers for itself and for nothing else', () => {
+  // The interesting lie this could tell: return the published root for whatever pointer it is
+  // asked about. A resolver that serves whatever it has to whatever it is asked for is not a
+  // resolver, and every name pointing anywhere would render this operator's site. The flag says
+  // "the record I am testing carries THIS pointer"; one mapping, not a wildcard.
+  const port = pointerFor('k51qzi5uqu5dtestpointer', 'bafyrootcid');
+  assert.ok(port);
+  assert.equal(port.resolve('k51qzi5uqu5dtestpointer'), 'bafyrootcid');
+  assert.equal(port.resolve('k51qzi5uqu5dsomeoneelse'), null, 'and null is 1505, which is true');
+  assert.equal(port.resolve(''), null);
+});
+
+test('no --pointer means no resolver at all, rather than one that answers nothing', () => {
+  // The distinction is visible at the proxy: an absent port and a port that always returns null
+  // produce the same code, but only the absent one leaves `options.ipns` undefined, which is what
+  // says "this resolver has no pointer resolution" rather than "this pointer did not resolve".
+  assert.equal(pointerFor(undefined, 'bafyrootcid'), null);
+});
+
+test('--pointer without --site is refused, not quietly ignored', () => {
+  // It names what `--site` publishes. Without one there is nothing for it to mean, and a flag
+  // accepted and dropped is how an operator ends up debugging a pointer that was never wired.
+  assert.throws(() => pointerFor('k51qzi5uqu5dtestpointer', null), /needs --site/);
 });

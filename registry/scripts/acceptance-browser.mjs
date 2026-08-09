@@ -57,6 +57,18 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REGISTRY = dirname(HERE);
 const CLI = join(REGISTRY, 'bin', 'vayuweb-registry.ts');
 const NAME = 'atlasobservatory.vayu';
+
+/**
+ * A second name carrying ONLY an `ipns` pointer, so step 10 is the only way it can render.
+ *
+ * `SOURCE_ORDER` puts `ipns` first and HOSTING.md tells publishers to write one, and until step 10
+ * was implemented nothing could act on it: a record carrying only a pointer answered 1421
+ * `NO_USABLE_RECORD` — "this name points at nothing fetchable" — about a record that is exactly
+ * what the specification recommends. With no `cid` beside it there is nothing to fall back to, so
+ * this page loading is the pointer path working and cannot be anything else.
+ */
+const POINTER_NAME = 'borealisstations.vayu';
+const POINTER = 'k51qzi5uqu5dabcdefghijklmnopqrstuvwxyz0123456789';
 const PORT = Number(process.env['VAYUWEB_ACCEPTANCE_PORT'] ?? 7654);
 
 const results = [];
@@ -377,6 +389,20 @@ try {
   ]);
   if (registered.code !== 0) throw new Error(`register failed: ${registered.err}`);
 
+  process.stdout.write(`registering ${POINTER_NAME} -> ${POINTER} (solving proof of work)\n`);
+  const pointed = await cli([
+    'register',
+    '--log',
+    log,
+    '--key',
+    key,
+    '--name',
+    POINTER_NAME,
+    '--ipns',
+    POINTER,
+  ]);
+  if (pointed.code !== 0) throw new Error(`pointer registration failed: ${pointed.err}`);
+
   resolver = spawn(
     process.execPath,
     [
@@ -391,6 +417,11 @@ try {
       join(dir, 'control.sock'),
       '--site',
       site,
+      // A locally declared answer for one pointer, which is what a publisher checking the
+      // `ipns`-first path before they publish actually has. Not a network resolution, and the
+      // banner the resolver prints says so.
+      '--pointer',
+      POINTER,
     ],
     { stdio: ['ignore', 'pipe', 'pipe'] },
   );
@@ -458,6 +489,25 @@ try {
     JSON.stringify(headline),
   );
 
+  // Step 10, through the whole stack: a name whose only content entry is a pointer, resolved by
+  // the shipping CLI's wiring rather than by a test double, rendered by stock Chromium. Nothing to
+  // fall back to, so a 200 here is the pointer path and cannot be anything else.
+  const pointerPage = await context.newPage();
+  const pointerResponse = await pointerPage.goto(`http://${POINTER_NAME}/`, {
+    waitUntil: 'load',
+    timeout: 20_000,
+  });
+  check(
+    'a name carrying only an ipns pointer renders, which needs step 10',
+    pointerResponse !== null && pointerResponse.status() === 200,
+    String(pointerResponse?.status()),
+  );
+  check(
+    'and it rendered the same verified content the pointer resolves to',
+    (await pointerPage.textContent('#headline')) === HEADLINE,
+  );
+  await pointerPage.close();
+
   // Proves the SECOND fetch worked, not just the first: a resolver that serves index.html and
   // nothing else renders an unstyled page that still passes a text assertion.
   const colour = await page.evaluate(() => getComputedStyle(document.querySelector('h1')).color);
@@ -490,9 +540,15 @@ try {
   const csp = response?.headers()['content-security-policy'] ?? '';
   check("the CSP reached the browser with default-src 'none'", csp.includes("default-src 'none'"));
   check('no request failed', failed.length === 0, JSON.stringify(failed));
+  // Both names this run registered, and nothing else. Written as a set rather than one prefix
+  // because a second name was added and the single-prefix version would have failed for the right
+  // reason in the wrong way — a check that has to be relaxed whenever the fixture grows tempts the
+  // relaxation "any VayuWeb host", which is what it is actually asserting against.
+  const OWN_HOSTS = [NAME, POINTER_NAME];
   check(
-    'every request stayed inside the VayuWeb name',
-    requested.length > 0 && requested.every((u) => u.startsWith(`http://${NAME}/`)),
+    'every request stayed inside the names this run registered',
+    requested.length > 0 &&
+      requested.every((u) => OWN_HOSTS.some((host) => u.startsWith(`http://${host}/`))),
     JSON.stringify(requested),
   );
 

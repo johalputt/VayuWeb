@@ -430,6 +430,9 @@ const DIGEST = sha256(new TextEncoder().encode('atlas observatory'));
 const CID_TEXT = encodeCid({ version: 1, codec: CID_PARAMETERS.codecDagPb, digest: DIGEST });
 const CID_BYTES = cidBytes({ version: 1, codec: CID_PARAMETERS.codecDagPb, digest: DIGEST });
 
+/** A well-formed IPNS pointer, which REGISTRY.md types as 1-128 characters of text. */
+const POINTER = 'k51qzi5uqu5dabcdefghijklmnopqrstuvwxyz0123456789';
+
 test('AUDIT: a cid entry reaches the content layer as base32, not as String(Uint8Array)', () => {
   // This was `String(outcome.entry.value)`. A `cid` entry is a bstr, so that produced
   // "1,112,18,32,180,…" — the comma-joined DECIMALS of a typed array. It is a string, it is
@@ -598,7 +601,24 @@ test('AUDIT: a fetched body leaves the handler byte for byte', () => {
 
 /** The arrangement HOSTING.md tells a publisher to use: the living pointer and the snapshot. */
 const pointerAndSnapshot = (): RegistryRecord =>
-  live([cborEntry('ipns', 'k51qzi5uqu5dabcdefghijklmnop'), cborEntry('cid', CID_BYTES)]);
+  live([cborEntry('ipns', POINTER), cborEntry('cid', CID_BYTES)]);
+
+/**
+ * What {@link POINTER} resolves to, deliberately NOT the snapshot's CID.
+ *
+ * Step 10 turns a pointer into a CID before step 11 fetches it, so a content layer sees `cid` for
+ * both sources and a test asserting on `source.type` can no longer tell them apart. Asserting on
+ * the value can — and it is the stronger assertion anyway, because it proves *which* snapshot was
+ * asked for and in what order rather than merely that two things were.
+ */
+const LIVE_CID = encodeCid({
+  version: 1,
+  codec: CID_PARAMETERS.codecDagPb,
+  digest: DIGEST.map((b) => b ^ 0xff),
+});
+
+/** A pointer resolver that answers for {@link POINTER} and refuses everything else. */
+const pointerResolves = { resolve: (p: string) => (p === POINTER ? LIVE_CID : null) };
 
 test('AUDIT: a record carrying both ipns and cid falls back to the snapshot', () => {
   // **The arrangement the specification recommends returned 502.** Reproduced before the fix:
@@ -618,8 +638,8 @@ test('AUDIT: a record carrying both ipns and cid falls back to the snapshot', ()
   const asked: string[] = [];
   const content: ContentPort = {
     fetch: (source) => {
-      asked.push(source.type);
-      if (source.type !== 'cid') return { ok: false, error: 'CONTENT_UNAVAILABLE' };
+      asked.push(source.value);
+      if (source.value !== CID_TEXT) return { ok: false, error: 'CONTENT_UNAVAILABLE' };
       return {
         ok: true,
         bytes: new TextEncoder().encode('the snapshot'),
@@ -632,7 +652,7 @@ test('AUDIT: a record carrying both ipns and cid falls back to the snapshot', ()
     { lookup: () => pointerAndSnapshot(), hasVerifiedHead: () => true },
     new ResolutionCache(),
     NOW,
-    { content, diagnostics: true },
+    { content, ipns: pointerResolves, diagnostics: true },
   );
 
   assert.equal(response.status, 200, 'the snapshot must be served, not a 502');
@@ -640,7 +660,9 @@ test('AUDIT: a record carrying both ipns and cid falls back to the snapshot', ()
   // The pointer was tried FIRST and the snapshot second. Serving the snapshot by preferring it
   // would pass the assertions above and reintroduce the defect `SOURCE_ORDER` was reordered to
   // fix: an author republishing weekly into a pointer nobody consults.
-  assert.deepEqual(asked, ['ipns', 'cid']);
+  // By VALUE, because after step 10 both sources reach the content layer as a CID. The pointer's
+  // CID first, the snapshot's second.
+  assert.deepEqual(asked, [LIVE_CID, CID_TEXT]);
 
   // MUST record the fallback, and MUST mark the answer stale. Both are observable only through
   // the diagnostic headers, which is why this request enables them.
@@ -676,22 +698,19 @@ test('AUDIT: a failing pointer with no snapshot still refuses, and says so once'
   const asked: string[] = [];
   const content: ContentPort = {
     fetch: (source) => {
-      asked.push(source.type);
+      asked.push(source.value);
       return { ok: false, error: 'CONTENT_UNAVAILABLE' };
     },
   };
   const response = handleRequest(
     get('/', { host: 'atlas.vayu' }),
-    {
-      lookup: () => live([cborEntry('ipns', 'k51qzi5uqu5dabcdefghijklmnop')]),
-      hasVerifiedHead: () => true,
-    },
+    { lookup: () => live([cborEntry('ipns', POINTER)]), hasVerifiedHead: () => true },
     new ResolutionCache(),
     NOW,
-    { content },
+    { content, ipns: pointerResolves },
   );
   assert.equal(response.status, RESOLVE_ERRORS.CONTENT_UNAVAILABLE.http);
-  assert.deepEqual(asked, ['ipns'], 'one source, one attempt');
+  assert.deepEqual(asked, [LIVE_CID], 'one source, one attempt');
 });
 
 test('AUDIT: a content failure is cached against the content, because the name is unreachable', () => {
@@ -704,22 +723,21 @@ test('AUDIT: a content failure is cached against the content, because the name i
   // Keyed by the source, it is reachable — and it is the truer statement anyway. A CID nobody is
   // serving is not being served to any name that points at it.
   const asked: string[] = [];
-  const pointer = 'k51qzi5uqu5dabcdefghijklmnop';
   const content: ContentPort = {
     fetch: (source) => {
-      asked.push(source.type);
+      asked.push(source.value);
       return { ok: false, error: 'CONTENT_UNAVAILABLE' };
     },
   };
   const cache = new ResolutionCache();
   const registry = {
-    lookup: () => live([cborEntry('ipns', pointer)]),
+    lookup: () => live([cborEntry('cid', CID_BYTES)]),
     hasVerifiedHead: () => true,
   };
 
   const first = handleRequest(get('/', { host: 'atlas.vayu' }), registry, cache, NOW, { content });
   assert.equal(first.status, RESOLVE_ERRORS.CONTENT_UNAVAILABLE.http);
-  assert.equal(cache.negative(`content:ipns:${pointer}`, NOW + 9), 'CONTENT_UNAVAILABLE');
+  assert.equal(cache.negative(`content:cid:${CID_TEXT}`, NOW + 9), 'CONTENT_UNAVAILABLE');
   assert.equal(
     cache.negative('atlas.vayu', NOW + 9),
     null,
@@ -732,11 +750,111 @@ test('AUDIT: a content failure is cached against the content, because the name i
     content,
   });
   assert.equal(second.status, RESOLVE_ERRORS.CONTENT_UNAVAILABLE.http);
-  assert.deepEqual(asked, ['ipns'], 'one fetch for two requests');
+  assert.deepEqual(asked, [CID_TEXT], 'one fetch for two requests');
 
   // Ten seconds, not thirty: a site coming back online recovers quickly.
   handleRequest(get('/', { host: 'atlas.vayu' }), registry, cache, NOW + 10, { content });
-  assert.deepEqual(asked, ['ipns', 'ipns'], 'and after the TTL it is tried again');
+  assert.deepEqual(asked, [CID_TEXT, CID_TEXT], 'and after the TTL it is tried again');
+});
+
+/* -------------------------------------------------------------------------- */
+/* RESOLUTION.md step 10 — pointer resolution, which had no implementation     */
+/* -------------------------------------------------------------------------- */
+
+test('a name carrying only a pointer is told its pointer failed, not that its record is empty', () => {
+  // 1421 `NO_USABLE_RECORD` says "this name points at nothing fetchable" and 1505
+  // `IPNS_UNRESOLVED` says "this site's pointer could not be resolved". A record carrying an
+  // `ipns` entry got the first, and it is false: the record is exactly what HOSTING.md tells
+  // publishers to write, and `SOURCE_ORDER` puts that entry FIRST. The publisher reading 1421
+  // goes and fixes a record that was never wrong.
+  //
+  // 1505 had no producer anywhere in the codebase before this — a catalogue entry, a message, an
+  // HTTP status and a conformance vector, and no line of code that could ever return it.
+  const content: ContentPort = { fetch: () => assert.fail('nothing is fetchable without a CID') };
+  const response = handleRequest(
+    get('/', { host: 'atlas.vayu' }),
+    { lookup: () => live([cborEntry('ipns', POINTER)]), hasVerifiedHead: () => true },
+    new ResolutionCache(),
+    NOW,
+    { content },
+  );
+  assert.equal(response.status, RESOLVE_ERRORS.IPNS_UNRESOLVED.http);
+});
+
+test('a resolved pointer is served, and the header says which snapshot it landed on', () => {
+  // `X-VayuWeb-CID` was `type === 'cid' ? value : null`, so a page served through a pointer
+  // carried an empty CID header — the one field that tells an operator which snapshot a living
+  // pointer resolved to, blank in exactly the case where it is not already in the record.
+  const asked: Array<{ type: string; value: string }> = [];
+  const content: ContentPort = {
+    fetch: (source) => {
+      asked.push({ ...source });
+      return { ok: true, bytes: new Uint8Array([1]), contentType: 'text/html; charset=utf-8' };
+    },
+  };
+  const response = handleRequest(
+    get('/', { host: 'atlas.vayu' }),
+    { lookup: () => live([cborEntry('ipns', POINTER)]), hasVerifiedHead: () => true },
+    new ResolutionCache(),
+    NOW,
+    { content, ipns: { resolve: (p) => (p === POINTER ? CID_TEXT : null) }, diagnostics: true },
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('x-vayuweb-cid'), CID_TEXT);
+  assert.equal(response.headers.get('x-vayuweb-source'), 'ipns', 'the record said ipns');
+  assert.deepEqual(
+    asked,
+    [{ type: 'cid', value: CID_TEXT }],
+    'after step 10 there is only a CID, so a content layer never needs to know what a pointer is',
+  );
+});
+
+test('a pointer that will not resolve falls back to the snapshot the publisher supplied', () => {
+  // The arrangement HOSTING.md recommends, working end to end for the first time: a pointer for
+  // the living site and a `cid` for "the last snapshot the owner is willing to have served if the
+  // pointer cannot be resolved".
+  const content: ContentPort = {
+    fetch: () => ({ ok: true, bytes: new Uint8Array([2]), contentType: 'text/plain' }),
+  };
+  const response = handleRequest(
+    get('/', { host: 'atlas.vayu' }),
+    {
+      lookup: () => live([cborEntry('ipns', POINTER), cborEntry('cid', CID_BYTES)]),
+      hasVerifiedHead: () => true,
+    },
+    new ResolutionCache(),
+    NOW,
+    { content, ipns: { resolve: () => null }, diagnostics: true },
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('x-vayuweb-source'), 'cid');
+  assert.equal(response.headers.get('x-vayuweb-fallbacks'), 'ipns');
+  assert.equal(response.headers.get('x-vayuweb-stale'), '1', 'a fallback is not the live answer');
+});
+
+test('a pointer that will not resolve is not re-resolved for ten seconds', () => {
+  // 1505 is one of the two ten-second codes, and until step 10 existed it was a TTL for an error
+  // nothing produced.
+  let attempts = 0;
+  const content: ContentPort = { fetch: () => ({ ok: false, error: 'CONTENT_UNAVAILABLE' }) };
+  const cache = new ResolutionCache();
+  const registry = {
+    lookup: () => live([cborEntry('ipns', POINTER)]),
+    hasVerifiedHead: () => true,
+  };
+  const ipns = {
+    resolve: () => {
+      attempts += 1;
+      return null;
+    },
+  };
+
+  handleRequest(get('/', { host: 'atlas.vayu' }), registry, cache, NOW, { content, ipns });
+  assert.equal(cache.negative(`content:ipns:${POINTER}`, NOW + 9), 'IPNS_UNRESOLVED');
+  handleRequest(get('/', { host: 'atlas.vayu' }), registry, cache, NOW + 9, { content, ipns });
+  assert.equal(attempts, 1, 'one resolution attempt for two requests');
+  handleRequest(get('/', { host: 'atlas.vayu' }), registry, cache, NOW + 10, { content, ipns });
+  assert.equal(attempts, 2, 'and it is tried again once the TTL passes');
 });
 
 test('AUDIT: an integrity failure is never cached, against a name or against a CID', () => {
@@ -785,7 +903,7 @@ test('AUDIT: the resolver does not fall back across a content-integrity failure'
   const asked: string[] = [];
   const content: ContentPort = {
     fetch: (source) => {
-      asked.push(source.type);
+      asked.push(source.value);
       return { ok: false, error: 'CONTENT_INTEGRITY' };
     },
   };
@@ -794,10 +912,10 @@ test('AUDIT: the resolver does not fall back across a content-integrity failure'
     { lookup: () => pointerAndSnapshot(), hasVerifiedHead: () => true },
     new ResolutionCache(),
     NOW,
-    { content, diagnostics: true },
+    { content, ipns: pointerResolves, diagnostics: true },
   );
   assert.equal(response.status, RESOLVE_ERRORS.CONTENT_INTEGRITY.http);
-  assert.deepEqual(asked, ['ipns'], 'the cid must NOT have been tried after bad bytes');
+  assert.deepEqual(asked, [LIVE_CID], 'the cid must NOT have been tried after bad bytes');
   // A refusal carries no diagnostic headers at all — not an empty one. LOCAL-SURFACE.md 2.4:
   // a refusal must not be distinguishable in a way that confirms VayuWeb is running, and an
   // `x-vayuweb-*` header on a 502 confirms it by existing. (Asserting the empty string was the

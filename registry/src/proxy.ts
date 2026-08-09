@@ -176,6 +176,34 @@ export interface ProxyOptions {
    * pretending: an empty body is a truthful "the name resolves and nothing here serves it".
    */
   readonly content?: ContentPort;
+  /**
+   * Step 10's pointer resolution, injected for the same reason the content layer is.
+   *
+   * Absent means this resolver cannot resolve a pointer, and the honest answer for an `ipns`
+   * source is then 1505 `IPNS_UNRESOLVED` — "this site's pointer could not be resolved", which is
+   * true — rather than 1421 `NO_USABLE_RECORD`, which says the name points at nothing fetchable
+   * and is false about a perfectly good pointer. The distinction matters to the one person who
+   * reads it: 1421 tells a publisher their record is wrong, and their record is fine.
+   */
+  readonly ipns?: IpnsPort;
+}
+
+/**
+ * RESOLUTION.md step 10: "For `ipns`, resolve the pointer to a CID; on failure return 1505."
+ *
+ * An interface rather than an implementation, and not because implementing it is hard. Resolving
+ * an IPNS name means the IPFS routing stack, and `security.yml` caps this package at 40 resolved
+ * dependencies — installing Helia took it to 601 and the gate refused, as designed. So this is the
+ * same shape Hyperswarm has in `swarm.ts`: a seam the protocol is defined against, with the
+ * network binding outside it.
+ *
+ * Synchronous, like {@link ContentPort} and for the same reason: the fallback across sources is a
+ * loop with an ordering the specification fixes, and an await inside it would let a caller
+ * interleave sources the ordering exists to keep apart.
+ */
+export interface IpnsPort {
+  /** The CID this pointer names, in the text form a content layer takes, or null. */
+  resolve(pointer: string): string | null;
 }
 
 /** A response with nothing in it, shared so that no caller invents its own empty body. */
@@ -433,14 +461,44 @@ export function handleRequest(
         continue;
       }
 
-      const fetched = options.content.fetch({ type, value }, pathOf(request.target));
+      // **Step 10, which had no implementation and left 1505 with no producer.** `SOURCE_ORDER`
+      // puts `ipns` FIRST — HOSTING.md tells publishers to carry a pointer for the living site and
+      // a `cid` for the snapshot to serve when the pointer cannot be resolved — so the entry the
+      // specification prefers was the one nothing could act on. A record carrying only a pointer
+      // answered 1421 `NO_USABLE_RECORD`, which tells its publisher the record is wrong.
+      //
+      // After this step there is only a CID, which is what step 11 fetches. A content layer
+      // therefore never needs to know what a pointer is.
+      let addressed = value;
+      if (type === 'ipns') {
+        const resolved = options.ipns?.resolve(value) ?? null;
+        if (resolved === null) {
+          failure = 'IPNS_UNRESOLVED';
+          cache.putNegative(contentKey, failure, now);
+          fallbacks.push(type);
+          continue;
+        }
+        addressed = resolved;
+      }
+
+      const fetched = options.content.fetch(
+        { type: 'cid', value: addressed },
+        pathOf(request.target),
+      );
       if (fetched.ok) {
         headers.set('content-type', fetched.contentType);
         // Handed on unchanged. There is no encoding step here any more, which is the point: the
         // two that used to exist did not agree with each other.
         body = fetched.bytes;
+        // The ORIGINAL type, because `X-VayuWeb-Source` enumerates `cid`, `ipns`, `peer` and a
+        // reader asking which kind of entry served them is asking about the record, not about
+        // what step 10 turned it into.
         source = type;
-        servedCid = type === 'cid' ? value : null;
+        // The CID actually addressed, which after a pointer resolution is not in the record at
+        // all. It was `type === 'cid' ? value : null`, so an ipns-served page carried an empty
+        // `X-VayuWeb-CID` — the one header that would tell an operator which snapshot a live
+        // pointer had landed on.
+        servedCid = addressed;
         served = true;
         break;
       }
@@ -453,7 +511,7 @@ export function handleRequest(
       // here, and would be refused by the table if it did. That refusal is the one that matters
       // most: an integrity failure cached against a CID is a way to make a site unreachable to
       // everyone behind this resolver by getting one bad copy through once.
-      cache.putNegative(`content:${type}:${value}`, fetched.error, now);
+      cache.putNegative(contentKey, fetched.error, now);
       failure = fetched.error;
       fallbacks.push(type);
     }

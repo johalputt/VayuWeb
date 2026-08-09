@@ -25,7 +25,8 @@ for byte, is what this package is mostly made of.
 | Local append-only log and index (`src/store.ts`) | Implemented, tested — **not** Hypercore |
 | Convergence and equivocation detection (`src/converge.ts`) | Implemented, tested |
 | Equivocation ledger: record and forward (`src/equivocation.ts`) | Implemented, tested |
-| Resolution algorithm (`src/resolve.ts`) | Implemented, tested — no network; steps 11-12 are ports |
+| Resolution algorithm (`src/resolve.ts`) | Implemented, tested — no network; steps 10-12 are ports |
+| Resolution caches and TTL policy (`src/cache.ts`) | Implemented, tested |
 | Command-line tool (`src/cli.ts`, `bin/`) | Implemented |
 | Conformance vectors ([`../conformance/vectors.json`](../conformance/vectors.json)) | Registry rules only |
 | Hypercore log and Hyperbee index | Not started |
@@ -60,6 +61,8 @@ vw vectors                      # run the conformance suite
 
 vw sync     --log ./log --listen 4747          # or --connect host:port
 vw equivocations --log ./log                   # what this peer knows about, and from whom
+
+vw serve    --log ./log --site ./public --pointer k51qzi5uqu5d…   # test the ipns-first path
 ```
 
 Exit codes: `0` accepted, `1` rejected or error, `2` deferred for clock skew, `3` name not live.
@@ -81,6 +84,20 @@ vw difficulty --log ./log --name atlas.vayu
 
 `--bits` may raise the difficulty — over-payment is valid — but a value below the requirement is
 refused up front rather than after the work, since the verifier would reject it anyway.
+
+### `ipns` is resolved, and `--pointer` is a local declaration
+
+`SOURCE_ORDER` prefers an `ipns` pointer over a `cid` snapshot, because HOSTING.md tells publishers
+to carry both: the pointer for the living site, the snapshot for when the pointer cannot be
+resolved. Step 10 turns the pointer into a CID before step 11 fetches it, so a content layer never
+needs to know what a pointer is, and a pointer that will not resolve is 1505 `IPNS_UNRESOLVED` —
+not 1421, which says the name points at nothing fetchable and would be false.
+
+Resolving an IPNS name over the network means the IPFS routing stack, which this package
+deliberately does not depend on; `IpnsPort` is the seam, the same shape Hyperswarm has in
+`swarm.ts`. `serve --pointer <key>` declares one local answer — "the record I am testing carries
+this pointer, and it means the site I just published" — which is what a publisher checking that
+path before they publish actually has. Every other pointer resolves to null.
 
 ### Equivocation is recorded, and punished by nothing
 

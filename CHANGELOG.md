@@ -10,6 +10,35 @@ it.
 
 ## [Unreleased]
 
+### Added — step 10, so the entry the specification prefers can finally be acted on
+
+`SOURCE_ORDER` puts `ipns` first, and HOSTING.md tells publishers to carry a pointer for the living
+site beside a `cid` for the snapshot to serve when the pointer cannot be resolved. Step 10 —
+"for `ipns`, resolve the pointer to a CID; on failure return 1505" — had no implementation, and
+1505 `IPNS_UNRESOLVED` had no producer anywhere: a catalogue entry, a message, an HTTP status and a
+conformance vector, and no line of code that could return it.
+
+What a record carrying only a pointer got instead was 1421 `NO_USABLE_RECORD` — "this name points
+at nothing fetchable" — which is false about a record that is exactly what the specification
+recommends. The publisher reading it goes and fixes something that was never wrong.
+
+Resolution now happens before the fetch, so after step 10 there is only a CID and a content layer
+never needs to know what a pointer is. `IpnsPort` is a seam rather than an implementation, for the
+same reason `swarm.ts` takes a Hyperswarm instead of importing one: the IPFS routing stack is 601
+resolved packages and `security.yml` caps this one at 40. `serve --pointer <key>` declares a single
+local answer — what a publisher checking the `ipns`-first path before they publish actually has —
+and every other pointer resolves to null, which is 1505 and is true.
+
+Two smaller things fell out of it. `X-VayuWeb-CID` was `type === 'cid' ? value : null`, so a page
+served through a pointer carried an empty CID header — blank in exactly the case where the CID is
+not already in the record and the header is the only way to see which snapshot a living pointer
+landed on. And 1505, being one of the two ten-second codes, now has both a producer and a reader.
+
+`registry/scripts/acceptance-browser.mjs` proves it through the whole stack: a second name carrying
+**only** a pointer, resolved by the shipping CLI's wiring rather than a test double, rendered by
+stock Chromium. With no `cid` beside it there is nothing to fall back to, so that page loading is
+the pointer path and cannot be anything else. 15/15.
+
 ### Added — the resolution cache, which covered one of five codes and had no positive half
 
 RESOLUTION.md's caching policy names five cacheable error codes at three TTLs, a positive record

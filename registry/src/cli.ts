@@ -35,7 +35,7 @@ import { verify, predecessorFrom, type RegistryView } from './verify.ts';
 import { serveControl, serveProxy } from './serve.ts';
 import { drivePeer, SWARM_LIMITS, type PeerOutcome } from './swarm.ts';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
-import { sourceValueOf, type ContentPort } from './proxy.ts';
+import { sourceValueOf, type ContentPort, type IpnsPort } from './proxy.ts';
 import { importSite, type SiteFile } from './unixfs.ts';
 import { cidBytes, decodeCid } from './content.ts';
 import { memorySource } from './blockstore.ts';
@@ -254,7 +254,7 @@ const FLAGS_FOR: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['difficulty', new Set(['log', 'name', 'at'])],
   ['verify', new Set(['log', 'record', 'at'])],
   ['vectors', new Set<string>()],
-  ['serve', new Set(['log', 'port', 'socket', 'site'])],
+  ['serve', new Set(['log', 'port', 'socket', 'site', 'pointer'])],
   ['sync', new Set(['log', 'listen', 'connect', 'address'])],
 ]);
 
@@ -820,7 +820,9 @@ export function siteFilesFor(directory: string): SiteFile[] {
  * Returns null when no `--site` was given, which leaves the proxy answering a bare 200 -- the
  * truthful "this name resolves and nothing here serves it".
  */
-function siteContentOf(directory: string | undefined): ContentPort | null {
+function siteContentOf(
+  directory: string | undefined,
+): { content: ContentPort; root: string } | null {
   if (directory === undefined) return null;
 
   const files = siteFilesFor(directory);
@@ -830,10 +832,11 @@ function siteContentOf(directory: string | undefined): ContentPort | null {
   out(`published ${files.length} file(s) from ${directory}`);
   out(`  root CID  ${built.root}`);
 
-  return {
+  const content: ContentPort = {
     fetch: (chosen, path) => {
-      // Only a `cid` entry is served here. An `ipns` pointer needs a resolution step this
-      // command does not perform, and answering one anyway would be claiming a capability.
+      // Kept although step 10 now hands this port a CID and nothing else: `ContentPort` is a
+      // published interface, and a guard at an interface boundary is not the same thing as a
+      // branch nobody can reach from inside one module.
       if (chosen.type !== 'cid') return { ok: false, error: 'NO_USABLE_RECORD' };
       if (chosen.value !== built.root) return { ok: false, error: 'CONTENT_UNAVAILABLE' };
       const candidates = path.endsWith('/') ? [`${path}index.html`] : [path, `${path}/index.html`];
@@ -848,6 +851,29 @@ function siteContentOf(directory: string | undefined): ContentPort | null {
       return { ok: false, error: 'PATH_NOT_FOUND' };
     },
   };
+  return { content, root: built.root };
+}
+
+/**
+ * A local, operator-declared answer for one IPNS pointer.
+ *
+ * **Not a network resolution, and the difference is the whole of what this is.** Resolving an IPNS
+ * name means the IPFS routing stack, which this package deliberately does not depend on. What
+ * `--pointer` says is "the record I am testing carries this pointer, and it means the site I just
+ * published from `--site`" — which is what a publisher needs to check the `ipns`-first path before
+ * they publish, and it is exactly one mapping the operator typed.
+ *
+ * Every other pointer resolves to null, which is 1505 and is true: this resolver could not resolve
+ * it. Returning the published root for any pointer at all would be the interesting lie — a
+ * resolver that serves whatever it has to whatever it is asked for.
+ */
+export function pointerFor(declared: string | undefined, root: string | null): IpnsPort | null {
+  if (declared === undefined) return null;
+  if (root === null) {
+    throw new UsageError('--pointer names what --site publishes, so it needs --site too');
+  }
+  out(`  pointer   ${declared} -> ${root} (declared locally, not resolved over a network)`);
+  return { resolve: (asked) => (asked === declared ? root : null) };
 }
 
 /**
@@ -1002,6 +1028,7 @@ async function cmdServe(args: Args): Promise<number> {
   // through the same VERIFIED traversal a peer's blocks would, so this is the content path rather
   // than a shortcut around it -- the only thing it skips is the network.
   const site = siteContentOf(args.flags.get('site'));
+  const pointer = pointerFor(args.flags.get('pointer'), site?.root ?? null);
 
   let diagnostics = false;
   const control = await serveControl({
@@ -1039,7 +1066,8 @@ async function cmdServe(args: Args): Promise<number> {
       get diagnostics() {
         return diagnostics;
       },
-      ...(site === null ? {} : { content: site }),
+      ...(site === null ? {} : { content: site.content }),
+      ...(pointer === null ? {} : { ipns: pointer }),
     },
     ports: {
       lookup: (label, tld) => store.lookup(label, tld)?.current.record ?? null,
@@ -1092,7 +1120,7 @@ const USAGE = `vayuweb-registry — local name registry (Phase 1: no network)
   difficulty --log <file> --name <label.tld> [--at <unix>]
   verify     --log <file> --record <file containing hex> [--at <unix>]
   vectors
-  serve      --log <file> [--port <n>] [--socket <path>] [--site <dir>]
+  serve      --log <file> [--port <n>] [--socket <path>] [--site <dir>] [--pointer <ipns>]
   sync       --log <file> (--listen <port> [--address <ip>] | --connect <host:port>)
 
 Flags are checked against the command that was typed, not against the tool as a whole, so
