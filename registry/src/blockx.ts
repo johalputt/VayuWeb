@@ -115,6 +115,21 @@ export interface BlockDone {
 
 export type BlockMessage = BlockHello | BlockWant | Blocks | BlockDone;
 
+/**
+ * Every block-exchange message type, as a value, with one line on what it carries.
+ *
+ * Same shape and same reason as {@link import('./replicate.ts').MESSAGE_TYPES}: a `Record` keyed
+ * by the union is checked in both directions, so a type added here without a conformance vector
+ * fails the coverage test rather than passing unnoticed. This suite happened to have a positive
+ * vector for all four; the guard is what keeps that true rather than a fact about one afternoon.
+ */
+export const BLOCK_MESSAGE_TYPES: Record<BlockMessage['t'], string> = {
+  BHELLO: 'the opening claim: protocol version and the largest message this peer will accept',
+  BWANT: 'a bounded set of block identifiers, each named at most once',
+  BLOCKS: 'block bytes, verified by the receiver against the identifier that referred them',
+  BDONE: 'this peer has nothing further, carrying no field that could vary with what it holds',
+};
+
 export type BlockExchangeRejection =
   | 'TOO_LARGE'
   | 'NON_CANONICAL'

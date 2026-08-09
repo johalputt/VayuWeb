@@ -18,7 +18,7 @@ import {
 } from './vectors.ts';
 import { resolveConflict, type Candidate } from './converge.ts';
 import { resolveName } from './resolve.ts';
-import { decodeMessage, verifyEquivocation, ReplicationError } from './replicate.ts';
+import { decodeMessage, verifyEquivocation, MESSAGE_TYPES, ReplicationError } from './replicate.ts';
 import { recordHashFromBytes } from './domain.ts';
 import { compareBytes, decode, encode, type CborMap, type CborValue } from './cbor.ts';
 import {
@@ -30,7 +30,12 @@ import {
 } from './verify.ts';
 import { parseRecordBytes } from './record.ts';
 import { baseBits, requiredBits, rateWindow, powSalt, tagSatisfies, RATE_FLOOR } from './pow.ts';
-import { BlockExchangeError, decodeBlockMessage, encodeBlockMessage } from './blockx.ts';
+import {
+  BlockExchangeError,
+  BLOCK_MESSAGE_TYPES,
+  decodeBlockMessage,
+  encodeBlockMessage,
+} from './blockx.ts';
 
 const ARTIFACT = fileURLToPath(new URL('../../conformance/vectors.json', import.meta.url));
 
@@ -244,6 +249,86 @@ test('every replication vector decodes, or is refused with the code the specific
     }
   }
   assert.deepEqual(failures, []);
+});
+
+test('every wire message has a vector that DECODES, not only ones that are refused', () => {
+  // The gap the rejection-coverage test above is structurally blind to. That one derives its
+  // expectations from `VERIFY_REJECTIONS`, so it can tell you a rejection code has no vector — and
+  // a message type with no vector produces no rejection to be missing. Three of the five had none:
+  // `RECORDS`, `CHECKPOINT` and `EQUIVOCATION`. A second implementation could pass the entire
+  // suite having never once decoded the message that moves records, the message that is the whole
+  // of what a light client is handed, or the report REPLICATION.md 6.3 makes a MUST.
+  //
+  // Derived from the union rather than listed here, so adding a sixth message type fails this
+  // instead of quietly enlarging the blind spot.
+  const decoded = new Set(
+    buildReplicationVectors()
+      .filter((v) => v.expect.decode === 'ok')
+      .map((v) => (v.expect.decode === 'ok' ? v.expect.type : '')),
+  );
+  const missing = Object.keys(MESSAGE_TYPES).filter((type) => !decoded.has(type));
+  assert.deepEqual(missing, [], `message types with no decoding vector: ${missing.join(', ')}`);
+
+  // And nothing is pinned that is not a message: a vector naming a type the protocol does not have
+  // is a vector a conforming implementation must fail.
+  const unknown = [...decoded].filter((type) => !(type in MESSAGE_TYPES));
+  assert.deepEqual(unknown, [], `vectors for types that are not messages: ${unknown.join(', ')}`);
+});
+
+test('every block-exchange message has a vector that decodes, for the same reason', () => {
+  const decoded = new Set(
+    buildBlockExchangeVectors()
+      .filter((v) => v.expect.decode === 'ok')
+      .map((v) => (v.expect.decode === 'ok' ? v.expect.type : '')),
+  );
+  const missing = Object.keys(BLOCK_MESSAGE_TYPES).filter((type) => !decoded.has(type));
+  assert.deepEqual(
+    missing,
+    [],
+    `block message types with no decoding vector: ${missing.join(', ')}`,
+  );
+  const unknown = [...decoded].filter((type) => !(type in BLOCK_MESSAGE_TYPES));
+  assert.deepEqual(
+    unknown,
+    [],
+    `vectors for types that are not block messages: ${unknown.join(', ')}`,
+  );
+});
+
+test('the RECORDS vector carries a record a runner can go on to verify', () => {
+  // A `RECORDS` whose payload is arbitrary bytes decodes perfectly well, so a vector built that
+  // way would pin the envelope and nothing else — and the envelope is the part nobody gets wrong.
+  // What a second implementation has to agree about is what it does with the contents.
+  const vector = buildReplicationVectors().find((v) => v.name === 'replicate/records-one');
+  assert.ok(vector, 'the vector must exist for this to mean anything');
+  const message = decodeMessage(fromHex(vector.message));
+  assert.equal(message.t, 'RECORDS');
+  if (message.t !== 'RECORDS') return;
+  assert.equal(message.recs.length, 1);
+
+  const carried = message.recs[0]!;
+  const record = parseRecordBytes(carried);
+  // A registry holding nothing, which is the state a first registration arrives into.
+  //
+  // `powVerified` is true for the reason the record suite states it per vector rather than solving
+  // one: an Argon2id search at 64 MiB per evaluation, repeated for every vector, is a suite nobody
+  // runs. The proof rules have their own suite — `buildPowVectors` — where the difficulty is the
+  // subject rather than a precondition. This vector's claim is that the payload of a `RECORDS` is
+  // a record the record rules accept, and that is what is checked here.
+  const empty: RegistryView = {
+    current: () => null,
+    fullyReleased: () => true,
+    revoked: () => false,
+    powVerified: () => true,
+  };
+  // Verified at the record's own `notBefore`, for the reason `Store.open` replays that way: the
+  // clock a record is judged against is the one it claims, not the one the test happens to run at.
+  const verdict = verify(carried, empty, record.notBefore);
+  assert.equal(
+    verdict.outcome,
+    'accept',
+    'a runner decoding this must be able to carry straight on into the record rules',
+  );
 });
 
 test('every equivocation vector is judged the same way by every implementation', () => {

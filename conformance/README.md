@@ -96,6 +96,20 @@ The file carries seven suites: `vectors` holds 73 record-verification vectors, a
 pin what implementations must *agree* about rather than what one of them accepts, which is where a
 fork lives.
 
+**Every wire message has a vector that decodes**, in `replication` and in `blockExchange` alike,
+and a test derives that from the message types themselves rather than from a list. Three of the
+five replication messages had none for a long time — `RECORDS`, `CHECKPOINT` and `EQUIVOCATION` —
+so an implementation could pass the whole suite having never once decoded the message that moves
+records, the message that is the whole of what a light client is handed, or the report
+REPLICATION.md 6.3 makes a MUST. The coverage test that was supposed to notice derives its
+expectations from the *rejection* codes, and a message type with no vector produces no rejection to
+be missing: it could not see the gap in principle, not merely in practice.
+
+The `RECORDS` vector carries a real record rather than filler, and a test verifies it as a record.
+A `RECORDS` whose payload is arbitrary bytes decodes perfectly well, so a vector built that way
+pins the envelope — the part nobody gets wrong — and says nothing about what a runner does next,
+which is the only part that matters.
+
 **`blockExchange` is the one suite that is not stable**, and it is marked so in the artifact's own
 notes. VWIP-0005 is a Draft; its encodings are generated rather than transcribed precisely so the
 proposal carries executed bytes, but a Draft may still change them. Do not build against it

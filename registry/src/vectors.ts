@@ -1246,6 +1246,24 @@ export function buildReplicationVectors(): ReplicationVector[] {
   );
   const unknown = encode(new Map<string | Uint8Array, CborValue>([['t', 'GOSSIP']]));
 
+  // The three that had no positive vector. A suite that only shows a message type being REFUSED
+  // lets a second implementation pass having never once decoded it — and `RECORDS` is how records
+  // move, `CHECKPOINT` is the whole of what a light client is given, and `EQUIVOCATION` is the
+  // report 6.3 makes a MUST. Two peers agreeing about the two easy messages is not agreement.
+  const records = encodeMessage({ t: 'RECORDS', from: 3, recs: [registration()] });
+  const checkpoint = encodeMessage({
+    t: 'CHECKPOINT',
+    len: 7,
+    treeRoot: new Uint8Array(32).fill(0x11),
+    indexRoot: new Uint8Array(32).fill(0x22),
+    liveNames: 4,
+  });
+  const equivocation = encodeMessage({
+    t: 'EQUIVOCATION',
+    a: registration(),
+    b: registration({ records: [entry('txt', 'v=vayuweb1;two')] }),
+  });
+
   return [
     {
       name: 'replicate/hello',
@@ -1258,6 +1276,29 @@ export function buildReplicationVectors(): ReplicationVector[] {
       rule: 'REPLICATION.md 5: WANT.count is bounded at 256',
       message: toHex(want),
       expect: { decode: 'ok', type: 'WANT' },
+    },
+    {
+      // Carrying a REAL record, not filler. A `RECORDS` whose payload is arbitrary bytes decodes
+      // perfectly, so a vector built that way pins the envelope and says nothing about what a
+      // runner does next — and what it does next is the only part that matters.
+      name: 'replicate/records-one',
+      rule: 'REPLICATION.md 4.3: RECORDS carries the encodings for a requested range',
+      message: toHex(records),
+      expect: { decode: 'ok', type: 'RECORDS' },
+    },
+    {
+      name: 'replicate/checkpoint',
+      rule: 'REPLICATION.md 7: a CHECKPOINT states a length, both roots and the live-name count',
+      message: toHex(checkpoint),
+      expect: { decode: 'ok', type: 'CHECKPOINT' },
+    },
+    {
+      // The envelope, which the equivocation suite does not pin: that suite judges a PAIR and
+      // never asks whether the message carrying it decodes.
+      name: 'replicate/equivocation-report',
+      rule: 'REPLICATION.md 6.3: a peer SHOULD forward the evidence, which means encoding it',
+      message: toHex(equivocation),
+      expect: { decode: 'ok', type: 'EQUIVOCATION' },
     },
     {
       name: 'replicate/batch-over-the-limit',

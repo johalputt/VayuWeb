@@ -10,6 +10,25 @@ it.
 
 ## [Unreleased]
 
+### Fixed — three of the five wire messages had no vector a second implementation could pass
+
+The conformance artifact is the thing a *second* implementation runs, and `RECORDS`, `CHECKPOINT`
+and `EQUIVOCATION` had no vector that decodes — only `HELLO` and `WANT` did, plus a `RECORDS`
+vector that exists to be **refused**. So an implementation could pass the entire suite having never
+once successfully decoded the message that moves records, the message that is the whole of what a
+light client is handed, or the report REPLICATION.md 6.3 makes a MUST.
+
+The coverage test that was supposed to catch this could not, in principle rather than by accident:
+it derives its expectations from `VERIFY_REJECTIONS`, and a message type with no vector produces no
+rejection to be missing. The new one derives from the message types themselves — `MESSAGE_TYPES`
+and `BLOCK_MESSAGE_TYPES` are `Record`s keyed by the unions, so a type added without an entry fails
+to compile and a type with an entry but no vector fails the test.
+
+The `RECORDS` vector carries a real record, and a test verifies it *as a record*. A `RECORDS` whose
+payload is arbitrary bytes decodes perfectly well, so a vector built that way pins the envelope —
+the part nobody gets wrong — and says nothing about what a runner does next, which is the only part
+that matters.
+
 ### Added — step 10, so the entry the specification prefers can finally be acted on
 
 `SOURCE_ORDER` puts `ipns` first, and HOSTING.md tells publishers to carry a pointer for the living

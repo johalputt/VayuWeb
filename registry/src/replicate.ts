@@ -126,6 +126,29 @@ export interface EquivocationMessage {
 
 export type Message = Hello | Want | Records | CheckpointMessage | EquivocationMessage;
 
+/**
+ * Every message type, as a value, with one line on what it carries.
+ *
+ * A `Record` keyed by the union rather than an array, because TypeScript checks an object literal
+ * against it in **both** directions: a member of {@link Message} with no entry here fails to
+ * compile, and an entry naming something that is not a message fails too. An array would catch
+ * only the second, and the second is not the failure mode — the failure mode is a type added to
+ * the union and forgotten everywhere else.
+ *
+ * It exists because the conformance artifact had positive vectors for two of these five. A second
+ * implementation could pass the whole suite having never successfully decoded a `RECORDS`, a
+ * `CHECKPOINT` or an `EQUIVOCATION`, which is three of the five things two peers have to agree
+ * about — and the coverage test could not see it, because it derived its expectations from the
+ * *rejection* codes and a missing message type produces no rejection to be missing.
+ */
+export const MESSAGE_TYPES: Record<Message['t'], string> = {
+  HELLO: 'the opening claim: protocol version, log length, tree root',
+  WANT: 'a bounded range of the REMOTE log, by index',
+  RECORDS: 'record encodings, which the receiver verifies and nobody else vouches for',
+  CHECKPOINT: 'evidence for a light client to weigh, never an instruction to a session',
+  EQUIVOCATION: 'two records at one seq by one owner, verifiable from the pair alone',
+};
+
 export type ReplicationRejection =
   | 'TOO_LARGE'
   | 'NON_CANONICAL'
