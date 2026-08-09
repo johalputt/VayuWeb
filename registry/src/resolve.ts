@@ -149,12 +149,30 @@ export interface ParsedHost {
   readonly tld: string;
 }
 
+/**
+ * What a resolution recorded about itself.
+ *
+ * **`stale` was here and is gone.** It was declared, initialised to `false`, and assigned by
+ * nothing — the only reader OR'd it with the fallback count, so the header it fed was driven
+ * entirely by that count and the field was dead weight.
+ *
+ * The rule it existed for is RESOLUTION.md's: "when the registry is unreachable the resolver MAY
+ * serve a record up to 600 seconds past its TTL […] It MUST record the staleness". That is a MAY,
+ * and it is not implemented — deliberately, because it would have no reachable caller here. This
+ * resolver's registry is a local log opened once at startup, so "unreachable" is a state it cannot
+ * enter mid-run: the length it derives its verified head from cannot fall. Building the path
+ * anyway would be a mechanism with no way to run it, which is the defect this codebase keeps
+ * finding rather than one to add on purpose.
+ *
+ * The other kind of staleness — a source fallback, which RESOLUTION.md says MUST mark the answer
+ * stale — is implemented, is where `X-VayuWeb-Stale` comes from, and lives in {@link fallbacks}
+ * where a reader can see what was abandoned rather than only that something was.
+ */
 export interface Diagnostics {
   readonly name: string;
   readonly seq: number | null;
   readonly source: SourceType | null;
   readonly resolvedFrom: 'cache' | 'registry' | null;
-  readonly stale: boolean;
   /** Sources tried and abandoned, in order. Recorded even when headers are off. */
   readonly fallbacks: readonly SourceType[];
   readonly aliasHops: number;
@@ -207,7 +225,6 @@ const emptyDiagnostics = (name: string): Diagnostics => ({
   seq: null,
   source: null,
   resolvedFrom: null,
-  stale: false,
   fallbacks: [],
   aliasHops: 0,
 });

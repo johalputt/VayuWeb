@@ -602,3 +602,41 @@ test('a declared path may not climb out of the tree, or start outside it', () =>
   // two implementations end up serving different documents for the same site.
   assert.equal(parseManifest(asManifest('{"version":1,"index":"a/b.html"}'))?.index, 'a/b.html');
 });
+
+/* -------------------------------------------------------------------------- */
+/* Step 7 — what a resolver with no registry may say                          */
+/* -------------------------------------------------------------------------- */
+
+test('I ask a resolver that has no registry, and it tells me nobody owns the name', () => {
+  // The wrong code told to the wrong person, again. A node started against a log file that does
+  // not exist answered 1404 — "No one has registered this name" — which is a definite claim about
+  // the GLOBAL namespace made from a local file with nothing in it. No resolver can know that, and
+  // the one making the claim knows least of all: it has not seen a single record.
+  //
+  // Step 7: "if the log has never synchronised (no verified head), return 1502
+  // REGISTRY_UNAVAILABLE." The two answers send a reader somewhere different — 1404 says the name
+  // is free and invites them to take it, 1502 says come back when this resolver has caught up.
+  const unsynced = ports({}, false);
+  assert.equal(code(resolveName('atlasobservatory.vayu', unsynced, NOW)), 'REGISTRY_UNAVAILABLE');
+
+  // And a resolver that HAS a registry still answers 1404 for a name nobody holds, which is the
+  // fact it is entitled to state.
+  const synced = ports({}, true);
+  assert.equal(code(resolveName('atlasobservatory.vayu', synced, NOW)), 'NAME_NOT_FOUND');
+});
+
+test('the diagnostics carry no field nothing can set', () => {
+  // `stale` was declared, initialised to false, and assigned by nothing; the only reader OR'd it
+  // with the fallback count, so the header it fed came entirely from that count. A field that
+  // cannot be true is a field a reader believes means something.
+  const outcome = resolveName('atlasobservatory.vayu', ports({}, false), NOW);
+  assert.equal('stale' in outcome.diagnostics, false);
+  assert.deepEqual(Object.keys(outcome.diagnostics).sort(), [
+    'aliasHops',
+    'fallbacks',
+    'name',
+    'resolvedFrom',
+    'seq',
+    'source',
+  ]);
+});

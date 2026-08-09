@@ -32,6 +32,7 @@ import { TERM_SECONDS, SETTLEMENT_SECONDS } from './verify.ts';
 import { stateAt } from './lifecycle.ts';
 import { buildVectors, fromHex } from './vectors.ts';
 import { verify, predecessorFrom, type RegistryView } from './verify.ts';
+import type { ResolverPorts } from './resolve.ts';
 import { serveControl, serveProxy } from './serve.ts';
 import { drivePeer, SWARM_LIMITS, type PeerOutcome } from './swarm.ts';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
@@ -858,6 +859,30 @@ function siteContentOf(
 }
 
 /**
+ * The resolver's view of a local log.
+ *
+ * **An empty log is a resolver that has not synchronised, not a namespace with nothing in it.**
+ * `hasVerifiedHead` said `true` unconditionally, so a node started against a log file that did not
+ * exist answered every name with 1404 — "No one has registered this name" — a definite claim about
+ * the *global* namespace made from a local file with nothing in it. No resolver can know that, and
+ * the one making the claim knew least of all: it had not seen a single record. The two answers send
+ * a reader somewhere different, too — 1404 says the name is free and invites them to take it.
+ *
+ * RESOLUTION.md step 7: "if the log has never synchronised (no verified head), return 1502
+ * `REGISTRY_UNAVAILABLE`." A log with entries has a verified head by construction — `Store.open`
+ * replays and re-verifies every one of them or refuses to open — so length is the whole question.
+ *
+ * A function rather than an object literal inside `cmdServe`, because the bug lived in the literal
+ * and a literal inside a command that binds two sockets is a literal no test reaches.
+ */
+export function resolverPortsFor(store: Store): ResolverPorts {
+  return {
+    lookup: (label, tld) => store.lookup(label, tld)?.current.record ?? null,
+    hasVerifiedHead: () => store.length > 0,
+  };
+}
+
+/**
  * A local, operator-declared answer for one IPNS pointer.
  *
  * **Not a network resolution, and the difference is the whole of what this is.** Resolving an IPNS
@@ -1113,10 +1138,7 @@ async function cmdServe(args: Args): Promise<number> {
       ...(site === null ? {} : { content: site.content }),
       ...(pointer === null ? {} : { ipns: pointer }),
     },
-    ports: {
-      lookup: (label, tld) => store.lookup(label, tld)?.current.record ?? null,
-      hasVerifiedHead: () => true,
-    },
+    ports: resolverPortsFor(store),
     // The log's length is the registry's generation: every operation that could change an answer
     // this resolver has cached is an append, so a length that has not moved is a registry whose
     // answers cannot have changed.
@@ -1139,6 +1161,15 @@ async function cmdServe(args: Args): Promise<number> {
       out('  Only this node is known to hold it. If it goes offline the site stops loading,');
       out('  and nothing here can tell you otherwise until a peer answers for it.');
     }
+  }
+
+  if (store.length === 0) {
+    // Said plainly, because the alternative is an operator watching a resolver answer 503 to
+    // everything and having to guess why. It is also the one place the read-once limitation
+    // matters: registering a name in another terminal does not reach this process.
+    out('');
+    out('This log is empty, so every name answers 1502 — this resolver has no registry to');
+    out('answer from. Register a name and restart: the log is read once, at startup.');
   }
 
   out(`browsing proxy   http://${proxy.address}`);

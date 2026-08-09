@@ -19,7 +19,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { main, pointerFor, siteFilesFor } from './cli.ts';
+import { main, pointerFor, resolverPortsFor, siteFilesFor } from './cli.ts';
 import { CID_PARAMETERS, cidBytes, encodeCid, sha256 } from './content.ts';
 import { Store } from './store.ts';
 
@@ -558,4 +558,41 @@ test('--pointer without --site is refused, not quietly ignored', () => {
   // It names what `--site` publishes. Without one there is nothing for it to mean, and a flag
   // accepted and dropped is how an operator ends up debugging a pointer that was never wired.
   assert.throws(() => pointerFor('k51qzi5uqu5dtestpointer', null), /needs --site/);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Step 7 — the port that told every visitor a lie                            */
+/* -------------------------------------------------------------------------- */
+
+test('a resolver with an empty log has no verified head, whatever it used to claim', async () => {
+  // This is where the defect lived: an object literal inside `cmdServe` saying
+  // `hasVerifiedHead: () => true`, which no test could reach because reaching it meant binding two
+  // sockets. Every name answered 1404 — a claim about the global namespace from an empty file.
+  const { Store } = await import('./store.ts');
+  const directory = mkdtempSync(join(tmpdir(), 'vayuweb-ports-'));
+  const log = join(directory, 'log');
+
+  const empty = Store.open(log, NOW);
+  assert.equal(empty.length, 0);
+  assert.equal(resolverPortsFor(empty).hasVerifiedHead(), false, 'nothing seen is nothing known');
+
+  // And once it holds a record — which `Store.open` re-verifies on every load — it has one.
+  assert.equal(main(['keygen', '--key', join(directory, 'key')]), 0);
+  assert.equal(
+    main([
+      'register',
+      '--log',
+      log,
+      '--key',
+      join(directory, 'key'),
+      '--name',
+      'atlasobservatory.vayu',
+    ]),
+    0,
+  );
+  const populated = Store.open(log, NOW);
+  assert.ok(populated.length > 0);
+  assert.equal(resolverPortsFor(populated).hasVerifiedHead(), true);
+  assert.ok(resolverPortsFor(populated).lookup('atlasobservatory', 'vayu'));
+  rmSync(directory, { recursive: true, force: true });
 });

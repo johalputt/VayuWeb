@@ -538,8 +538,10 @@ export function handleRequest(
     headers.set('x-vayuweb-source', source ?? '');
     headers.set('x-vayuweb-resolved-from', outcome.diagnostics.resolvedFrom ?? '');
     // Stale when a source was abandoned, which is the MUST the specification attaches to falling
-    // back: the answer is not the one the publisher would rather have served.
-    headers.set('x-vayuweb-stale', outcome.diagnostics.stale || fallbacks.length > 0 ? '1' : '0');
+    // back: the answer is not the one the publisher would rather have served. It used to be
+    // `diagnostics.stale || fallbacks.length > 0`, and the first half was a field nothing ever
+    // set — so the expression read as though two conditions fed this header when one did.
+    headers.set('x-vayuweb-stale', fallbacks.length > 0 ? '1' : '0');
     headers.set('x-vayuweb-fallbacks', fallbacks.join(','));
   }
 

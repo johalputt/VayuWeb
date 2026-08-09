@@ -10,6 +10,39 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a resolver with no registry told every visitor the name was free
+
+`hasVerifiedHead` was `() => true`, unconditionally, in the object literal `cmdServe` hands the
+resolver. So a node started against a log file that did not exist answered every name with 1404
+`NAME_NOT_FOUND` — "No one has registered this name" — which is a definite claim about the **global**
+namespace made from a local file with nothing in it. No resolver can know that, and the one making
+the claim knew least of all: it had not seen a single record.
+
+RESOLUTION.md step 7 says what to do instead: "if the log has never synchronised (no verified head),
+return 1502 `REGISTRY_UNAVAILABLE`." The two answers send a reader somewhere different — 1404 says
+the name is free and invites them to take it; 1502 says come back when this resolver has caught up.
+A log with entries has a verified head by construction, since `Store.open` replays and re-verifies
+every one of them or refuses to open, so the length is the whole question.
+
+The port construction moved out of `cmdServe` into `resolverPortsFor`, because the bug lived in a
+literal inside a command that binds two sockets, and a literal there is a literal no test reaches.
+`serve` also now says plainly that an empty log will answer 1502 to everything, and that the log is
+read once at startup — the alternative is an operator watching 503s and guessing why.
+
+### Removed — a diagnostic field that nothing could set
+
+`Diagnostics.stale` was declared, initialised to `false`, and assigned by nothing. Its only reader
+OR'd it with the fallback count, so the header it fed was driven entirely by that count and the
+expression read as though two conditions fed it when one did.
+
+The rule it existed for is a **MAY**: "when the registry is unreachable the resolver MAY serve a
+record up to 600 seconds past its TTL […] It MUST record the staleness." It is not implemented, on
+purpose, because it would have no reachable caller — this resolver's registry is a local log opened
+once at startup, so "unreachable" is a state it cannot enter mid-run. Building the path anyway would
+be a mechanism with no way to run it, which is the defect this codebase keeps finding rather than
+one to add deliberately. The other staleness — a source fallback, which the specification says MUST
+mark the answer stale — is implemented, and is where `X-VayuWeb-Stale` comes from.
+
 ### Fixed — the module that refuses to overstate availability could not be reached
 
 `GET /v1/pins` is in RESOLUTION.md's endpoint list and was not implemented, so `pins.ts` — a module
