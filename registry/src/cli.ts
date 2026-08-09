@@ -1513,6 +1513,15 @@ async function cmdServe(args: Args): Promise<number> {
   const pointer = pointerFor(args.flags.get('pointer'), site?.root ?? null);
 
   let diagnostics = false;
+  // One function for both `GET /v1/config` and the answer `PATCH /v1/config` returns, so the two
+  // cannot describe the same resolver differently. `redact` blanks the token by key name.
+  const effectiveConfig = (): Record<string, unknown> => ({
+    log: required(args, 'log'),
+    socket: socketPath,
+    token: token.current(),
+    cacheSizes: cache.limits,
+  });
+
   const control = await serveControl({
     path: socketPath,
     token: token.current,
@@ -1531,7 +1540,7 @@ async function cmdServe(args: Args): Promise<number> {
         while (store.entryAt(length) !== null) length += 1;
         return { length, root: toHex(merkleRootOf(store, length)) };
       },
-      config: () => ({ log: required(args, 'log'), socket: socketPath, token }),
+      config: effectiveConfig,
       diagnostics: () => diagnostics,
       setDiagnostics: (on: boolean) => {
         diagnostics = on;
@@ -1597,6 +1606,13 @@ async function cmdServe(args: Args): Promise<number> {
       // already carries the startup one and would otherwise leave two live-looking tokens in one
       // terminal, and not to a file.
       rotateToken: () => token.rotate(),
+      // The cache the proxy is actually reading, so a lowered bound trims what it is holding now
+      // rather than only what it takes next. `serve` and the proxy share one instance for exactly
+      // this reason — `DELETE /v1/cache` had the same requirement first.
+      patchCacheSizes: (sizes) => {
+        cache.setLimits(sizes);
+        return effectiveConfig();
+      },
     },
   });
 

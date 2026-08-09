@@ -119,6 +119,19 @@ export interface ControlPorts {
   /** Release a pin. `false` means it was not pinned, which is not an error. */
   unpin(cid: string): boolean;
   /**
+   * Apply a validated cache-size patch and return the effective configuration.
+   *
+   * Only the sizes reach here. Which fields this build can change is decided in the router, so a
+   * field it cannot change is refused by name rather than arriving as a value nobody applies.
+   * Throws when a size is unusable, which the router turns into a 400 — and `ResolutionCache`
+   * validates every value before applying any, so a refused patch leaves nothing half-applied.
+   */
+  patchCacheSizes(sizes: {
+    negativeEntries?: number;
+    positiveEntries?: number;
+    manifestEntries?: number;
+  }): Record<string, unknown>;
+  /**
    * Issue a new bearer token and make it the only one that works, returning it.
    *
    * The returned value is the **only** copy that leaves this process. Nothing writes it to disk,
@@ -293,6 +306,58 @@ export function handleControlRequest(
       if (outcome === 'full') return deny(409, 'pin_set_full');
       return ok({ cid, outcome });
     }
+    case 'PATCH /v1/config': {
+      const fields = jsonObject(request.body);
+      if (fields === null) return deny(400, 'bad_request');
+      // **A field this build cannot change is refused by name, never ignored.** RESOLUTION.md
+      // lists "mode, timeouts, cache sizes" and only the last is settable in this process.
+      // Answering 200 to `{"mode":"tor"}` and doing nothing is a resolver telling an operator it
+      // changed something it did not, which is the one failure this endpoint is able to have.
+      for (const field of Object.keys(fields)) {
+        if (field !== 'cacheSizes') {
+          return {
+            status: 400,
+            headers: new Map(DENY_HEADERS),
+            body: { error: 'unsupported_field', field },
+          };
+        }
+      }
+      const sizes = fields['cacheSizes'];
+      if (
+        sizes === undefined ||
+        sizes === null ||
+        typeof sizes !== 'object' ||
+        Array.isArray(sizes)
+      ) {
+        return deny(400, 'bad_config');
+      }
+      const asked: Record<string, number> = {};
+      for (const [field, value] of Object.entries(sizes as Record<string, unknown>)) {
+        if (!CACHE_SIZE_FIELDS.has(field)) {
+          return {
+            status: 400,
+            headers: new Map(DENY_HEADERS),
+            body: { error: 'unsupported_field', field },
+          };
+        }
+        // **Narrows the type; it is not the refusal.** `setLimits` rejects anything that is not
+        // a positive integer, non-numbers included, so removing this line changes no answer — a
+        // mutation that replaced it with `Number(value)` survived for exactly that reason and is
+        // recorded as a no-op rather than papered over. What it buys is a `Record<string, number>`
+        // for the port call instead of a cast, and saying that is better than leaving a reader to
+        // assume the coercion is being guarded against here.
+        if (typeof value !== 'number') return deny(400, 'bad_config');
+        asked[field] = value;
+      }
+      try {
+        return ok(redact(ports.patchCacheSizes(asked)));
+      } catch {
+        // The message is discarded for the same reason every other refusal here discards one: it
+        // is the likeliest place for a path or a value to be, and the caller already knows what
+        // they sent.
+        return deny(400, 'bad_config');
+      }
+    }
     case 'POST /v1/token/rotate':
       // Past the token check, like everything else — otherwise the endpoint is a denial of service
       // with an authentication step nobody passed: rotate, discard the response, and the
@@ -410,6 +475,9 @@ export function parseControlName(raw: string): { label: string; tld: string } | 
 }
 
 const PIN_PREFIX = '/v1/pin/';
+
+/** The cache bounds `PATCH /v1/config` can set. Enumerated, so an unknown one is refused. */
+const CACHE_SIZE_FIELDS = new Set(['negativeEntries', 'positiveEntries', 'manifestEntries']);
 
 /**
  * The one place a CID reaching the control API is validated, or refused.

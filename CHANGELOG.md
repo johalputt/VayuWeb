@@ -10,9 +10,55 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a control-API endpoint count that was never true, repeated three times
+
+`registry/README.md` has claimed the specification enumerates eighteen control-API endpoints. It
+enumerates **fifteen**. Eighteen is what you get by adding the three `/v1/diagnostics*` endpoints the
+implementation has and the specification does not enumerate — a real difference, and exactly the
+kind a sentence absorbs without anyone noticing.
+
+I did not notice either. I copied the number into three changelog entries — each an *n*-of-eighteen
+progress claim — in a repository whose standing rule is that a number comes from the source and not
+from the sentence next to it. All four claims are corrected;
+the true progression was eleven, thirteen, fourteen.
+
+`check-counts.py` exists for precisely this class of defect and had no rule for it, so it has one
+now: the count is derived from the fenced block after `Endpoints:` in RESOLUTION.md, and any prose
+claiming a different number fails. Restoring the old number makes it fail, which is the only
+evidence worth having that the rule works.
+
+The rule bit this entry's own first draft, whose heading quoted the wrong claim verbatim. Exempting
+`CHANGELOG.md` would have been the easy fix and the wrong one: the changelog is *where* the claim
+was repeated, so it is precisely where the rule has to apply. The heading was reworded instead.
+
+### Added — `PATCH /v1/config`, which refuses by name every field it cannot change
+
+The last endpoint on RESOLUTION.md's list. Its whole risk is answering 200 and applying nothing:
+the specification says the endpoint governs "mode, timeouts, cache sizes", and only the last is
+settable in this process. A resolver that accepted `{"mode":"tor"}`, changed nothing and answered
+200 would be telling an operator it had done something it had not — so an unsupported field is
+**refused by name**, at the top level and inside `cacheSizes` alike, where a mistyped
+`negativeEntires` would otherwise be dropped in silence.
+
+**Lowering a bound trims what is already held.** A resize that assigned the field and returned would
+answer 200 while the entries over the new bound sat there until something else happened to evict
+them — a limit that governs only the next insert, and an operator who believes they have capped
+memory. Trimming runs oldest-first, the same end `evictFor` takes from, because a resize that
+trimmed from the other end would contradict the eviction policy it shares a cache with. Every size
+is validated before any is applied, so a patch naming three and getting one wrong leaves the cache
+exactly as it was.
+
+Seven mutations, two survivors, and the second is instructive. An unknown field inside `cacheSizes`
+being dropped survived because no test sent one — a real gap, now closed. The other survived
+because it is a **no-op**: replacing the handler's `typeof` check with `Number(value)` changes no
+answer, since `setLimits` already refuses anything that is not a positive integer. That check earns
+its place by narrowing the type for the port call, not by guarding anything, and the comment now
+says so rather than leaving a reader to assume a coercion is being defended against. Nine mutations
+on the re-run, eight killed, the no-op still standing and recorded as one.
+
 ### Added — token rotation, and the reason it needed a holder rather than a string
 
-`POST /v1/token/rotate` ships, taking the endpoint count to seventeen of eighteen. The endpoint is
+`POST /v1/token/rotate` ships, taking the endpoint count to fourteen of fifteen. The endpoint is
 three lines; what took the work is the thing that makes it real.
 
 **The listener reads the token per request rather than capturing it at bind time.** A listener that
@@ -42,7 +88,7 @@ is mostly about.
 
 ### Added — a pin set that refuses to pin what the node does not hold
 
-`POST /v1/pin` and `DELETE /v1/pin/{cid}` ship, taking the endpoint count to sixteen of eighteen.
+`POST /v1/pin` and `DELETE /v1/pin/{cid}` ship, taking the endpoint count to thirteen of fifteen.
 The interesting part is not that they exist; it is what the first one refuses.
 
 **A pin is refused for content this node does not hold**, with 409 `not_held`. This build's only
@@ -257,7 +303,7 @@ second request was ever parsed off those bytes. It was a framing disagreement ne
 observe, on a surface one refactor away from the close no longer hiding it. The proxy now refuses a
 body outright — nothing on it takes one — and the control API is the only surface that accepts one.
 
-**`POST /v1/resolve` ships**, the fourteenth of RESOLUTION.md's eighteen endpoints and the one the
+**`POST /v1/resolve` ships**, the eleventh of RESOLUTION.md's fifteen endpoints and the one the
 last entry said was waiting on exactly this. Its name goes through `parseControlName` — the *same*
 function the path-carrying routes use, extracted rather than reimplemented. Two spellings of one
 grammar are two spellings that disagree later, and this repository has the habit already: a resolver
@@ -324,7 +370,7 @@ before the check, in that order, as `check-absolute-claims.py` already did.
 
 ### Added — five more of the control API's endpoints, and the one value a user types
 
-RESOLUTION.md lists eighteen endpoints and eight existed. Five more do now: `GET /v1/records/{name}`,
+RESOLUTION.md lists fifteen endpoints and five existed. Five more do now: `GET /v1/records/{name}`,
 `GET /v1/cache/stats`, `DELETE /v1/cache`, `DELETE /v1/cache/{name}` and `GET /v1/peers`. They are
 the ones an operator reaches for when a name will not load — what does this resolver think, and
 forget what you remember — and they are the ones that need no request body, which is what makes them

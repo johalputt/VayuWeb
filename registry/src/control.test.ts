@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 
 import { PinSet, report } from './pins.ts';
+import { ResolutionCache } from './cache.ts';
 
 import {
   CONTROL_HEADER,
@@ -21,6 +22,7 @@ const TOKEN = randomBytes(TOKEN_BYTES).toString('base64url');
 const ports = (): ControlPorts => {
   let diagnostics = false;
   const pinned = new PinSet((cid) => cid === HELD_CID);
+  const cache = new ResolutionCache({});
   return {
     status: () => ({ mode: 'clearnet', uptime: 42, listeners: ['proxy'] }),
     version: () => '0.2.0-test',
@@ -29,6 +31,7 @@ const ports = (): ControlPorts => {
       mode: 'clearnet',
       tokenPath: '/home/reader/.config/vayuweb/token',
       cache: { entries: 512, secretKey: 'hunter2' },
+      cacheSizes: cache.limits,
     }),
     diagnostics: () => diagnostics,
     setDiagnostics: (on: boolean) => {
@@ -54,6 +57,11 @@ const ports = (): ControlPorts => {
     pin: (cid) => pinned.add(cid),
     unpin: (cid) => pinned.remove(cid),
     rotateToken: () => randomBytes(TOKEN_BYTES).toString('base64url'),
+    // A real cache, so a refused patch can be shown to have changed nothing.
+    patchCacheSizes: (sizes) => {
+      cache.setLimits(sizes);
+      return { mode: 'clearnet', cacheSizes: cache.limits };
+    },
   };
 };
 
@@ -751,4 +759,113 @@ test('the pin routes are behind the token like every other one', () => {
   );
   assert.equal(deleted.status, 401);
   assert.equal(control.pins().length, 0, 'and neither reached the pin set');
+});
+
+/* -------------------------------------------------------------------------- */
+/* PATCH /v1/config — the last endpoint, and what it refuses to pretend        */
+/* -------------------------------------------------------------------------- */
+
+test('a config patch names what it changed, and the change is readable back', () => {
+  const control = ports();
+  const patched = handleControlRequest(
+    withBody('PATCH', '/v1/config', JSON.stringify({ cacheSizes: { negativeEntries: 16 } })),
+    control,
+    TOKEN,
+  );
+  assert.equal(patched.status, 200, JSON.stringify(patched.body));
+  const body = patched.body as { cacheSizes: Record<string, number> };
+  assert.equal(body.cacheSizes['negativeEntries'], 16);
+});
+
+test('a field this build cannot change is REFUSED, not accepted and ignored', () => {
+  // RESOLUTION.md lists "mode, timeouts, cache sizes". Only the last is settable in this process,
+  // and the other two are the whole risk of the endpoint: answering 200 to `{"mode":"tor"}` and
+  // doing nothing is a resolver telling an operator it changed something it did not. A refusal
+  // that names the field is worse to read and better to trust.
+  for (const patch of [{ mode: 'tor' }, { timeouts: { blockMs: 1 } }, { nonsense: 1 }]) {
+    const response = handleControlRequest(
+      withBody('PATCH', '/v1/config', JSON.stringify(patch)),
+      ports(),
+      TOKEN,
+    );
+    assert.equal(response.status, 400, JSON.stringify(patch));
+    const body = response.body as { error: string; field?: string };
+    assert.equal(body.error, 'unsupported_field');
+    assert.equal(body.field, Object.keys(patch)[0], 'the refusal names the field');
+  }
+});
+
+test('an unusable cache size is refused, and nothing is half-applied', () => {
+  const control = ports();
+  const before = (
+    handleControlRequest(request('GET', '/v1/config'), control, TOKEN).body as {
+      cacheSizes: Record<string, number>;
+    }
+  ).cacheSizes;
+
+  const response = handleControlRequest(
+    withBody(
+      'PATCH',
+      '/v1/config',
+      // The first is valid and the second is not. A setter that applied as it went would leave the
+      // cache half-patched and answer 400, which is the worst of both.
+      JSON.stringify({ cacheSizes: { negativeEntries: 32, positiveEntries: 0 } }),
+    ),
+    control,
+    TOKEN,
+  );
+  assert.equal(response.status, 400);
+  assert.deepEqual(response.body, { error: 'bad_config' });
+
+  const after = (
+    handleControlRequest(request('GET', '/v1/config'), control, TOKEN).body as {
+      cacheSizes: Record<string, number>;
+    }
+  ).cacheSizes;
+  assert.deepEqual(after, before, 'a refused patch changes nothing at all');
+});
+
+test('a config patch is behind the token', () => {
+  const response = handleControlRequest(
+    {
+      method: 'PATCH',
+      path: '/v1/config',
+      headers: new Map([[CONTROL_HEADER, '1']]),
+      body: new TextEncoder().encode(JSON.stringify({ cacheSizes: { negativeEntries: 1 } })),
+    },
+    ports(),
+    TOKEN,
+  );
+  assert.equal(response.status, 401);
+});
+
+test('MUTATION: an unknown cache-size field is refused by name, not quietly dropped', () => {
+  // The test above covers an unsupported field at the TOP level. Inside `cacheSizes` was
+  // unguarded by any test, and dropping the check survived — which is the endpoint's whole failure
+  // mode wearing a smaller hat: a mistyped `negativeEntires` would answer 200, change nothing, and
+  // leave an operator believing they had resized a cache.
+  for (const field of ['negativeEntires', 'entries', 'bytes', '__proto__']) {
+    const response = handleControlRequest(
+      withBody('PATCH', '/v1/config', JSON.stringify({ cacheSizes: { [field]: 16 } })),
+      ports(),
+      TOKEN,
+    );
+    assert.equal(response.status, 400, field);
+    assert.deepEqual(response.body, { error: 'unsupported_field', field }, field);
+  }
+});
+
+test('MUTATION: a size that is not a number is refused rather than coerced', () => {
+  // `Number("16")` is 16, `Number(true)` is 1, `Number([32])` is 32. Coercing would make the wire
+  // format accept three spellings of a bound and this build's answer depend on which one arrived —
+  // the same leniency `framing` refuses for `Content-Length`, for the same reason.
+  for (const value of ['16', true, [32], null, { valueOf: 1 }]) {
+    const response = handleControlRequest(
+      withBody('PATCH', '/v1/config', JSON.stringify({ cacheSizes: { negativeEntries: value } })),
+      ports(),
+      TOKEN,
+    );
+    assert.equal(response.status, 400, JSON.stringify(value));
+    assert.deepEqual(response.body, { error: 'bad_config' }, JSON.stringify(value));
+  }
 });

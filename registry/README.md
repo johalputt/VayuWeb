@@ -150,10 +150,10 @@ path before they publish actually has. Every other pointer resolves to null.
 
 ### The control API answers about a name, and forgets what it remembers
 
-Seventeen of the eighteen endpoints RESOLUTION.md lists now exist: `GET /v1/records/{name}` (the
+All fifteen endpoints RESOLUTION.md lists now exist: `GET /v1/records/{name}` (the
 record and what this resolver resolves it to), `POST /v1/resolve`, `GET /v1/cache/stats`,
 `DELETE /v1/cache`, `DELETE /v1/cache/{name}`, `POST /v1/pin`, `DELETE /v1/pin/{cid}`,
-`POST /v1/token/rotate`, and `GET /v1/peers` — which answers `joined: false` from `serve`, because `sync` is where a peer
+`POST /v1/token/rotate`, `PATCH /v1/config`, and `GET /v1/peers` — which answers `joined: false` from `serve`, because `sync` is where a peer
 connection lives and a zero that reads like a measurement is worse than a sentence.
 
 A name is **the first value a user types that reaches this API's routing**; every other endpoint is
@@ -192,8 +192,21 @@ The consequence is stated rather than designed around: **if the response is lost
 unreachable until it is restarted.** No arrangement that keeps a recovery copy somewhere is
 compatible with not having a copy somewhere.
 
-The one that remains is `PATCH /v1/config`, which needs a mutable configuration this process does
-not yet own. It is not blocked on the transport. Reading a body was the shared blocker and it is gone: `serve.ts` now has a
+`PATCH /v1/config` sets cache sizes, and **refuses by name every field it cannot change.**
+RESOLUTION.md lists "mode, timeouts, cache sizes"; only the last is settable in this process, and
+the other two are the whole risk of the endpoint — answering 200 to `{"mode":"tor"}` and doing
+nothing is a resolver telling an operator it changed something it did not. A refusal naming the
+field is worse to read and better to trust, and the same applies inside `cacheSizes`, where a
+mistyped `negativeEntires` is refused rather than dropped.
+
+**Lowering a bound trims what is already held**, oldest-first — the same end the cache evicts from
+when making room for one key. A resize that assigned the field and returned would answer 200 while
+the entries over the new bound sat there until something else happened to evict them, which is a
+limit that governs only the next insert. Every size is validated before any is applied, so a patch
+naming three and getting one wrong leaves the cache exactly as it was.
+
+That is all fifteen endpoints RESOLUTION.md lists. Reading a body was the shared blocker and it is
+gone: `serve.ts` now has a
 bounded reader, refusing `Transfer-Encoding` outright so one field decides the length, checking
 that length against `SERVE_LIMITS.bodyBytes` before a byte is buffered, refusing any byte past it
 rather than ignoring it, and holding the head deadline armed across the body so a sender that

@@ -64,6 +64,28 @@ def launch_tld_set():
     return set(re.findall(r"^\| `\.([a-z0-9]+)` \|", text, re.M))
 
 
+def count_control_endpoints():
+    """The control-API endpoints RESOLUTION.md enumerates, counted from the block that lists them.
+
+    Added because a prose claim of "eighteen endpoints RESOLUTION.md lists" survived in
+    `registry/README.md` and was copied into three changelog entries before anyone counted the
+    block. The specification lists FIFTEEN. Eighteen is what you get by adding the three
+    `/v1/diagnostics*` endpoints the implementation has and the specification does not enumerate --
+    a real difference, and exactly the kind a sentence quietly absorbs.
+
+    Counted from the fenced block after `Endpoints:` so that adding an endpoint to the list is what
+    moves the number, rather than a mention of one anywhere else in the document.
+    """
+    text = read("docs/spec/RESOLUTION.md")
+    match = re.search(r"^Endpoints:\s*\n\n```text\n(.*?)^```", text, re.M | re.S)
+    if match is None:
+        return None, "RESOLUTION.md has no `Endpoints:` block -- the format changed"
+    rows = re.findall(r"^(?:GET|POST|DELETE|PATCH|PUT)\s+/v1/", match.group(1), re.M)
+    if not rows:
+        return None, "the `Endpoints:` block matched no endpoint rows"
+    return len(rows), None
+
+
 def count_launch_tlds():
     """The ratified extensions, enumerated as table rows in the Namespace Annex.
 
@@ -500,6 +522,18 @@ AGREEMENTS = [
 # Each rule: a label, a function deriving the true number, and the claim patterns that
 # must agree with it. A pattern's one capture group is the asserted quantity.
 RULES = [
+    {
+        "label": "control-API endpoints",
+        "derive": count_control_endpoints,
+        "source": "docs/spec/RESOLUTION.md, the `Endpoints:` block",
+        "patterns": [
+            re.compile(r"\ball ([\w]+) endpoints RESOLUTION\.md lists\b", re.I),
+            re.compile(r"\b([\w]+) endpoints RESOLUTION\.md lists\b", re.I),
+            re.compile(r"\bRESOLUTION\.md lists ([\w]+) endpoints\b", re.I),
+            re.compile(r"\bendpoint count to [\w]+ of ([\w]+)\b", re.I),
+            re.compile(r"\bRESOLUTION\.md's ([\w]+) endpoints\b", re.I),
+        ],
+    },
     {
         "label": "ratified extensions",
         "derive": count_launch_tlds,

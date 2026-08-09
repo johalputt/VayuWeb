@@ -453,3 +453,50 @@ test('a miss is counted as a miss, which is the only way a hit rate means anythi
   cache.positive('atlas.vayu', NOW + POSITIVE_TTL_SECONDS);
   assert.deepEqual(cache.counts, { hits: 1, misses: 3 });
 });
+
+/* -------------------------------------------------------------------------- */
+/* Resizing, which has to take effect on what is already held                  */
+/* -------------------------------------------------------------------------- */
+
+test('lowering a cache bound trims what is already held, rather than only future inserts', () => {
+  // The defect this is written against: a resize that assigns a field and returns. `PATCH
+  // /v1/config` would answer 200, an operator would believe they had capped memory, and the
+  // entries already over the new bound would sit there until something happened to evict them.
+  // A bound that only governs the next insert is not the bound the caller asked for.
+  const cache = new ResolutionCache({ negativeEntries: 8 });
+  for (let i = 0; i < 8; i += 1) cache.putNegative(`name${i}.vayu`, 'NAME_NOT_FOUND', NOW);
+  assert.equal(cache.negativeSize, 8);
+
+  cache.setLimits({ negativeEntries: 3 });
+  assert.equal(cache.negativeSize, 3, 'the new bound applies to what is already there');
+  // Oldest-first, the same order `evictFor` uses when making room for one key. A resize that
+  // trimmed from the other end would contradict the eviction policy it shares a cache with.
+  assert.equal(cache.negative('name0.vayu', NOW), null, 'the oldest went');
+  assert.notEqual(cache.negative('name7.vayu', NOW), null, 'the newest stayed');
+});
+
+test('raising a bound admits more without inventing anything', () => {
+  const cache = new ResolutionCache({ negativeEntries: 2 });
+  for (let i = 0; i < 4; i += 1) cache.putNegative(`name${i}.vayu`, 'NAME_NOT_FOUND', NOW);
+  assert.equal(cache.negativeSize, 2);
+  cache.setLimits({ negativeEntries: 6 });
+  assert.equal(cache.negativeSize, 2, 'raising a bound adds nothing');
+  for (let i = 4; i < 8; i += 1) cache.putNegative(`name${i}.vayu`, 'NAME_NOT_FOUND', NOW);
+  assert.equal(cache.negativeSize, 6, 'and the new headroom is real');
+});
+
+test('a bound that is not a usable size is refused rather than coerced', () => {
+  // A cache with a limit of zero holds nothing and reports hits it cannot have; a fractional or
+  // negative one is a caller who has misunderstood. Refused at the setter, because a Map does not
+  // enforce anything and the wrong value would surface as behaviour nobody could explain.
+  const cache = new ResolutionCache({});
+  for (const bad of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.throws(
+      () => cache.setLimits({ negativeEntries: bad }),
+      /positive integer/i,
+      String(bad),
+    );
+  }
+  // An empty patch is not an error: it changes nothing, which is what it asked for.
+  cache.setLimits({});
+});

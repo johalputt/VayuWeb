@@ -163,6 +163,7 @@ const controlPorts: ControlPorts = {
   pin: () => 'not_held' as const,
   unpin: () => false,
   rotateToken: () => randomBytes(32).toString('base64url'),
+  patchCacheSizes: (sizes) => ({ cacheSizes: sizes }),
 };
 
 async function withListener(make: () => Promise<Listener>, run: (l: Listener) => Promise<void>) {

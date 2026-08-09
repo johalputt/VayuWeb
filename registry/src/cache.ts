@@ -147,13 +147,21 @@ interface PositiveEntry {
  * touching them, and there is nothing here worth protecting from eviction: every entry is
  * reconstructible from a local lookup costing microseconds.
  */
+/** A bound this cache cannot honour. Its own class so a caller can tell it from a bug. */
+export class CacheError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CacheError';
+  }
+}
+
 export class ResolutionCache {
   private readonly negatives = new Map<string, NegativeEntry>();
   private readonly positives = new Map<string, PositiveEntry>();
   private readonly manifests = new Map<string, SiteManifest | null>();
-  private readonly negativeLimit: number;
-  private readonly positiveLimit: number;
-  private readonly manifestLimit: number;
+  private negativeLimit: number;
+  private positiveLimit: number;
+  private manifestLimit: number;
   private generation: number | null = null;
   private hitCount = 0;
   private missCount = 0;
@@ -177,6 +185,56 @@ export class ResolutionCache {
     this.positiveLimit = limits.positiveEntries ?? CACHE_LIMITS.positiveEntries;
     this.manifestLimit = limits.manifestEntries ?? CACHE_LIMITS.manifestEntries;
     this.ttls = ttls;
+  }
+
+  /**
+   * Change one or more bounds, and make them true of what is already held.
+   *
+   * **Trimming is the whole point.** A resize that assigned the fields and returned would answer
+   * `PATCH /v1/config` with 200 while the entries already over the new bound sat there until
+   * something else happened to evict them — an operator believing they had capped memory, and a
+   * limit that governs only the next insert. Trimming runs oldest-first, the same end
+   * {@link evictFor} takes from, because a resize that trimmed from the other end would contradict
+   * the eviction policy it shares a cache with.
+   *
+   * A size that is not a positive integer is refused rather than coerced: a `Map` enforces nothing,
+   * so a zero or a fraction would surface later as behaviour nobody could explain — a cache that
+   * holds nothing while reporting hits it cannot have.
+   */
+  setLimits(limits: {
+    negativeEntries?: number;
+    positiveEntries?: number;
+    manifestEntries?: number;
+  }): void {
+    const usable = (value: number | undefined, field: string): number | undefined => {
+      if (value === undefined) return undefined;
+      if (!Number.isInteger(value) || value < 1) {
+        throw new CacheError(`${field} must be a positive integer, not ${String(value)}`);
+      }
+      return value;
+    };
+    // Every value is validated BEFORE any is applied, so a patch naming three sizes and getting one
+    // wrong leaves the cache as it was rather than half-resized.
+    const negative = usable(limits.negativeEntries, 'negativeEntries');
+    const positive = usable(limits.positiveEntries, 'positiveEntries');
+    const manifest = usable(limits.manifestEntries, 'manifestEntries');
+
+    if (negative !== undefined) this.negativeLimit = negative;
+    if (positive !== undefined) this.positiveLimit = positive;
+    if (manifest !== undefined) this.manifestLimit = manifest;
+
+    trimTo(this.negatives, this.negativeLimit);
+    trimTo(this.positives, this.positiveLimit);
+    trimTo(this.manifests, this.manifestLimit);
+  }
+
+  /** The bounds currently in force, so a caller can read back what it set. */
+  get limits(): { negativeEntries: number; positiveEntries: number; manifestEntries: number } {
+    return {
+      negativeEntries: this.negativeLimit,
+      positiveEntries: this.positiveLimit,
+      manifestEntries: this.manifestLimit,
+    };
   }
 
   get negativeSize(): number {
@@ -350,6 +408,15 @@ export class ResolutionCache {
     evictFor(this.positives, key, this.positiveLimit);
     this.positives.set(key, { record, expires });
     return true;
+  }
+}
+
+/** Trim a map down to `limit`, oldest first — the same end {@link evictFor} takes from. */
+function trimTo<T>(map: Map<string, T>, limit: number): void {
+  while (map.size > limit) {
+    const oldest = map.keys().next();
+    if (oldest.done) return;
+    map.delete(oldest.value);
   }
 }
 
