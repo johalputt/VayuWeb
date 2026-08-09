@@ -10,6 +10,47 @@ it.
 
 ## [Unreleased]
 
+### Added — the dead-code gate asks the second question, and answers it about itself
+
+The gate asked whether an export is imported or tested anywhere. That is a real question and it has
+caught real things, but it is satisfied by a symbol whose only reachable caller is the test written
+alongside it — a mechanism built, tested against itself, and connected to nothing that ships. That
+is the defect this repository keeps finding by hand, one commit at a time, and finding it by hand is
+not a process.
+
+It now asks a second question: **is this export reached by anything that is not a test?**
+Thirty-nine are not, and every one of them is named in `REACHED_ONLY_BY_TESTS` with the reason it is
+waiting — the light-client verification half, VWIP-0005 while it is Draft, the Hyperbee keyspace,
+unpublishing, the Hyperswarm bindings, tooling, policy that a test asserts and no caller consumes,
+and a group worth stating separately: *a second way to do something the shipping path does
+differently*. The table is checked in both directions, so a name that stops being an island fails
+the gate as loudly as a new island does. An exemption that has quietly become false is worse than no
+exemption, because it reads as a decision someone made.
+
+Its first run found `mapPath`, orphaned by a commit in this same set. Step 13 moved path mapping
+into `serveStep13` so the manifest and non-manifest halves live in one place; the old exported
+function stayed behind with four tests still passing against it. Deleted, with those tests and the
+doc reference that pointed at it. Nothing was wrong with it — it simply had no caller, and four
+green tests said otherwise every time anyone looked.
+
+**The checker's own comment-and-string stripper was blanking real code.** It was a regex, and
+`serve.ts` contains the RFC 7230 token pattern — a character class holding both an apostrophe and a
+backtick. Everything after it vanished from the corpus, including the only call site of `parseHead`,
+which is precisely the kind of evidence this file counts. Replaced with a hand-written scanner that
+tracks regex literals (distinguishing them from division by what precedes the slash), both comment
+forms, and template literals — keeping `${…}` interpolations, because those are code and blanking
+them loses call sites; preserving line numbers, because otherwise every reported location is wrong;
+and refusing a file that ends mid-string instead of returning a plausible answer about it.
+
+Mutating the checker is where it earned the entry. Five mutations, two killed, **three survived** —
+stale exemptions never reported, interpolations blanked, an unterminated string accepted — all for
+one reason: nothing in today's corpus exercises those branches, so breaking them changed no output.
+A branch that cannot be observed is trusted rather than tested, which is the thing this file exists
+to catch, now true of the file itself. `--self-test` (nine cases, over both the scanner and the
+reporting, the latter extracted into `problems` so it is callable at all) makes all three
+observable, and re-running the three mutations against it kills all three. CI runs the self-test
+before the check, in that order, as `check-absolute-claims.py` already did.
+
 ### Added — five more of the control API's endpoints, and the one value a user types
 
 RESOLUTION.md lists eighteen endpoints and eight existed. Five more do now: `GET /v1/records/{name}`,

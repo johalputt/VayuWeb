@@ -823,9 +823,9 @@ function request(port: ContentPort, path: string, cache = new ResolutionCache())
 test('my site 404s on every deep link, and my manifest says what to do about it', () => {
   // PUBLISHING.md 2.3 is a **SHALL** and it names its own symptom in the sentence before: "a site
   // with client-side routing 404s on every deep link unless a fallback exists". Nothing in the
-  // shipping resolver read `.vayu/manifest.json` at all — `mapPath` implements the non-manifest
-  // half and had no caller, and the CLI's content port reimplemented a subset of it inline, which
-  // is how the manifest half went missing without anything looking wrong.
+  // shipping resolver read `.vayu/manifest.json` at all — the rule lived in two places, a
+  // resolver-side path mapper with no caller and the CLI's content port reimplementing a subset
+  // of it inline, and the manifest belonged to neither.
   const site = siteWith({
     '/index.html': 'the app shell',
     '/.vayu/manifest.json': manifest({ fallback: 'index.html' }),

@@ -6,7 +6,6 @@ import {
   parseHost,
   selectSource,
   resolveName,
-  mapPath,
   RESOLVE_ERRORS,
   ALIAS_BUDGET,
   SOURCE_ORDER,
@@ -310,40 +309,6 @@ test('every outcome carries diagnostics, including the failures', () => {
 
 /* -------------------------------------------------------------------------- */
 /* Step 13: path mapping                                                       */
-/* -------------------------------------------------------------------------- */
-
-test('a directory path resolves to its index', () => {
-  const listing = new Set(['index.html', 'about.html', 'docs/index.html', 'img/logo.png']);
-  assert.equal(mapPath('/', listing), 'index.html');
-  assert.equal(mapPath('/about.html', listing), 'about.html');
-  assert.equal(mapPath('/docs/', listing), 'docs/index.html');
-  assert.equal(mapPath('/docs', listing), 'docs/index.html', 'without the trailing slash too');
-  assert.equal(mapPath('/img/logo.png', listing), 'img/logo.png');
-});
-
-test('a missing path is the site’s problem, and returns nothing to serve', () => {
-  const listing = new Set(['index.html']);
-  assert.equal(mapPath('/nope.html', listing), null);
-  assert.equal(mapPath('/deep/', listing), null);
-});
-
-test('path traversal is refused before normalisation, not after', () => {
-  // Normalising first and checking second is the shape that has produced traversal bugs for
-  // thirty years.
-  const listing = new Set(['index.html', 'secret.txt']);
-  assert.equal(mapPath('/../secret.txt', listing), null);
-  assert.equal(mapPath('/a/../../secret.txt', listing), null);
-  assert.equal(mapPath('/..%2fsecret.txt', listing), null);
-});
-
-test('query and fragment are stripped before matching', () => {
-  const listing = new Set(['index.html']);
-  assert.equal(mapPath('/?utm=1', listing), 'index.html');
-  assert.equal(mapPath('/#top', listing), 'index.html');
-});
-
-/* -------------------------------------------------------------------------- */
-/* AUDIT FINDING: a conformance item that required a name to differ from itself */
 /* -------------------------------------------------------------------------- */
 
 test('AUDIT: the origin model is tested on both components of the tuple', () => {

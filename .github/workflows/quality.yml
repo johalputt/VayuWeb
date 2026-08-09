@@ -75,8 +75,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with: { persist-credentials: false }
-      - name: Every export is imported or tested
-        run: python3 scripts/check-deadcode.py
+      - name: Every export is imported or tested, and reaches something that ships
+        # The self-test runs first and is not decoration: three of this checker's branches cannot
+        # be observed against the repository's own corpus, so without it they are trusted rather
+        # than tested.
+        run: |
+          python3 scripts/check-deadcode.py --self-test
+          python3 scripts/check-deadcode.py
 
   reproducible-build:
     name: reproducible build

@@ -501,9 +501,9 @@ export function parseManifest(bytes: Uint8Array): SiteManifest | null {
 /**
  * A path a manifest declares, or null.
  *
- * Relative, no traversal, bounded, non-empty. Rejected before normalising rather than after, for
- * the reason {@link mapPath} gives: a check that normalises first has produced path-traversal bugs
- * for thirty years. A leading `/` is refused rather than stripped — a manifest declaring an
+ * Relative, no traversal, bounded, non-empty. Rejected before normalising rather than after: a
+ * check that normalises first and inspects second is the shape that has produced path-traversal
+ * bugs for thirty years. A leading `/` is refused rather than stripped — a manifest declaring an
  * absolute path means something this resolver would have to invent an interpretation for.
  */
 function declaredPath(value: unknown): string | null {
@@ -512,29 +512,4 @@ function declaredPath(value: unknown): string | null {
   if (value.startsWith('/') || value.includes('..')) return null;
   if (value.includes('\0') || value.includes('\n') || value.includes('\r')) return null;
   return value;
-}
-
-/**
- * Step 13. Map a request path onto a directory listing.
- *
- * Returns the entry to serve, or null for 1414 — an ordinary 404, the site's problem rather than
- * the network's.
- */
-export function mapPath(path: string, listing: ReadonlySet<string>): string | null {
-  // Reject traversal before normalising rather than after: a resolver that normalises first and
-  // checks second is the shape that has produced path-traversal bugs for thirty years.
-  if (path.includes('..')) return null;
-
-  const clean = path.split('?')[0]!.split('#')[0]!;
-  const trimmed = clean.startsWith('/') ? clean.slice(1) : clean;
-
-  if (trimmed === '' || trimmed.endsWith('/')) {
-    const index = `${trimmed}index.html`;
-    return listing.has(index) ? index : null;
-  }
-  if (listing.has(trimmed)) return trimmed;
-
-  // A directory named without its trailing slash still resolves to its index.
-  const index = `${trimmed}/index.html`;
-  return listing.has(index) ? index : null;
 }
