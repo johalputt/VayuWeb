@@ -1679,7 +1679,9 @@ async function cmdServe(args: Args): Promise<number> {
       status: () => ({
         mode: 'clearnet',
         uptime: Math.floor(Date.now() / 1000) - started,
-        listeners: [proxy.address, socketPath],
+        // Only what is actually bound. Reporting a proxy address for a proxy that was not
+        // bound would be the same overstatement one field over.
+        listeners: proxy === null ? [socketPath] : [proxy.address, socketPath],
       }),
       version: () => RESOLVER_VERSION,
       logHead: () => {
@@ -1764,25 +1766,40 @@ async function cmdServe(args: Args): Promise<number> {
     },
   });
 
-  const proxy = await serveProxy({
-    port: number(args, 'port', 7654),
-    // The process boundary is where the real clock is allowed to exist; every module below this
-    // takes it as a parameter.
-    now: () => Math.floor(Date.now() / 1000),
-    options: {
-      get diagnostics() {
-        return diagnostics;
-      },
-      ...(served === null ? {} : { content: served }),
-      ...(pointer === null ? {} : { ipns: pointer }),
-    },
-    ports: resolverPortsFor(store),
-    cache,
-    // The log's length is the registry's generation: every operation that could change an answer
-    // this resolver has cached is an append, so a length that has not moved is a registry whose
-    // answers cannot have changed.
-    generation: () => store.length,
-  });
+  // **A browsing proxy with no content layer can only lie.** This build's only source of blocks
+  // is `--site`, so without one every name that resolves would be answered from a proxy that
+  // cannot fetch anything — and it WAS answered, `200 OK` with an empty body, until this. Not
+  // binding it is the honest form: there is no request to answer wrongly, the control API still
+  // runs, and the operator is told why rather than left to discover a blank page.
+  if (served === null) {
+    out('');
+    out('no --site, so no browsing proxy: this build fetches content only from a published');
+    out('directory, and a proxy with nothing to fetch with can only answer 200 with no body.');
+    out('The control API below still answers about names.');
+  }
+
+  const proxy =
+    served === null
+      ? null
+      : await serveProxy({
+          port: number(args, 'port', 7654),
+          // The process boundary is where the real clock is allowed to exist; every module below this
+          // takes it as a parameter.
+          now: () => Math.floor(Date.now() / 1000),
+          options: {
+            get diagnostics() {
+              return diagnostics;
+            },
+            ...(served === null ? {} : { content: served }),
+            ...(pointer === null ? {} : { ipns: pointer }),
+          },
+          ports: resolverPortsFor(store),
+          cache,
+          // The log's length is the registry's generation: every operation that could change an answer
+          // this resolver has cached is an append, so a length that has not moved is a registry whose
+          // answers cannot have changed.
+          generation: () => store.length,
+        });
 
   // HOSTING.md's first mitigation, said out loud. "One always-on node is the difference between a
   // site that loads and a site that does not", and this is precisely the state a publisher cannot
@@ -1811,7 +1828,7 @@ async function cmdServe(args: Args): Promise<number> {
     out('answer from. Register a name and restart: the log is read once, at startup.');
   }
 
-  out(`browsing proxy   http://${proxy.address}`);
+  if (proxy !== null) out(`browsing proxy   http://${proxy.address}`);
   out(`control API      ${control.address}  (mode 0600)`);
   out('');
   out('control token (this run only, not written to disk):');
@@ -1823,7 +1840,8 @@ async function cmdServe(args: Args): Promise<number> {
     const stop = (): void => {
       // The socket is removed on close. A resolver that leaves one behind makes the next start
       // fail on a path that looks like a running instance and is not.
-      void Promise.all([proxy.close(), control.close()]).then(() => resolve());
+      const closing = proxy === null ? [control.close()] : [proxy.close(), control.close()];
+      void Promise.all(closing).then(() => resolve());
     };
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);

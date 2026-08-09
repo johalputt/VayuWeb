@@ -145,6 +145,26 @@ R=$(ctl GET /v1/status); case "$R" in *200) ok "the NEW token works";; *) bad "n
 case "$R" in *0.2.1*) ok "the disclosed version matches the package";; *) bad "version" "$R";; esac
 
 kill $SERVE_PID 2>/dev/null; wait $SERVE_PID 2>/dev/null
+
+echo; echo "=== a resolver with no content layer binds no proxy at all ==="
+# It used to bind one and answer `200 OK, content-length: 0` for every name that resolved — a
+# browser showing a blank page, a link checker recording the site as up, and a crawler indexing an
+# empty document, each told by the resolver that this is what the publisher published. This build
+# fetches only from --site, so a proxy without one can only lie; not binding it is the honest form.
+ALT_PORT=$(( ${VW_PORT:-7799} + 1 ))
+"${VW[@]}" serve --log "$D/log" --port "$ALT_PORT" --socket "$D/bare.sock" > "$D/bare.out" 2>&1 &
+BARE_PID=$!
+for _ in $(seq 1 40); do [ -S "$D/bare.sock" ] && break; sleep 0.5; done; sleep 1
+BARE_TOKEN=$(grep -A1 'control token' "$D/bare.out" | tail -1 | tr -d ' ')
+# curl already prints 000 on a connection failure AND exits non-zero, so an `|| echo 000` here
+# appends a second one and the comparison never matches. It did, and reported the fix as broken.
+C=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:$ALT_PORT/" 2>/dev/null)
+[ "$C" = 000 ] && ok "no browsing proxy is listening" || bad "a proxy that cannot serve was bound" "got $C"
+R=$(curl -sS --unix-socket "$D/bare.sock" "http://localhost/v1/status" -H "x-vayuweb-control: 1" -H "authorization: Bearer $BARE_TOKEN")
+case "$R" in *'"listeners"'*) ok "the control API still answers";; *) bad "control API without a site" "$R";; esac
+case "$R" in *127.0.0.1*) bad "status lists a proxy address that was never bound" "$R";; *) ok "and does not list a proxy address it never bound";; esac
+case "$(grep -c 'no --site' "$D/bare.out")" in 0) bad "startup says nothing about the missing proxy" "";; *) ok "startup says why there is no proxy";; esac
+kill $BARE_PID 2>/dev/null; wait $BARE_PID 2>/dev/null
 rm -rf "$D"
 echo; echo "=== $pass passed, $fail failed ==="
 exit $([ $fail -eq 0 ] && echo 0 || echo 1)

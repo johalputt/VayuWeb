@@ -10,6 +10,40 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a resolver with no content layer answered 200 and an empty body
+
+The most serious of the four, and the plainest. `serve` without `--site` bound a browsing proxy, and
+that proxy answered **`HTTP/1.1 200 OK`, `content-length: 0`** for every name that resolved. A
+browser shows a blank page. A link checker records the site as up. A crawler indexes an empty
+document. Each of them was told by the resolver that this is what the publisher published.
+
+The cause is a skipped block rather than a decision: the whole content section sat inside
+`if (options.content !== undefined)`, so with no content port it was jumped over and control fell
+through to the initial `status = 200`. Nothing chose that answer.
+
+**Choosing the right refusal turned out to be the interesting part, and the catalogue has no entry
+that fits.** `CONTENT_UNAVAILABLE` (1504) says "no one is currently sharing this site's files" — a
+claim about the network, from a node that asked nobody, which is precisely the defect 1502 exists to
+prevent and which this codebase has already fixed once for `NAME_NOT_FOUND`. `NO_USABLE_RECORD`
+(1421) blames the record, and the record is fine. Inventing a code is a specification change, not a
+bug fix.
+
+So the fix is structural instead. **This build fetches content only from `--site`**, so a proxy
+without one can never serve anything and a listener that can only lie should not be bound at all.
+`serve` now binds the control API alone in that configuration, says why at startup, and does not
+list a proxy address in `GET /v1/status` that it never bound. `handleRequest` keeps a refusal for
+the same case — 1500, the bare 500 the catalogue reserves for a construction error — so an embedder
+that builds a proxy with nothing to fetch with gets a refusal rather than a lie; a reader should
+never reach it.
+
+`acceptance-control-lifecycle.sh` now starts a second, site-less resolver and checks all four
+claims: no proxy is listening, the control API still answers, `GET /v1/status` does not advertise a
+listener that does not exist, and the startup output explains itself. Thirty-four checks.
+
+One more thing that check caught, about the check: `curl` prints `000` on a connection failure *and*
+exits non-zero, so an `|| echo 000` appended a second one and the comparison never matched — the
+assertion reported the fix as broken. A test harness is code too.
+
 ### Fixed — the pointer path stayed down after a re-pin, and I had written that off as acceptable
 
 The third of the same family, and the one I am least pleased about. A name carrying only an `ipns`

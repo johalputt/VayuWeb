@@ -1206,3 +1206,31 @@ test('MUTATION: the resolver stores a content failure under the key the pin path
   cache.forget(contentCacheKey('cid', CID_TEXT));
   assert.equal(cache.negative(contentCacheKey('cid', CID_TEXT), NOW), null);
 });
+
+test('AUDIT: a resolver with no content layer answered 200 and an empty body', () => {
+  // `serve --log ./log` with no `--site` is the ORDINARY browsing configuration — `--site` exists
+  // for testing your own publish. In it, `options.content` is undefined, the whole content block
+  // is skipped, and `handleRequest` falls through to its initial `status = 200` with no body.
+  //
+  // Confirmed against a running resolver before it was written down: `HTTP/1.1 200 OK`,
+  // `content-length: 0`, for a name that resolves perfectly well. A browser shows a blank page, a
+  // link checker records the site as up, and a crawler indexes an empty document — every one of
+  // them told by the resolver that this is what the publisher published.
+  //
+  // A skipped block is not a decision. There is no content layer, so the content cannot be
+  // obtained, and that is what the reader has to be told.
+  const answer = handleRequest(
+    get('/index.html', { host: 'atlas.vayu' }),
+    { lookup: () => live([cborEntry('cid', CID_BYTES)]), hasVerifiedHead: () => true },
+    new ResolutionCache(),
+    NOW,
+    {}, // no content port at all
+  );
+
+  assert.notEqual(answer.status, 200, 'a proxy that holds nothing must not report success');
+  // 1500, not 1504. The catalogue has no entry for "built without a content layer", and 1504 says
+  // "no one is currently sharing this site's files" — a claim about the network from a node that
+  // asked nobody, which is the defect 1502 exists to prevent. A construction error gets the bare
+  // 500 the catalogue reserves for one.
+  assert.equal(answer.status, 500);
+});

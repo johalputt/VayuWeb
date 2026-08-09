@@ -450,7 +450,24 @@ export function handleRequest(
    */
   let status = 200;
   const fallbacks: SourceType[] = [];
-  if (options.content !== undefined) {
+  // **A resolver with no content layer must refuse, not report success.** This used to be an
+  // `if (options.content !== undefined)` wrapped around the whole block, so a proxy with no
+  // content port skipped it and fell through to the initial `status = 200` — answering
+  // `200 OK, content-length: 0` for a name that resolves perfectly well. `serve --log ./log`
+  // with no `--site` is the ordinary browsing configuration, so this was the ordinary case: a
+  // browser showing a blank page, a link checker recording the site as up, and a crawler indexing
+  // an empty document, each of them told by the resolver that this is what the publisher
+  // published.
+  //
+  // A skipped block is not a decision. The catalogue has no entry for "this proxy was built
+  // without a content layer", and the near misses are all false: 1504 says "no one is currently
+  // sharing this site's files", which is a claim about the network from a node that asked nobody —
+  // the same defect 1502 exists to prevent — and 1421 blames the record, which is fine. So this is
+  // 1500: a proxy constructed with nothing to fetch with is a construction error, and a bare 500
+  // is what the catalogue reserves for one. `cmdServe` does not bind such a proxy at all, so a
+  // reader should never see this; it is here so an embedder gets a refusal rather than a lie.
+  if (options.content === undefined) return refusal('INTERNAL');
+  {
     const candidates = sourceCandidates(outcome.record);
     let failure: ResolveErrorName = 'NO_USABLE_RECORD';
     let served = false;
