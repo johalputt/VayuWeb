@@ -59,6 +59,41 @@ test('your own pin is never counted as redundancy', () => {
   assert.equal(/\b1 other peer/.test(summarise(alone)), false, 'never summed into a peer count');
 });
 
+test('the self-only sentence says the consequence, because a caller will not', () => {
+  // Found by writing the endpoint that renders it. It used to produce "pinned here. Observed, not
+  // guaranteed." — true, and reassuring, which is the failure this module's header names in its
+  // second paragraph. `onlyThisNodeHoldsIt` carried the warning as a separate predicate, so a
+  // caller who did not think to ask got the comfortable half on its own; and this function exists
+  // precisely so the optimistic sentence is not written by each caller.
+  const alone = report(CID, 12, [self()], STALE, NOW);
+  assert.match(summarise(alone), /goes offline the site stops loading/);
+  assert.match(
+    summarise(alone),
+    /none of the 12 peers asked/,
+    'the denominator is in the sentence',
+  );
+
+  // Nobody asked is a different fact from nobody answered, and the sentence distinguishes them.
+  const unasked = report(CID, 0, [self()], STALE, NOW);
+  assert.match(summarise(unasked), /no peer has been asked/);
+  assert.match(summarise(unasked), /goes offline the site stops loading/);
+  assert.equal(
+    /none of the 0 peers/.test(summarise(unasked)),
+    false,
+    'a zero denominator is not a measurement',
+  );
+
+  // And a site somebody else holds gets no such warning, because it is not true of that site.
+  const shared = report(
+    CID,
+    3,
+    [self(), { holder: { kind: 'peer', id: 'p1' }, observedAt: NOW }],
+    STALE,
+    NOW,
+  );
+  assert.equal(/stops loading/.test(summarise(shared)), false);
+});
+
 test('there is no total, no percentage and no durability field to render', () => {
   // Article 23 forbids an uptime figure and HOSTING.md says any document quoting one is wrong. The
   // defence is that the number does not exist as a field, so a dashboard cannot bind to it.

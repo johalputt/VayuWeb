@@ -44,6 +44,7 @@ import { treeOf } from './merkle.ts';
 import { TOKEN_BYTES } from './control.ts';
 import { EquivocationLedger, ledgerPathFor, type LedgerEntry } from './equivocation.ts';
 import { CheckpointLedger } from './checkpoint.ts';
+import { OBSERVATION_STALE_SECONDS, onlyThisNodeHoldsIt, report, summarise } from './pins.ts';
 
 const toHex = (bytes: Uint8Array): string =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
@@ -1053,6 +1054,7 @@ async function cmdServe(args: Args): Promise<number> {
   // it produces. The tree goes through the same importer a real publish uses and comes back
   // through the same VERIFIED traversal a peer's blocks would, so this is the content path rather
   // than a shortcut around it -- the only thing it skips is the network.
+  const clock = (): number => Math.floor(Date.now() / 1000);
   const site = siteContentOf(args.flags.get('site'));
   const pointer = pointerFor(args.flags.get('pointer'), site?.root ?? null);
 
@@ -1080,6 +1082,22 @@ async function cmdServe(args: Args): Promise<number> {
       setDiagnostics: (on: boolean) => {
         diagnostics = on;
       },
+      // What this node holds, and the honest denominator beside it. `asked: 0` is the true
+      // number: there is no block-exchange session — VWIP-0005 is a Draft — so no peer has been
+      // asked anything, and `summarise` renders that as "nothing is known about who holds this"
+      // rather than as a zero that reads like an answer.
+      pins: () =>
+        site === null
+          ? []
+          : [
+              report(
+                site.root,
+                0,
+                [{ holder: { kind: 'self' }, observedAt: clock() }],
+                OBSERVATION_STALE_SECONDS,
+                clock(),
+              ),
+            ],
     },
   });
 
@@ -1104,6 +1122,24 @@ async function cmdServe(args: Args): Promise<number> {
     // answers cannot have changed.
     generation: () => store.length,
   });
+
+  // HOSTING.md's first mitigation, said out loud. "One always-on node is the difference between a
+  // site that loads and a site that does not", and this is precisely the state a publisher cannot
+  // see from their own machine — from there the site always loads.
+  if (site !== null) {
+    const held = report(
+      site.root,
+      0,
+      [{ holder: { kind: 'self' }, observedAt: clock() }],
+      OBSERVATION_STALE_SECONDS,
+      clock(),
+    );
+    out(`  holders   ${summarise(held)}`);
+    if (onlyThisNodeHoldsIt(held)) {
+      out('  Only this node is known to hold it. If it goes offline the site stops loading,');
+      out('  and nothing here can tell you otherwise until a peer answers for it.');
+    }
+  }
 
   out(`browsing proxy   http://${proxy.address}`);
   out(`control API      ${control.address}  (mode 0600)`);

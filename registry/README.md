@@ -99,6 +99,25 @@ deliberately does not depend on; `IpnsPort` is the seam, the same shape Hyperswa
 this pointer, and it means the site I just published" — which is what a publisher checking that
 path before they publish actually has. Every other pointer resolves to null.
 
+### What is keeping your site alive, said without overstating it
+
+`GET /v1/pins` on the control API reports what this node holds, and `pins.ts` — the module whose
+entire job is to refuse to overstate availability — is what renders it. It had been imported by
+nothing that ships, and a module nothing can reach cannot refuse anything.
+
+There is no `total`, no `percentage` and no `durable` field, because Article 23 forbids the figure
+and a field is where a dashboard binds to one. `asked` travels beside `answered` so a zero has a
+denominator: "no peer answered out of 40 asked" and "no peer was asked" are different facts, and
+only one of them is about the content. A self-pin is never summed into a peer count.
+
+`serve --site` says the same thing at startup, because the state it describes is invisible from the
+publisher's own machine — from there the site always loads.
+
+**Unpublishing is not implemented.** `UNPUBLISH_EFFECTS` and `tombstonedBindingExpired` still have
+no caller: the endpoint that would use them is `DELETE /v1/pin/{cid}`, and there is no mutable pin
+set to unpin from. Building one so a constant has a caller would be the defect this section is
+about, wearing a different hat.
+
 ### A fork is surfaced, and never resolved
 
 A peer states a `CHECKPOINT` over its own log at every multiple of `CHECKPOINT_INTERVAL`, and

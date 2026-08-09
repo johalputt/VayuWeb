@@ -30,6 +30,7 @@ const ports = (): ControlPorts => {
     setDiagnostics: (on: boolean) => {
       diagnostics = on;
     },
+    pins: () => [],
   };
 };
 
@@ -273,4 +274,59 @@ test('health requires the token too', () => {
       .status,
     401,
   );
+});
+
+/* -------------------------------------------------------------------------- */
+/* GET /v1/pins — the endpoint the honesty module had been waiting for         */
+/* -------------------------------------------------------------------------- */
+
+test('the pins endpoint exists at all, which it had not', () => {
+  // RESOLUTION.md's endpoint list has carried `GET /v1/pins` since it was written, and `pins.ts` —
+  // the module whose entire job is to refuse to overstate availability — was imported by nothing
+  // that ships. A module nothing can reach cannot refuse anything.
+  const answered = handleControlRequest(request('GET', '/v1/pins'), ports(), TOKEN);
+  assert.equal(answered.status, 200);
+});
+
+test('a pin nobody was asked about says so, rather than reporting a zero', () => {
+  // The whole reason this module exists. `answered: 0` out of `asked: 0` is not "nobody holds it";
+  // it is "nobody was asked", and a client handed a bare zero renders the first one.
+  const withPin: ControlPorts = {
+    ...ports(),
+    pins: () => [
+      {
+        cid: 'bafyexample',
+        asked: 0,
+        answered: 0,
+        peersHolding: 0,
+        servicesHolding: 0,
+        selfPinned: true,
+        observedAt: 1_782_518_400,
+        availabilityUnguaranteed: true,
+      },
+    ],
+  };
+  const answered = handleControlRequest(request('GET', '/v1/pins'), withPin, TOKEN);
+  const body = answered.body as { pins: Array<Record<string, unknown>> };
+  assert.equal(body.pins.length, 1);
+  const [pin] = body.pins;
+  assert.ok(pin);
+  assert.match(String(pin['summary']), /no peer has been asked/);
+  assert.match(String(pin['summary']), /goes offline the site stops loading/);
+  assert.equal(pin['onlyThisNodeHolds'], true, 'and the warning is computed, not left to a client');
+  assert.equal(pin['availabilityUnguaranteed'], true);
+  // The fields that would let a client render a guarantee are absent by construction, and this
+  // asserts the absence rather than trusting the interface to keep it.
+  for (const forbidden of ['total', 'percentage', 'durable', 'uptime', 'replicas']) {
+    assert.equal(forbidden in pin, false, `a pin report must not carry ${forbidden}`);
+  }
+});
+
+test('the pins endpoint is behind the token like everything else', () => {
+  const unauthenticated = handleControlRequest(
+    { method: 'GET', path: '/v1/pins', headers: new Map([[CONTROL_HEADER, '1']]) },
+    ports(),
+    TOKEN,
+  );
+  assert.equal(unauthenticated.status, 401);
 });

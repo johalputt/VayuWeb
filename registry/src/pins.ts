@@ -186,6 +186,22 @@ export function summarise(report: AvailabilityReport): string {
   if (!report.selfPinned && report.peersHolding === 0 && report.servicesHolding === 0) {
     return 'Nothing observed holding this.';
   }
+
+  // **The self-only case says the consequence, and it did not.** It produced "pinned here.
+  // Observed, not guaranteed." — a true sentence that reads as reassurance, which is the exact
+  // failure this module's own header names: "'1 peer holds this site' reads as reassurance and
+  // means nothing if that peer is you". {@link onlyThisNodeHoldsIt} carries the warning as a
+  // separate predicate, so a caller who does not think to ask gets the comfortable half on its
+  // own — and this function exists "rather than left to each caller because this is exactly the
+  // sentence that gets written optimistically". A sentence that needs a second call to not
+  // mislead is a sentence that will be shown without it.
+  if (onlyThisNodeHoldsIt(report)) {
+    return report.asked === 0
+      ? 'pinned here, and no peer has been asked. Nothing is known about who else holds it — ' +
+          'if this node goes offline the site stops loading.'
+      : `pinned here, and none of the ${report.asked} peers asked answered for it — if this node ` +
+          'goes offline the site stops loading. Observed, not guaranteed.';
+  }
   return `${parts.join(', ')}. Observed, not guaranteed.`;
 }
 
@@ -204,6 +220,20 @@ export function onlyThisNodeHoldsIt(report: AvailabilityReport): boolean {
 /* -------------------------------------------------------------------------- */
 /* Unpublishing                                                                */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * How long an observation counts for, in seconds.
+ *
+ * **This implementation's choice, not the protocol's.** No specification fixes it, and the reason
+ * is that an observation is a statement about a *moment* — how long a moment stays interesting is a
+ * policy question, and the answer differs between a laptop that syncs twice a day and a node that
+ * never sleeps. It is stated here rather than passed in at each call site so that it is one number
+ * a reader can find, which is the same reason every other bound in this codebase is collected.
+ *
+ * Deliberately short. The failure mode of too short is asking again; the failure mode of too long
+ * is telling a publisher that a peer is holding their site after that peer has gone.
+ */
+export const OBSERVATION_STALE_SECONDS = 300;
 
 /** Longest a tombstoned binding may survive in any cache. Article 19.4. */
 export const TOMBSTONE_CACHE_SECONDS = 3_600;

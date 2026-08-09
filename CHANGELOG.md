@@ -10,6 +10,31 @@ it.
 
 ## [Unreleased]
 
+### Fixed — the module that refuses to overstate availability could not be reached
+
+`GET /v1/pins` is in RESOLUTION.md's endpoint list and was not implemented, so `pins.ts` — a module
+written top to bottom to stop a true number being reported in a way that means something false —
+was imported by nothing that ships. A module nothing can reach cannot refuse anything.
+
+The endpoint now exists, `serve --site` says the same thing at startup, and the report carries the
+rendered sentence beside the fields. That last part is deliberate: `summarise` exists "rather than
+left to each caller because this is exactly the sentence that gets written optimistically", and a
+client handed only numbers writes its own.
+
+**Writing the caller found the module overstating in its own voice.** For the case it was most
+concerned about — a publisher who is the only holder — it produced "pinned here. Observed, not
+guaranteed." That is true, and it reads as reassurance, which is the failure its own header names
+two paragraphs in: "'1 peer holds this site' reads as reassurance and means nothing if that peer is
+you." The warning lived in `onlyThisNodeHoldsIt`, a separate predicate a caller has to think to ask,
+so the comfortable half was the half that shipped on its own. The sentence now carries the
+consequence — and distinguishes "no peer has been asked" from "none of the 12 asked answered",
+because those are different facts and only one is about the content.
+
+Still not done, and said rather than implied: `UNPUBLISH_EFFECTS` and `tombstonedBindingExpired`
+have no caller. The endpoint that would use them is `DELETE /v1/pin/{cid}`, and there is no mutable
+pin set to unpin from. Building one so a constant has a caller would be the same defect wearing a
+different hat.
+
 ### Fixed — a fork was not unreported, it was undetectable
 
 REPLICATION.md 7.3: "a client comparing two checkpoints at the same length that differ has detected

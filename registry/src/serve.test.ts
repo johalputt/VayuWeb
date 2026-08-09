@@ -154,6 +154,7 @@ const controlPorts: ControlPorts = {
   config: () => ({ token: 'secret-value-that-must-not-appear' }),
   diagnostics: () => false,
   setDiagnostics: () => undefined,
+  pins: () => [],
 };
 
 async function withListener(make: () => Promise<Listener>, run: (l: Listener) => Promise<void>) {

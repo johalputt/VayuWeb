@@ -36,6 +36,7 @@
  *   aid.
  */
 
+import { onlyThisNodeHoldsIt, summarise, type AvailabilityReport } from './pins.ts';
 import { timingSafeEqual } from 'node:crypto';
 
 /** The header a caller must send. RESOLUTION.md, "The control API". */
@@ -67,6 +68,14 @@ export interface ControlPorts {
   /** Whether the proxy is currently emitting diagnostic headers. */
   diagnostics(): boolean;
   setDiagnostics(on: boolean): void;
+  /**
+   * What this node can honestly say about who is keeping its content alive.
+   *
+   * Returns the reports rather than a count, because `pins.ts` exists to stop a count being read
+   * as a promise — there is no `total` field on an {@link AvailabilityReport} and this port must
+   * not become the place one is invented.
+   */
+  pins(): readonly AvailabilityReport[];
 }
 
 /**
@@ -179,6 +188,21 @@ export function handleControlRequest(
       return ok(ports.logHead());
     case 'GET /v1/config':
       return ok(redact(ports.config()));
+    case 'GET /v1/pins':
+      // RESOLUTION.md's endpoint list has carried `GET /v1/pins` since it was written, and
+      // `pins.ts` — the module whose entire job is to refuse to overstate availability — was
+      // imported by nothing that ships. A module that cannot be reached cannot refuse anything.
+      //
+      // The rendered sentence goes over the wire beside the fields, deliberately. `summarise`
+      // exists "rather than left to each caller because this is exactly the sentence that gets
+      // written optimistically", and a client handed only numbers writes its own.
+      return ok({
+        pins: ports.pins().map((pin) => ({
+          ...pin,
+          summary: summarise(pin),
+          onlyThisNodeHolds: onlyThisNodeHoldsIt(pin),
+        })),
+      });
     case 'GET /v1/diagnostics':
       return ok({ enabled: ports.diagnostics() });
     case 'POST /v1/diagnostics/on':
