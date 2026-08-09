@@ -22,12 +22,15 @@ import { join } from 'node:path';
 import {
   main,
   pinGated,
+  pinPorts,
   pointerFor,
   resolverPortsFor,
   rotatingToken,
   siteFilesFor,
 } from './cli.ts';
 import { PinSet } from './pins.ts';
+import { ResolutionCache } from './cache.ts';
+import { contentCacheKey } from './proxy.ts';
 import type { ContentPort } from './proxy.ts';
 import { CID_PARAMETERS, cidBytes, encodeCid, sha256 } from './content.ts';
 import { Store } from './store.ts';
@@ -1076,4 +1079,60 @@ test('MUTATION: the shipping token holder really replaces the value, and issues 
   const seen = new Set([first, second]);
   for (let i = 0; i < 8; i += 1) seen.add(token.rotate());
   assert.equal(seen.size, 10, 'every rotation issues a distinct token');
+});
+
+test('AUDIT: re-pinning brought the site back in the pin set but not on the wire', () => {
+  // Found by running a real resolver rather than by testing one. Unpin, request, re-pin, request:
+  // the second request still failed. `DELETE /v1/pin/{cid}` takes effect instantly because it
+  // CREATES the failure; `POST /v1/pin` did not, because the failure it should undo is negatively
+  // cached against the content source for ten seconds. The operator sees `200 {"outcome":"pinned"}`
+  // and a site that is still down, with nothing to explain the difference.
+  //
+  // The asymmetry is the tell, and the codebase already had the argument: `setGeneration` exists
+  // because "a log that has not grown is a registry whose answers cannot have changed". The pin set
+  // is another thing that changes answers, and nothing invalidated on it.
+  const CID = 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e';
+  const cache = new ResolutionCache({});
+  const pinned = new PinSet(() => true);
+  const ports = pinPorts(pinned, cache);
+
+  // A reader has already been told this content is unavailable, and that answer is cached.
+  cache.putNegative(contentCacheKey('cid', CID), 'CONTENT_UNAVAILABLE', 1);
+  assert.equal(cache.negative(contentCacheKey('cid', CID), 1), 'CONTENT_UNAVAILABLE');
+
+  assert.equal(ports.pin(CID), 'pinned');
+  assert.equal(
+    cache.negative(contentCacheKey('cid', CID), 1),
+    null,
+    'pinning must drop the cached failure it exists to undo',
+  );
+
+  // And unpinning drops any POSITIVE answer for the same reason, in the other direction: a reader
+  // must not keep being served from a snapshot this node has stopped undertaking to serve.
+  cache.putNegative(contentCacheKey('cid', CID), 'CONTENT_UNAVAILABLE', 1);
+  assert.equal(ports.unpin(CID), true);
+  assert.equal(cache.negative(contentCacheKey('cid', CID), 1), null);
+});
+
+test('MUTATION: a REFUSED pin flushes nothing, because it has undone nothing', () => {
+  // `pinPorts` says "a refused pin has undone nothing and must not flush an answer that is still
+  // true", and nothing tested it — making the guard flush unconditionally survived the suite.
+  // It matters in the direction that is easy to miss: a caller who cannot pin a CID could
+  // otherwise use `POST /v1/pin` as an unauthenticated-shaped cache flush for any content source
+  // they can name, one 409 at a time.
+  const CID = 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e';
+  const cache = new ResolutionCache({});
+  const ports = pinPorts(new PinSet(() => false), cache);
+
+  cache.putNegative(contentCacheKey('cid', CID), 'CONTENT_UNAVAILABLE', 1);
+  assert.equal(ports.pin(CID), 'not_held', 'the node does not hold it, so the pin is refused');
+  assert.equal(
+    cache.negative(contentCacheKey('cid', CID), 1),
+    'CONTENT_UNAVAILABLE',
+    'a refused pin must leave a cached answer that is still true exactly where it was',
+  );
+
+  // Unpinning something that was not pinned is the same story from the other side.
+  assert.equal(ports.unpin(CID), false);
+  assert.equal(cache.negative(contentCacheKey('cid', CID), 1), 'CONTENT_UNAVAILABLE');
 });

@@ -10,6 +10,48 @@ it.
 
 ## [Unreleased]
 
+### Fixed — unpinning a site took effect at once; re-pinning it did not
+
+**Found by driving a running resolver, not by testing one.** Unpin the published root, request the
+site, re-pin it, request again — the second request still failed. `POST /v1/pin` answered
+`200 {"outcome":"pinned"}`, `GET /v1/pins` listed the root, and the browsing proxy went on
+refusing, with nothing to explain the difference.
+
+The asymmetry is the whole tell. `DELETE /v1/pin/{cid}` is instant because it *creates* the
+failure; the pin that should undo it was fighting a `CONTENT_UNAVAILABLE` cached against the
+content source for ten seconds. Ten seconds is short enough to look like flakiness and long enough
+for an operator to conclude the endpoint does not work — and "wait and try again" is not an
+explanation a resolver should require.
+
+The argument was already in the codebase, applied to a different input: `setGeneration` drops every
+entry when the log grows, because "a log that has not grown is a registry whose answers cannot have
+changed". The pin set is a second thing that changes answers and nothing invalidated on it. Both
+directions now forget the entry, because a stale *positive* is as wrong after an unpin as a stale
+negative is after a pin, and `contentCacheKey` is exported so the resolver that stores the entry and
+the pin path that drops it cannot spell the key two ways.
+
+Six mutations, and the three that survived the first pass were each worth the run:
+
+- **A refused pin flushed anyway**, and nothing noticed. `pinPorts`'s own comment said a refusal
+  "has undone nothing and must not flush an answer that is still true" — an untested claim. It
+  matters in the direction that is easy to miss: without the guard, a caller who *cannot* pin a CID
+  could use `POST /v1/pin` as a cache flush for any content source they can name, one 409 at a time.
+- **The resolver could store under a different key than the pin path drops** and every test still
+  passed, because the tests called `contentCacheKey` on both sides. A test that computes the key it
+  is checking cannot see the code that computes it differently; the storing side is now asserted
+  through a real proxy request.
+- **An `ipns` key was being forgotten too, and could never match anything.** The two keyspaces do
+  not overlap — an ipns entry is keyed by the pointer, a pin names a CID — so passing a CID as an
+  ipns key matched nothing that has ever existed. It read as a defence and could not fire, so it
+  went, with the real limitation written down in its place: a pointer that resolves to the pinned
+  CID is not invalidated here, because this path has no reverse mapping, and it expires on the
+  pointer cache's own 120-second bound instead.
+
+An end-to-end script now drives a live resolver through its control socket and its browsing proxy —
+pin, unpin, re-pin, the body reader's refusals on the wire, `PATCH /v1/config`, and a token rotation
+whose old token must stop working on the very next request. Twenty-two checks; the re-pin one is the
+reason the script exists.
+
 ### Changed — the "second way to do something" exports, each given a decision
 
 The dead-code gate's table carried seven exports described as "waiting on a decision" rather than

@@ -213,6 +213,19 @@ export interface IpnsPort {
 const EMPTY_BODY = new Uint8Array(0);
 
 /** What the proxy needs to turn a resolved content source into a response body. */
+/**
+ * The cache key a content failure is stored under.
+ *
+ * Exported because it is read from two places now: the resolver stores a failure here, and the pin
+ * path has to drop it when the reason for the failure goes away. Building the string twice would
+ * be two spellings of one rule, and the two would disagree the first time either changed.
+ *
+ * A name key cannot collide with one of these — the label grammar admits no colon.
+ */
+export function contentCacheKey(type: string, value: string): string {
+  return `content:${type}:${value}`;
+}
+
 export interface ContentPort {
   /**
    * Bytes for `path` under `source`, or a numbered failure.
@@ -463,7 +476,7 @@ export function handleRequest(
       // a CID nobody is serving is not being served to any name that points at it, and two names
       // sharing a snapshot share the answer. A name key cannot collide with one of these — the
       // label grammar admits no colon.
-      const contentKey = `content:${type}:${value}`;
+      const contentKey = contentCacheKey(type, value);
       const known = cache.negative(contentKey, now);
       if (known !== null) {
         // No fetch at all. This is the whole of what caching a content failure buys: a site being

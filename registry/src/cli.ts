@@ -37,7 +37,7 @@ import { ResolutionCache } from './cache.ts';
 import { serveControl, serveProxy } from './serve.ts';
 import { drivePeer, SWARM_LIMITS, type PeerOutcome } from './swarm.ts';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
-import { sourceValueOf, type ContentPort, type IpnsPort } from './proxy.ts';
+import { contentCacheKey, sourceValueOf, type ContentPort, type IpnsPort } from './proxy.ts';
 import { importSite, type SiteFile } from './unixfs.ts';
 import { cidBytes, decodeCid } from './content.ts';
 import { memorySource } from './blockstore.ts';
@@ -50,6 +50,7 @@ import { CheckpointLedger } from './checkpoint.ts';
 import {
   OBSERVATION_STALE_SECONDS,
   PinSet,
+  type PinOutcome,
   UNPUBLISH_EFFECTS,
   onlyThisNodeHoldsIt,
   report,
@@ -1250,6 +1251,56 @@ export function rotatingToken(): { current: () => string; rotate: () => string }
 }
 
 /**
+ * The pin and unpin ports, with the cache invalidation that makes them symmetric.
+ *
+ * **Unpinning took effect at once and re-pinning did not**, which is the defect this exists to
+ * close. `DELETE /v1/pin/{cid}` is instant because it *creates* the failure; `POST /v1/pin` was
+ * not, because the failure it undoes is negatively cached against the content source for ten
+ * seconds. The operator saw `200 {"outcome":"pinned"}` and a site that was still down, with
+ * nothing to explain the gap — found by driving a running resolver, not by testing one.
+ *
+ * The argument was already in the codebase: `setGeneration` drops every entry when the log grows,
+ * because "a log that has not grown is a registry whose answers cannot have changed". The pin set
+ * is a second thing that changes answers, and nothing invalidated on it. Both directions forget
+ * the entry, because a stale *positive* is as wrong after an unpin as a stale negative is after a
+ * pin.
+ *
+ * Grouped as a pair rather than written inline so the symmetry is a thing a test can hold.
+ */
+export function pinPorts(
+  pinned: PinSet,
+  cache: ResolutionCache,
+): { pin: (cid: string) => PinOutcome; unpin: (cid: string) => boolean } {
+  // Only the `cid` key. This dropped an `ipns` one too until a surviving mutation showed nothing
+  // could tell — and nothing could, because the two keyspaces do not overlap: an ipns entry is
+  // keyed by the POINTER (`k51…`), and a pin names a CID (`bafy…`), so passing a CID as an ipns
+  // key matched nothing that has ever existed. It read as a defence and could not fire.
+  //
+  // The honest limitation, since removing the line does not remove the question: if a pointer
+  // resolves to the CID being pinned, its cached answer is not invalidated here, because this path
+  // has no reverse mapping from a CID to the pointers that resolve to it. That entry expires on
+  // the pointer cache's own bound — `min(record validity, 120 seconds)` — which is the shortest
+  // TTL in the table precisely because the pointer is the mutable half.
+  const forget = (cid: string): void => {
+    cache.forget(contentCacheKey('cid', cid));
+  };
+  return {
+    pin: (cid) => {
+      const outcome = pinned.add(cid);
+      // Only when something changed. A refused pin has undone nothing and must not flush an
+      // answer that is still true.
+      if (outcome === 'pinned') forget(cid);
+      return outcome;
+    },
+    unpin: (cid) => {
+      const removed = pinned.remove(cid);
+      if (removed) forget(cid);
+      return removed;
+    },
+  };
+}
+
+/**
  * A content port that serves only what the pin set still holds.
  *
  * Extracted and exported so the behaviour can be exercised as data rather than by binding a
@@ -1600,8 +1651,7 @@ async function cmdServe(args: Args): Promise<number> {
               clock(),
             ),
           ),
-      pin: (cid) => pinned.add(cid),
-      unpin: (cid) => pinned.remove(cid),
+      ...pinPorts(pinned, cache),
       // The new token is returned to the caller and goes nowhere else — not to stdout, which
       // already carries the startup one and would otherwise leave two live-looking tokens in one
       // terminal, and not to a file.

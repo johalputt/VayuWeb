@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
+  contentCacheKey,
   DEFAULT_CSP,
   DIAGNOSTIC_HEADERS,
   FORBIDDEN_RESPONSE_HEADERS,
@@ -1179,4 +1180,29 @@ test('AUDIT: every diagnostic header RESOLUTION.md enumerates is one the resolve
   }
   // And the CID one carries the identifier actually served, rendered as a reader would compare it.
   assert.equal(response.headers.get('x-vayuweb-cid'), CID_TEXT);
+});
+
+test('MUTATION: the resolver stores a content failure under the key the pin path drops', () => {
+  // `pinPorts` invalidates `contentCacheKey('cid', cid)` so that re-pinning a site brings it back
+  // on the wire. That only works if the resolver STORES the failure under the same key, and a test
+  // that calls `contentCacheKey` on both sides cannot see the difference — mutating the resolver's
+  // key to an inline string survived the whole suite. This asserts the storing side.
+  const cache = new ResolutionCache();
+  const offline: ContentPort = {
+    fetch: () => ({ ok: false, error: 'CONTENT_UNAVAILABLE' }),
+  };
+
+  const first = request(offline, '/index.html', cache);
+  assert.equal(first.status, 504, 'the fixture must actually fail, or this proves nothing');
+
+  const stored = cache.negative(contentCacheKey('cid', CID_TEXT), NOW);
+  assert.equal(
+    stored,
+    'CONTENT_UNAVAILABLE',
+    'the failure must be reachable at the key the pin path forgets',
+  );
+
+  // And dropping it exactly as `pinPorts` does really does clear the resolver's answer.
+  cache.forget(contentCacheKey('cid', CID_TEXT));
+  assert.equal(cache.negative(contentCacheKey('cid', CID_TEXT), NOW), null);
 });
