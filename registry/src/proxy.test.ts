@@ -14,13 +14,20 @@ import {
   sourceValueOf,
   type ContentPort,
   type ProxyRequest,
+  type ProxyResponse,
 } from './proxy.ts';
 import { ResolutionCache } from './cache.ts';
 import { CID_PARAMETERS, cidBytes, encodeCid, sha256 } from './content.ts';
 import { parseRecord } from './record.ts';
 import { POW_ALGORITHM, POW_NONCE_LENGTH } from './pow.ts';
 import type { CborValue } from './cbor.ts';
-import { RESOLVE_ERRORS, resolveName, sourceCandidates, type ResolverPorts } from './resolve.ts';
+import {
+  MANIFEST_PATH,
+  RESOLVE_ERRORS,
+  resolveName,
+  sourceCandidates,
+  type ResolverPorts,
+} from './resolve.ts';
 import type { RegistryRecord } from './record.ts';
 
 const NOW = 1_782_518_400;
@@ -32,6 +39,17 @@ function ports(known: RegistryRecord | null = null): ResolverPorts {
     hasVerifiedHead: () => true,
   };
 }
+
+/**
+ * The answer these ports give to the resolver's manifest probe.
+ *
+ * RESOLUTION.md step 13 reads `.vayu/manifest.json` before mapping a directory path, because a
+ * declared `index` outranks `index.html` and there is no way to learn that afterwards. That probe
+ * is a real fetch — but a test asserting *which sources were tried, in what order* is asking about
+ * content, so each port below answers the probe and does not count it. The tests that are about the
+ * manifest ask for it on purpose.
+ */
+const MANIFEST_MISS = { ok: false, error: 'PATH_NOT_FOUND' } as const;
 
 function get(target: string, headers: Record<string, string> = {}): ProxyRequest {
   return { method: 'GET', target, headers: new Map(Object.entries(headers)) };
@@ -448,7 +466,12 @@ test('AUDIT: a cid entry reaches the content layer as base32, not as String(Uint
   // And end to end: the port receives what an addressing layer can compare against.
   const seen: { type: string; value: string }[] = [];
   const content: ContentPort = {
-    fetch: (source) => {
+    fetch: (source, path) => {
+      // This port says yes to everything, which includes step 13's manifest probe — so the probe
+      // is answered separately and not counted. Worth noting what it proves in passing: a content
+      // layer that returns bytes for any path hands `parseManifest` "served", which is not JSON
+      // and is discarded, so a site cannot be broken by a port that is agreeable.
+      if (path === MANIFEST_PATH) return MANIFEST_MISS;
       seen.push(source);
       return { ok: true, bytes: new TextEncoder().encode('served'), contentType: 'text/html' };
     },
@@ -637,7 +660,8 @@ test('AUDIT: a record carrying both ipns and cid falls back to the snapshot', ()
   // following RESOLUTION both conformed, and every reader got a 502.
   const asked: string[] = [];
   const content: ContentPort = {
-    fetch: (source) => {
+    fetch: (source, path) => {
+      if (path === MANIFEST_PATH) return MANIFEST_MISS;
       asked.push(source.value);
       if (source.value !== CID_TEXT) return { ok: false, error: 'CONTENT_UNAVAILABLE' };
       return {
@@ -697,7 +721,8 @@ test('AUDIT: a failing pointer with no snapshot still refuses, and says so once'
   // only a pointer, there is nothing to fall back to and the refusal stands.
   const asked: string[] = [];
   const content: ContentPort = {
-    fetch: (source) => {
+    fetch: (source, path) => {
+      if (path === MANIFEST_PATH) return MANIFEST_MISS;
       asked.push(source.value);
       return { ok: false, error: 'CONTENT_UNAVAILABLE' };
     },
@@ -724,7 +749,8 @@ test('AUDIT: a content failure is cached against the content, because the name i
   // serving is not being served to any name that points at it.
   const asked: string[] = [];
   const content: ContentPort = {
-    fetch: (source) => {
+    fetch: (source, path) => {
+      if (path === MANIFEST_PATH) return MANIFEST_MISS;
       asked.push(source.value);
       return { ok: false, error: 'CONTENT_UNAVAILABLE' };
     },
@@ -758,6 +784,191 @@ test('AUDIT: a content failure is cached against the content, because the name i
 });
 
 /* -------------------------------------------------------------------------- */
+/* RESOLUTION.md step 13 / PUBLISHING.md 2.3 — the manifest                    */
+/* -------------------------------------------------------------------------- */
+
+/** A site whose tree is exactly the paths given, with a manifest if one is declared. */
+function siteWith(files: Record<string, string>): { port: ContentPort; asked: string[] } {
+  const asked: string[] = [];
+  return {
+    asked,
+    port: {
+      fetch: (_source, path) => {
+        asked.push(path);
+        const body = files[path];
+        if (body === undefined) return { ok: false, error: 'PATH_NOT_FOUND' };
+        return {
+          ok: true,
+          bytes: new TextEncoder().encode(body),
+          contentType: 'text/html; charset=utf-8',
+        };
+      },
+    },
+  };
+}
+
+const manifest = (fields: Record<string, unknown>): string =>
+  JSON.stringify({ version: 1, ...fields });
+
+function request(port: ContentPort, path: string, cache = new ResolutionCache()): ProxyResponse {
+  return handleRequest(
+    get(path, { host: 'atlas.vayu' }),
+    { lookup: () => live([cborEntry('cid', CID_BYTES)]), hasVerifiedHead: () => true },
+    cache,
+    NOW,
+    { content: port },
+  );
+}
+
+test('my site 404s on every deep link, and my manifest says what to do about it', () => {
+  // PUBLISHING.md 2.3 is a **SHALL** and it names its own symptom in the sentence before: "a site
+  // with client-side routing 404s on every deep link unless a fallback exists". Nothing in the
+  // shipping resolver read `.vayu/manifest.json` at all — `mapPath` implements the non-manifest
+  // half and had no caller, and the CLI's content port reimplemented a subset of it inline, which
+  // is how the manifest half went missing without anything looking wrong.
+  const site = siteWith({
+    '/index.html': 'the app shell',
+    '/.vayu/manifest.json': manifest({ fallback: 'index.html' }),
+  });
+
+  const deep = request(site.port, '/reports/2026/march');
+  assert.equal(deep.status, 200, 'the router gets its chance, which is the whole of the clause');
+  assert.equal(new TextDecoder().decode(deep.body), 'the app shell');
+});
+
+test('a declared notFound is served, and with 404 rather than 200', () => {
+  // The two fields are separate because the STATUS is what separates them. Serving a `notFound`
+  // page with 200 would make every broken link look like a page to a search engine, a link
+  // checker and the browser's own history — which is what a `notFound` document exists to avoid.
+  const site = siteWith({
+    '/index.html': 'home',
+    '/404.html': 'nothing here',
+    '/.vayu/manifest.json': manifest({ notFound: '404.html', fallback: 'index.html' }),
+  });
+
+  const missing = request(site.port, '/gone');
+  assert.equal(missing.status, 404);
+  assert.equal(new TextDecoder().decode(missing.body), 'nothing here');
+  assert.equal(
+    missing.headers.get('content-type'),
+    'text/html; charset=utf-8',
+    'a site page carries the site page’s type, not a refusal’s',
+  );
+});
+
+test('notFound outranks fallback, because the specification orders them', () => {
+  const site = siteWith({
+    '/404.html': 'nothing here',
+    '/index.html': 'home',
+    '/.vayu/manifest.json': manifest({ notFound: '404.html', fallback: 'index.html' }),
+  });
+  assert.equal(request(site.port, '/gone').status, 404);
+});
+
+test('a declared index outranks index.html, and is read before the mapping rather than after', () => {
+  // "resolving `/` and directory paths to the manifest's `index` when one is declared and to
+  // `index.html` otherwise". A resolver that tried `index.html` first and consulted the manifest
+  // only on a miss would serve the wrong document for every site that has both — and would look
+  // correct in every test where only one exists.
+  const site = siteWith({
+    '/index.html': 'the wrong one',
+    '/home.html': 'the declared one',
+    '/.vayu/manifest.json': manifest({ index: 'home.html' }),
+  });
+  const root = request(site.port, '/');
+  assert.equal(root.status, 200);
+  assert.equal(new TextDecoder().decode(root.body), 'the declared one');
+});
+
+test('a declared file that is not in the tree is discarded rather than reported', () => {
+  // Step 13: "a declared file that is not present in the verified tree is discarded rather than
+  // reported, because the manifest declares intent and is never evidence about the tree." A
+  // manifest is optional, so a typo in one must not be a way to break a site — it falls through to
+  // the ordinary answer.
+  const site = siteWith({
+    '/index.html': 'home',
+    '/.vayu/manifest.json': manifest({ index: 'typo.html', notFound: 'also-missing.html' }),
+  });
+  const root = request(site.port, '/');
+  assert.equal(root.status, 200);
+  assert.equal(new TextDecoder().decode(root.body), 'home', 'the ordinary mapping still applies');
+
+  const missing = request(site.port, '/gone');
+  assert.equal(missing.status, RESOLVE_ERRORS.PATH_NOT_FOUND.http);
+});
+
+test('I put ../ in my own manifest and read a file outside my tree', () => {
+  // The manifest is inside the tree and covered by the root CID, so it is AUTHENTIC — it is what
+  // the publisher signed. That is the whole of what the hash proves. It says nothing about whether
+  // the publisher is careless or hostile toward their readers, and these fields become paths this
+  // resolver fetches, so each one is validated as though it came from a stranger.
+  for (const hostile of ['../secrets', '/etc/passwd', 'a/../../b', '']) {
+    const site = siteWith({
+      '/index.html': 'home',
+      '/.vayu/manifest.json': manifest({ index: hostile, notFound: hostile, fallback: hostile }),
+    });
+    const root = request(site.port, '/');
+    assert.equal(new TextDecoder().decode(root.body), 'home', `index ${hostile}`);
+    assert.equal(request(site.port, '/gone').status, RESOLVE_ERRORS.PATH_NOT_FOUND.http, hostile);
+    assert.equal(
+      site.asked.some((path) => path.includes('..')),
+      false,
+      `no traversal may reach the content layer: ${JSON.stringify(site.asked)}`,
+    );
+  }
+});
+
+test('the manifest is read once per site, not once per request', () => {
+  // A CID addresses its bytes, so a manifest keyed by one cannot go stale — which is what makes
+  // remembering it sound and what stops a directory request costing an extra block fetch every
+  // time. RESOLUTION.md's caching section calls this the content cache: "immutable, keyed by CID,
+  // no expiry."
+  const site = siteWith({ '/index.html': 'home' });
+  const cache = new ResolutionCache();
+  for (let i = 0; i < 5; i += 1) assert.equal(request(site.port, '/', cache).status, 200);
+
+  const probes = site.asked.filter((path) => path === MANIFEST_PATH).length;
+  assert.equal(probes, 1, 'five requests, one probe');
+  assert.equal(cache.manifestSize, 1, 'and "this site has no manifest" is remembered too');
+});
+
+test('a registry append does not forget what a CID contains', () => {
+  // `setGeneration` drops the record and negative caches because an append can change what a NAME
+  // resolves to. It cannot change what a CID contains, and dropping these with them would make a
+  // syncing peer re-fetch every manifest it holds, forever, for no reason.
+  const site = siteWith({ '/index.html': 'home' });
+  const cache = new ResolutionCache();
+  cache.setGeneration(1);
+  request(site.port, '/', cache);
+  cache.setGeneration(2);
+  request(site.port, '/', cache);
+  assert.equal(site.asked.filter((path) => path === MANIFEST_PATH).length, 1);
+});
+
+test('a manifest is only consulted when the path is missing, never when the site is', () => {
+  // A source that is unavailable, a pointer that will not resolve, or bytes that failed their hash
+  // are not "this path is not in the tree". Answering any of them with the site's own 404 page
+  // would tell a reader the site is fine and their link is wrong, which is the opposite of true.
+  const asked: string[] = [];
+  const content: ContentPort = {
+    fetch: (_source, path) => {
+      asked.push(path);
+      if (path === MANIFEST_PATH) {
+        return {
+          ok: true,
+          bytes: new TextEncoder().encode(manifest({ notFound: '404.html' })),
+          contentType: 'application/json',
+        };
+      }
+      return { ok: false, error: 'CONTENT_UNAVAILABLE' };
+    },
+  };
+  const response = request(content, '/anything');
+  assert.equal(response.status, RESOLVE_ERRORS.CONTENT_UNAVAILABLE.http);
+  assert.equal(asked.includes('/404.html'), false, 'the site’s 404 page must not be served');
+});
+
+/* -------------------------------------------------------------------------- */
 /* RESOLUTION.md step 10 — pointer resolution, which had no implementation     */
 /* -------------------------------------------------------------------------- */
 
@@ -787,7 +998,8 @@ test('a resolved pointer is served, and the header says which snapshot it landed
   // pointer resolved to, blank in exactly the case where it is not already in the record.
   const asked: Array<{ type: string; value: string }> = [];
   const content: ContentPort = {
-    fetch: (source) => {
+    fetch: (source, path) => {
+      if (path === MANIFEST_PATH) return MANIFEST_MISS;
       asked.push({ ...source });
       return { ok: true, bytes: new Uint8Array([1]), contentType: 'text/html; charset=utf-8' };
     },
@@ -869,7 +1081,8 @@ test('AUDIT: an integrity failure is never cached, against a name or against a C
   // one status, so this one counts the fetches and reads the code.
   let fetches = 0;
   const content: ContentPort = {
-    fetch: () => {
+    fetch: (_source, path) => {
+      if (path === MANIFEST_PATH) return MANIFEST_MISS;
       fetches += 1;
       return { ok: false, error: 'CONTENT_INTEGRITY' };
     },
@@ -902,7 +1115,8 @@ test('AUDIT: the resolver does not fall back across a content-integrity failure'
   // that means "someone is lying to you" must not be the trigger for trying somewhere else.
   const asked: string[] = [];
   const content: ContentPort = {
-    fetch: (source) => {
+    fetch: (source, path) => {
+      if (path === MANIFEST_PATH) return MANIFEST_MISS;
       asked.push(source.value);
       return { ok: false, error: 'CONTENT_INTEGRITY' };
     },

@@ -839,14 +839,15 @@ function siteContentOf(
       // branch nobody can reach from inside one module.
       if (chosen.type !== 'cid') return { ok: false, error: 'NO_USABLE_RECORD' };
       if (chosen.value !== built.root) return { ok: false, error: 'CONTENT_UNAVAILABLE' };
-      const candidates = path.endsWith('/') ? [`${path}index.html`] : [path, `${path}/index.html`];
-      for (const candidate of candidates) {
-        try {
-          const bytes = fetchPath(source, built.root, candidate);
-          return { ok: true, bytes, contentType: contentTypeOf(candidate) };
-        } catch (error) {
-          if (!(error instanceof FetchError)) throw error;
-        }
+      // **An exact path, and no mapping.** This used to try `path`, then `path/index.html`, which
+      // put half of RESOLUTION.md step 13 here and half in the resolver — and the manifest half,
+      // which belongs to neither, ended up in nothing at all. Step 13 now lives in `serveStep13`
+      // and a port is what it says it is: bytes for a path, or a numbered failure.
+      try {
+        const bytes = fetchPath(source, built.root, path);
+        return { ok: true, bytes, contentType: contentTypeOf(path) };
+      } catch (error) {
+        if (!(error instanceof FetchError)) throw error;
       }
       return { ok: false, error: 'PATH_NOT_FOUND' };
     },

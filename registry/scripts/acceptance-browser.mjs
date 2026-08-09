@@ -272,6 +272,13 @@ const INDEX = `<!doctype html>
   </body>
 </html>
 `;
+const MANIFEST = JSON.stringify({ version: 1, notFound: '404.html' });
+
+const NOT_FOUND = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Not here</title></head>
+<body><h1 id="missing">This page does not exist on this site</h1></body></html>
+`;
+
 const STYLE = `body { background: #0b0f14; color: #e6edf3; font-family: system-ui, sans-serif; }
 h1 { color: #7ee787; }
 `;
@@ -360,11 +367,20 @@ try {
   writeFileSync(join(site, 'index.html'), INDEX);
   writeFileSync(join(site, 'assets', 'style.css'), STYLE);
   writeFileSync(join(site, 'assets', 'pixel.png'), PIXEL);
+  // The manifest, and a 404 document for it to name. PUBLISHING.md 2.3 is a SHALL and names its
+  // own symptom: "a site with client-side routing 404s on every deep link unless a fallback
+  // exists". Published as an ordinary file inside the tree, so it is covered by the root CID and
+  // signed along with everything else.
+  mkdirSync(join(site, '.vayu'), { recursive: true });
+  writeFileSync(join(site, '.vayu', 'manifest.json'), MANIFEST);
+  writeFileSync(join(site, '404.html'), NOT_FOUND);
 
   // The root CID comes out of the same importer the resolver uses, so the name is registered
   // against the address the content actually has rather than one asserted alongside it.
   const { importSite } = await import(join(REGISTRY, 'src', 'unixfs.ts'));
   const root = importSite([
+    { path: '.vayu/manifest.json', content: Buffer.from(MANIFEST) },
+    { path: '404.html', content: Buffer.from(NOT_FOUND) },
     { path: 'index.html', content: Buffer.from(INDEX) },
     { path: 'assets/style.css', content: Buffer.from(STYLE) },
     { path: 'assets/pixel.png', content: PIXEL },
@@ -488,6 +504,26 @@ try {
     headline === HEADLINE,
     JSON.stringify(headline),
   );
+
+  // Step 13's manifest half, through the whole stack: a deep link nobody published, answered with
+  // the site's own 404 document and — the part that separates `notFound` from `fallback` — with
+  // HTTP 404. Serving it with 200 would make every broken link look like a page to a search
+  // engine, a link checker and the browser's own history.
+  const deepPage = await context.newPage();
+  const deepResponse = await deepPage.goto(`http://${NAME}/reports/2026/march`, {
+    waitUntil: 'load',
+    timeout: 20_000,
+  });
+  check(
+    'a deep link is answered with the site’s own notFound document',
+    (await deepPage.textContent('#missing')) === 'This page does not exist on this site',
+  );
+  check(
+    'and with HTTP 404, which is what makes it a notFound rather than a fallback',
+    deepResponse !== null && deepResponse.status() === 404,
+    String(deepResponse?.status()),
+  );
+  await deepPage.close();
 
   // Step 10, through the whole stack: a name whose only content entry is a pointer, resolved by
   // the shipping CLI's wiring rather than by a test double, rendered by stock Chromium. Nothing to

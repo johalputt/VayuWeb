@@ -414,6 +414,90 @@ export function resolveName(
 }
 
 /**
+ * The path of the site manifest inside a published tree.
+ *
+ * `.vayu` is the one dot-directory `siteFilesFor` publishes, and this is why.
+ */
+export const MANIFEST_PATH = '/.vayu/manifest.json';
+
+/** Bytes of manifest this resolver will read. A publisher-controlled file needs a bound. */
+export const MAX_MANIFEST_BYTES = 8_192;
+
+/** Characters in a path a manifest may declare. Longer than any sane one and shorter than an attack. */
+const MAX_DECLARED_PATH = 512;
+
+/**
+ * The three manifest fields that drive resolver behaviour, and nothing else.
+ *
+ * `title`, `description` and `generator` are descriptive — PUBLISHING.md section 2 says so in
+ * terms — so they are not parsed here. A resolver that read them would be a resolver that could be
+ * made to act on them later by somebody who found them already available.
+ */
+export interface SiteManifest {
+  /** What `/` and a directory path resolve to, when declared. */
+  readonly index: string | null;
+  /** Served with 200 on no match, so a site's own router can handle the path. */
+  readonly fallback: string | null;
+  /** Served with 404 on no match, in preference to `fallback`. */
+  readonly notFound: string | null;
+}
+
+/**
+ * Read a site manifest, discarding anything that is not a usable declaration.
+ *
+ * ## Verified is not benign
+ *
+ * The manifest is inside the tree and covered by the root CID, so it is **authentic**: it is what
+ * the publisher signed. That is the whole of what the hash proves. It says nothing about whether
+ * the publisher is careless or hostile toward their own readers, and these fields become paths
+ * this resolver fetches — so every one is validated as though it arrived from a stranger, because
+ * in the case that matters it did.
+ *
+ * A declaration that is malformed, absolute, or contains `..` is **discarded rather than
+ * reported**. RESOLUTION.md step 13: "a declared file that is not present in the verified tree is
+ * discarded rather than reported, because the manifest declares intent and is never evidence about
+ * the tree". A manifest with a bad `notFound` is a site that 404s ordinarily, not a site that
+ * cannot be served — refusing the whole site over a typo in an optional field would make an
+ * optional field a way to break a site.
+ */
+export function parseManifest(bytes: Uint8Array): SiteManifest | null {
+  if (bytes.length === 0 || bytes.length > MAX_MANIFEST_BYTES) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  const map = parsed as Record<string, unknown>;
+  // `version` is the one required field. A manifest declaring a version this resolver does not
+  // know is ignored whole rather than read optimistically: a future version may give one of these
+  // names a different meaning, and acting on it would be acting on a guess.
+  if (map['version'] !== 1) return null;
+  return {
+    index: declaredPath(map['index']),
+    fallback: declaredPath(map['fallback']),
+    notFound: declaredPath(map['notFound']),
+  };
+}
+
+/**
+ * A path a manifest declares, or null.
+ *
+ * Relative, no traversal, bounded, non-empty. Rejected before normalising rather than after, for
+ * the reason {@link mapPath} gives: a check that normalises first has produced path-traversal bugs
+ * for thirty years. A leading `/` is refused rather than stripped — a manifest declaring an
+ * absolute path means something this resolver would have to invent an interpretation for.
+ */
+function declaredPath(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  if (value.length === 0 || value.length > MAX_DECLARED_PATH) return null;
+  if (value.startsWith('/') || value.includes('..')) return null;
+  if (value.includes('\0') || value.includes('\n') || value.includes('\r')) return null;
+  return value;
+}
+
+/**
  * Step 13. Map a request path onto a directory listing.
  *
  * Returns the entry to serve, or null for 1414 — an ordinary 404, the site's problem rather than

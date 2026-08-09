@@ -10,6 +10,53 @@ it.
 
 ## [Unreleased]
 
+### Fixed — every site with client-side routing 404s on every deep link
+
+PUBLISHING.md 2.3 is a **SHALL** and names its own symptom in the sentence before it: "a site with
+client-side routing 404s on every deep link unless a fallback exists. On no path match the resolver
+SHALL serve `notFound` with HTTP 404 if present; otherwise, if `fallback` is declared, serve it with
+HTTP 200 so the site's own router can handle the path." RESOLUTION.md step 13 restates it. **Nothing
+in the shipping resolver read `.vayu/manifest.json` at all.** The publish flow put the manifest in
+the tree, where it was signed along with everything else and never opened.
+
+The reason it went missing is worth more than the fix. `mapPath` implements step 13's non-manifest
+half and had **no caller** — the CLI's content port reimplemented a subset of it inline, so the rule
+lived in two places, neither of which was the one the manifest belonged to. Step 13 now happens in
+one place, `serveStep13`, and a `ContentPort` is what its name says: bytes for an exact path, or a
+numbered failure. A port asked for an exact path cannot lose half a rule it was never given.
+
+A declared `index` outranks `index.html`, which means the manifest has to be read **before** the
+mapping rather than after — a resolver that tried `index.html` first and consulted the manifest only
+on a miss would serve the wrong document for every site that has both, and look correct in every
+test where only one exists. That would cost an extra block fetch per directory request, so the
+manifest is remembered per CID with no expiry: the first slice of the content cache RESOLUTION.md's
+caching section already describes ("immutable, keyed by CID, no expiry"). A CID addresses its bytes,
+so the entry cannot go stale — which is also why `setGeneration` does *not* drop these. An append
+changes which CID a *name* resolves to; it cannot change what a CID contains.
+
+**The manifest is authentic, not benign.** It is inside the tree and covered by the root CID, so it
+is what the publisher signed — that is the whole of what the hash proves. Its fields become paths
+this resolver fetches, so each is validated as though it came from a stranger: relative, bounded, no
+traversal, and a version this resolver does not know means the manifest is ignored whole rather than
+read optimistically. A malformed declaration is discarded rather than reported, because a manifest
+is optional and a typo in one must not be a way to break a site.
+
+One more rule fell out of writing it: **only a missing path is a reason to try another path.** A
+source that is unavailable, or whose bytes failed their hash, will not answer a different path any
+better — and answering an unavailable site with its own 404 document would tell a reader the site is
+fine and their link is wrong, which is the opposite of true.
+
+`registry/scripts/acceptance-browser.mjs` proves it end to end: a deep link nobody published,
+answered by stock Chromium with the site's own 404 document, at HTTP 404. 17/17.
+
+Two of the tests exist because a mutation survived — nothing covered the manifest's version check or
+its size bound, which are the two things standing between a publisher-controlled file and this
+resolver's parser.
+
+`docs/spec/PUBLISHING.md` said "Draft — not yet implemented" and `check-status-claims.py` caught it
+the moment two modules began citing the document. Corrected to say which section is implemented and
+which are not.
+
 ### Added — identity generation, so the refusal that guards a private key has one to guard
 
 `client/Cargo.toml` has described this crate as "identity handling and the control-API client"

@@ -41,6 +41,9 @@ import {
   type ResolveErrorName,
   type ResolverPorts,
   type SourceType,
+  MANIFEST_PATH,
+  parseManifest,
+  type SiteManifest,
 } from './resolve.ts';
 import { cidFromBytes, encodeCid } from './content.ts';
 import { ResolutionCache } from './cache.ts';
@@ -424,6 +427,15 @@ export function handleRequest(
    * fallback those are different things and the useful one is what the reader received.
    */
   let servedCid: string | null = null;
+  /**
+   * The status a successful answer carries, which is not always 200.
+   *
+   * Step 13 serves a declared `notFound` document **with HTTP 404**: the site's own page, and the
+   * status a search engine, a link checker and a browser's history all need. Serving it with 200
+   * would make every broken deep link look like a page, which is the thing a `notFound` document
+   * exists to avoid rather than to cause.
+   */
+  let status = 200;
   const fallbacks: SourceType[] = [];
   if (options.content !== undefined) {
     const candidates = sourceCandidates(outcome.record);
@@ -481,11 +493,9 @@ export function handleRequest(
         addressed = resolved;
       }
 
-      const fetched = options.content.fetch(
-        { type: 'cid', value: addressed },
-        pathOf(request.target),
-      );
+      const fetched = serveStep13(options.content, addressed, pathOf(request.target), cache);
       if (fetched.ok) {
+        status = fetched.status;
         headers.set('content-type', fetched.contentType);
         // Handed on unchanged. There is no encoding step here any more, which is the point: the
         // two that used to exist did not agree with each other.
@@ -533,5 +543,109 @@ export function handleRequest(
     headers.set('x-vayuweb-fallbacks', fallbacks.join(','));
   }
 
-  return { status: 200, headers, body };
+  return { status, headers, body };
+}
+
+/**
+ * RESOLUTION.md step 13, including the half that consulted no manifest.
+ *
+ * ## What was missing, and what it cost
+ *
+ * PUBLISHING.md 2.3 is a **SHALL** — "on no path match the resolver SHALL serve `notFound` with
+ * HTTP 404 if present; otherwise, if `fallback` is declared, serve it with HTTP 200 so the site's
+ * own router can handle the path" — and it names its own symptom in the sentence before: "a site
+ * with client-side routing 404s on every deep link unless a fallback exists". Nothing in the
+ * shipping resolver read `.vayu/manifest.json` at all. `mapPath` implements the non-manifest half
+ * and had no caller; the CLI's content port reimplemented a subset of it inline, which is how the
+ * manifest half went missing without anything looking wrong.
+ *
+ * ## The manifest is fetched at most once, and only when it is needed
+ *
+ * A file request that hits costs nothing extra — the common case is untouched. A directory request
+ * needs it up front, because a declared `index` takes precedence over `index.html` and there is no
+ * way to know that after the fact. A miss needs it to look for `notFound` and `fallback`.
+ *
+ * The manifest is remembered per CID with no expiry, which is the first slice of the content cache
+ * RESOLUTION.md's caching section describes — "immutable, keyed by CID, no expiry". A CID addresses
+ * its bytes, so the entry cannot go stale, and the cost is therefore one extra block fetch per
+ * SITE rather than per request. Stated rather than left for a reader to measure.
+ */
+export function serveStep13(
+  content: ContentPort,
+  cid: string,
+  path: string,
+  cache: ResolutionCache,
+):
+  | (ContentResult & { readonly ok: true; readonly status: number })
+  | { ok: false; error: ResolveErrorName } {
+  const fetchPath = (at: string): ContentResult => content.fetch({ type: 'cid', value: cid }, at);
+
+  const site = (): SiteManifest | null => {
+    const known = cache.manifest(cid);
+    if (known !== undefined) return known;
+    const got = fetchPath(MANIFEST_PATH);
+    const parsed = got.ok ? parseManifest(got.bytes) : null;
+    // Remembered whether or not there was one: "this site has no manifest" is exactly as reusable
+    // a fact as its contents, and is the more common one.
+    cache.rememberManifest(cid, parsed);
+    return parsed;
+  };
+
+  // A declared `index` wins over `index.html`, which is what "resolving `/` and directory paths to
+  // the manifest's `index` when one is declared and to `index.html` otherwise" says. If the
+  // declared file is not in the tree the request carries on to the ordinary mapping, because a
+  // manifest declares intent and is never evidence about the tree.
+  //
+  // **The whole mapping happens here and not in the content layer**, which is a change from how
+  // this worked. The CLI's port did its own directory-to-`index.html` mapping, so step 13 was
+  // implemented in two places — a resolver that knew about `mapPath` and a port that knew about
+  // `index.html` — and the manifest, which belongs to neither, ended up in nothing. A port that is
+  // asked for an exact path cannot lose half a rule it was never given.
+  const directory = path === '/' || path.endsWith('/');
+  if (directory) {
+    const declared = site()?.index ?? null;
+    if (declared !== null) {
+      const attempt = fetchPath(`${path}${declared}`);
+      if (attempt.ok) return { ...attempt, status: 200 };
+      // **Only a missing path is a reason to try another path.** A source that is unavailable, or
+      // whose bytes failed their hash, is not going to answer a different path any better — and on
+      // an integrity failure, asking again is the downgrade RESOLUTION.md forbids at the source
+      // level, applied one level down. Every attempt after the first is bandwidth spent proving
+      // something already known.
+      if (attempt.error !== 'PATH_NOT_FOUND') return attempt;
+    }
+    const fallbackIndex = fetchPath(`${path}index.html`);
+    if (fallbackIndex.ok) return { ...fallbackIndex, status: 200 };
+    if (fallbackIndex.error !== 'PATH_NOT_FOUND') return fallbackIndex;
+    // A directory that has no index is not the same as a path that is missing, but the tree is the
+    // only thing that can say so — ask for the path as given before giving up on it.
+  }
+
+  const direct = fetchPath(path);
+  if (direct.ok) return { ...direct, status: 200 };
+  // A directory named without its trailing slash still resolves to its index — `mapPath`'s rule,
+  // applied where the tree can actually be asked.
+  if (!directory && direct.error === 'PATH_NOT_FOUND') {
+    const nested = fetchPath(`${path}/index.html`);
+    if (nested.ok) return { ...nested, status: 200 };
+  }
+  // Only a missing PATH is a reason to look at the manifest. A source that is unavailable, a
+  // pointer that will not resolve or bytes that failed their hash are not "this path is not in the
+  // tree", and answering any of them with the site's 404 page would tell a reader the site is fine
+  // and their link is wrong.
+  if (direct.error !== 'PATH_NOT_FOUND') return direct;
+
+  const declared = site();
+  if (declared !== null) {
+    if (declared.notFound !== null) {
+      const attempt = fetchPath(`/${declared.notFound}`);
+      // Served with 404, which is the point of it being a separate field from `fallback`.
+      if (attempt.ok) return { ...attempt, status: 404 };
+    }
+    if (declared.fallback !== null) {
+      const attempt = fetchPath(`/${declared.fallback}`);
+      if (attempt.ok) return { ...attempt, status: 200 };
+    }
+  }
+  return direct;
 }

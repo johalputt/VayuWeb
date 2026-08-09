@@ -45,7 +45,7 @@
  */
 
 import type { RegistryRecord } from './record.ts';
-import type { ResolveErrorName } from './resolve.ts';
+import type { ResolveErrorName, SiteManifest } from './resolve.ts';
 
 /**
  * How long a negative answer may be trusted, in seconds. `null` means it is never cached.
@@ -118,6 +118,16 @@ export const POSITIVE_TTL_SECONDS = 300;
 export const CACHE_LIMITS = {
   negativeEntries: 512,
   positiveEntries: 512,
+  /**
+   * Manifests held, keyed by content identifier.
+   *
+   * Small: a manifest is at most {@link import('./resolve.ts').MAX_MANIFEST_BYTES} and this bounds
+   * the memory a stream of distinct names can make this resolver hold. It exists at all because
+   * without it a directory request costs an extra block fetch **every time** rather than once per
+   * site — the manifest has to be read before mapping, since a declared `index` outranks
+   * `index.html` and there is no way to learn that after the fact.
+   */
+  manifestEntries: 256,
 } as const;
 
 interface NegativeEntry {
@@ -140,8 +150,10 @@ interface PositiveEntry {
 export class ResolutionCache {
   private readonly negatives = new Map<string, NegativeEntry>();
   private readonly positives = new Map<string, PositiveEntry>();
+  private readonly manifests = new Map<string, SiteManifest | null>();
   private readonly negativeLimit: number;
   private readonly positiveLimit: number;
+  private readonly manifestLimit: number;
   private generation: number | null = null;
 
   /**
@@ -156,11 +168,12 @@ export class ResolutionCache {
   private readonly ttls: Record<ResolveErrorName, number | null>;
 
   constructor(
-    limits: { negativeEntries?: number; positiveEntries?: number } = {},
+    limits: { negativeEntries?: number; positiveEntries?: number; manifestEntries?: number } = {},
     ttls: Record<ResolveErrorName, number | null> = NEGATIVE_TTL_SECONDS,
   ) {
     this.negativeLimit = limits.negativeEntries ?? CACHE_LIMITS.negativeEntries;
     this.positiveLimit = limits.positiveEntries ?? CACHE_LIMITS.positiveEntries;
+    this.manifestLimit = limits.manifestEntries ?? CACHE_LIMITS.manifestEntries;
     this.ttls = ttls;
   }
 
@@ -170,6 +183,10 @@ export class ResolutionCache {
 
   get positiveSize(): number {
     return this.positives.size;
+  }
+
+  get manifestSize(): number {
+    return this.manifests.size;
   }
 
   /**
@@ -229,6 +246,34 @@ export class ResolutionCache {
       return null;
     }
     return entry.record;
+  }
+
+  /**
+   * What a site's manifest says, or `undefined` if this CID has not been looked at.
+   *
+   * Three states, and the middle one is the point: `undefined` means "not read yet", `null` means
+   * "read, and there is no usable manifest", and a value is a manifest. Collapsing the first two
+   * would make a site without a manifest pay for a fetch on every request forever.
+   */
+  manifest(cid: string): SiteManifest | null | undefined {
+    return this.manifests.get(cid);
+  }
+
+  /**
+   * Remember what a CID's manifest says, with **no expiry**.
+   *
+   * RESOLUTION.md's caching section: "Content cache: immutable, keyed by CID, no expiry." A CID
+   * addresses its bytes, so an entry keyed by one cannot go stale — which is also why
+   * {@link setGeneration} does not clear these. A registry append changes which CID a *name*
+   * resolves to; it cannot change what a CID contains, and dropping these on every append would
+   * make a syncing peer re-fetch every manifest it holds for no reason at all.
+   *
+   * Bounded like everything else, because the keys are still chosen by whoever gets this resolver
+   * to look at a name.
+   */
+  rememberManifest(cid: string, manifest: SiteManifest | null): void {
+    evictFor(this.manifests, cid, this.manifestLimit);
+    this.manifests.set(cid, manifest);
   }
 
   /**

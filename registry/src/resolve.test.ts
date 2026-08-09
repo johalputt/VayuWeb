@@ -13,6 +13,7 @@ import {
   type ResolverPorts,
   type Outcome,
 } from './resolve.ts';
+import { MAX_MANIFEST_BYTES, parseManifest } from './resolve.ts';
 import { parseRecord, type RegistryRecord } from './record.ts';
 import { POW_ALGORITHM, POW_NONCE_LENGTH } from './pow.ts';
 import { type CborMap, type CborValue } from './cbor.ts';
@@ -537,4 +538,67 @@ test('AUDIT: two entries of the same type resolve the same way in every implemen
 
   const spec = readFileSync(new URL('../../docs/spec/RESOLUTION.md', import.meta.url), 'utf8');
   assert.match(spec.replace(/\s+/g, ' '), /the \*\*first in record order\*\*/);
+});
+
+/* -------------------------------------------------------------------------- */
+/* The site manifest — publisher-controlled input that becomes paths we fetch  */
+/* -------------------------------------------------------------------------- */
+
+const asManifest = (text: string): Uint8Array => new TextEncoder().encode(text);
+
+test('a manifest declaring a version this resolver does not know is ignored whole', () => {
+  // Found by a mutation that SURVIVED. Reading the fields anyway is reading a guess: a version 2
+  // may give `index`, `fallback` or `notFound` a different meaning — a different base, a pattern
+  // rather than a path, a list — and acting on today's meaning would be acting on the one thing
+  // the version number exists to warn about. `version` is the manifest's only required field for
+  // exactly this reason.
+  assert.equal(parseManifest(asManifest('{"version":2,"notFound":"404.html"}')), null);
+  assert.equal(parseManifest(asManifest('{"notFound":"404.html"}')), null, 'absent is not 1');
+  assert.equal(parseManifest(asManifest('{"version":"1"}')), null, 'the string "1" is not 1');
+  assert.equal(parseManifest(asManifest('{"version":1.5}')), null);
+  assert.deepEqual(parseManifest(asManifest('{"version":1}')), {
+    index: null,
+    fallback: null,
+    notFound: null,
+  });
+});
+
+test('I hand you a megabyte of manifest and you parse all of it', () => {
+  // Also a surviving mutation. The manifest is fetched from a tree whose publisher chose every
+  // byte, and `JSON.parse` on an unbounded string is work an attacker allocates for free — one
+  // block reference in a tree, whatever size they like. The bound is checked before decoding
+  // rather than after, so the bytes are never turned into a string at all.
+  const padded = `{"version":1,"title":"${'a'.repeat(MAX_MANIFEST_BYTES)}"}`;
+  assert.ok(asManifest(padded).length > MAX_MANIFEST_BYTES);
+  assert.equal(parseManifest(asManifest(padded)), null);
+
+  // And the boundary is where it says it is, rather than an order of magnitude away.
+  const filler = MAX_MANIFEST_BYTES - '{"version":1,"title":""}'.length;
+  const atLimit = `{"version":1,"title":"${'a'.repeat(filler)}"}`;
+  assert.equal(asManifest(atLimit).length, MAX_MANIFEST_BYTES);
+  assert.deepEqual(parseManifest(asManifest(atLimit))?.notFound, null, 'the limit itself parses');
+});
+
+test('anything that is not an object of strings declares nothing', () => {
+  // A manifest is optional, so none of these may be a way to break a site: each one yields "no
+  // usable declaration" and the ordinary mapping carries on.
+  for (const text of ['', 'not json', '[]', 'null', '"a string"', '42', '{']) {
+    assert.equal(parseManifest(asManifest(text)), null, JSON.stringify(text));
+  }
+  // A field of the wrong type is discarded on its own, not with the whole manifest: a publisher
+  // who typed a number into `index` still gets their `notFound`.
+  const mixed = parseManifest(asManifest('{"version":1,"index":7,"notFound":"404.html"}'));
+  assert.deepEqual(mixed, { index: null, fallback: null, notFound: '404.html' });
+});
+
+test('a declared path may not climb out of the tree, or start outside it', () => {
+  const hostile = ['../secrets', 'a/../../b', '/etc/passwd', '/index.html', ''];
+  for (const value of hostile) {
+    const parsed = parseManifest(asManifest(JSON.stringify({ version: 1, notFound: value })));
+    assert.equal(parsed?.notFound, null, value);
+  }
+  // A leading slash is refused rather than stripped: a manifest declaring an absolute path means
+  // something this resolver would have to invent an interpretation for, and inventing one is how
+  // two implementations end up serving different documents for the same site.
+  assert.equal(parseManifest(asManifest('{"version":1,"index":"a/b.html"}'))?.index, 'a/b.html');
 });

@@ -6,7 +6,10 @@ for people who are not security engineers.
 The key words MUST, MUST NOT, SHALL, SHALL NOT, SHOULD, SHOULD NOT and MAY are to be interpreted
 as described in RFC 2119.
 
-**Status:** Draft — not yet implemented.
+**Status:** Draft — not yet deployed. Section 2.3's deep-link rule is implemented in
+`registry/src/proxy.ts` and `registry/src/resolve.ts`, which read the manifest and serve `notFound`
+with 404 or `fallback` with 200. The publish flow, the authoring checks and the content-security
+profile's publish-time enforcement are not.
 
 ## 0. The design rule
 
