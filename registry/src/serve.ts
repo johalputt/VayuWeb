@@ -631,7 +631,15 @@ export interface ControlServerOptions {
   readonly ports: ControlPorts;
   /** Filesystem path for the socket. Refused if it looks like a TCP address. */
   readonly path: string;
-  readonly token: string;
+  /**
+   * The token to compare against, read **per request** rather than captured once.
+   *
+   * A function and not a string, because `POST /v1/token/rotate` changes it while the listener is
+   * bound. Capturing the value at bind time would return a fresh token to the caller and then go
+   * on refusing it — the shape of defect this codebase has found repeatedly, where a mechanism
+   * produces a new value and the thing that checks it keeps reading the old one.
+   */
+  readonly token: () => string;
 }
 
 /**
@@ -651,10 +659,11 @@ export function serveControl(options: ControlServerOptions): Promise<Listener> {
   // binds a control API nobody can reach -- and says nothing, because every request answers 401
   // exactly as a wrong guess would. Failing at bind turns a silent misconfiguration into a
   // startup error, which is the only moment anybody is looking.
-  if (Buffer.from(options.token, 'base64url').length !== TOKEN_BYTES) {
+  const initial = options.token();
+  if (Buffer.from(initial, 'base64url').length !== TOKEN_BYTES) {
     throw new Error(
       `the control token must be base64url of ${TOKEN_BYTES} bytes; this one decodes to ` +
-        `${Buffer.from(options.token, 'base64url').length}, so no caller could ever authenticate`,
+        `${Buffer.from(initial, 'base64url').length}, so no caller could ever authenticate`,
     );
   }
 
@@ -691,7 +700,7 @@ export function serveControl(options: ControlServerOptions): Promise<Listener> {
           // would be, and this response ends up in support tickets and screenshots.
           let response: ControlResponse;
           try {
-            response = handleControlRequest(request, options.ports, options.token);
+            response = handleControlRequest(request, options.ports, options.token());
           } catch {
             response = { status: 500, headers: new Map(), body: { error: 'internal' } };
           }

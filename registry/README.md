@@ -150,10 +150,10 @@ path before they publish actually has. Every other pointer resolves to null.
 
 ### The control API answers about a name, and forgets what it remembers
 
-Sixteen of the eighteen endpoints RESOLUTION.md lists now exist: `GET /v1/records/{name}` (the
+Seventeen of the eighteen endpoints RESOLUTION.md lists now exist: `GET /v1/records/{name}` (the
 record and what this resolver resolves it to), `POST /v1/resolve`, `GET /v1/cache/stats`,
-`DELETE /v1/cache`, `DELETE /v1/cache/{name}`, `POST /v1/pin`, `DELETE /v1/pin/{cid}`, and
-`GET /v1/peers` — which answers `joined: false` from `serve`, because `sync` is where a peer
+`DELETE /v1/cache`, `DELETE /v1/cache/{name}`, `POST /v1/pin`, `DELETE /v1/pin/{cid}`,
+`POST /v1/token/rotate`, and `GET /v1/peers` — which answers `joined: false` from `serve`, because `sync` is where a peer
 connection lives and a zero that reads like a measurement is worse than a sentence.
 
 A name is **the first value a user types that reaches this API's routing**; every other endpoint is
@@ -180,9 +180,20 @@ the proxy's content port is gated on the pin set: unpinning a root stops it bein
 stay in memory — nothing here can shred them — and what changes is that this node stops undertaking
 to hand them out, which is the whole of what a local unpin can honestly mean.
 
-The two that remain are `PATCH /v1/config` and `POST /v1/token/rotate`. Both change state this
-process does not yet own — a mutable configuration, a token file it can rewrite — and neither is
-blocked on the transport. Reading a body was the shared blocker and it is gone: `serve.ts` now has a
+`POST /v1/token/rotate` issues a new bearer token and makes it the only one that works. The
+listener reads the token **per request** rather than capturing it at bind time, which is the whole
+of what makes rotation real: capturing it would return a fresh token to the caller and then go on
+refusing it, leaving an operator holding a credential nothing accepts and a resolver only a restart
+can recover.
+
+The returned value is the only copy that leaves the process — not stdout, which already carries the
+startup token and would otherwise leave two live-looking tokens in one terminal, and not a file.
+The consequence is stated rather than designed around: **if the response is lost, the resolver is
+unreachable until it is restarted.** No arrangement that keeps a recovery copy somewhere is
+compatible with not having a copy somewhere.
+
+The one that remains is `PATCH /v1/config`, which needs a mutable configuration this process does
+not yet own. It is not blocked on the transport. Reading a body was the shared blocker and it is gone: `serve.ts` now has a
 bounded reader, refusing `Transfer-Encoding` outright so one field decides the length, checking
 that length against `SERVE_LIMITS.bodyBytes` before a byte is buffered, refusing any byte past it
 rather than ignoring it, and holding the head deadline armed across the body so a sender that

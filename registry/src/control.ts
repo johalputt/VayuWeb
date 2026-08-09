@@ -118,6 +118,17 @@ export interface ControlPorts {
   pin(cid: string): PinOutcome;
   /** Release a pin. `false` means it was not pinned, which is not an error. */
   unpin(cid: string): boolean;
+  /**
+   * Issue a new bearer token and make it the only one that works, returning it.
+   *
+   * The returned value is the **only** copy that leaves this process. Nothing writes it to disk,
+   * logs it or prints it, for the same reason `serve` generates one per run rather than reading a
+   * file: a token in a config file is a token in a backup, in a screenshot and in a support
+   * ticket. The operational consequence is stated rather than designed around — if the response is
+   * lost, the resolver is unreachable until it is restarted, and no arrangement that keeps a
+   * recovery copy somewhere is compatible with not having a copy somewhere.
+   */
+  rotateToken(): string;
 }
 
 /**
@@ -282,6 +293,11 @@ export function handleControlRequest(
       if (outcome === 'full') return deny(409, 'pin_set_full');
       return ok({ cid, outcome });
     }
+    case 'POST /v1/token/rotate':
+      // Past the token check, like everything else — otherwise the endpoint is a denial of service
+      // with an authentication step nobody passed: rotate, discard the response, and the
+      // operator's credential is dead with no way back but a restart.
+      return ok({ token: ports.rotateToken() });
     case 'GET /v1/health':
       return ok({ ok: true });
     case 'GET /v1/status': {

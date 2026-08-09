@@ -1223,6 +1223,33 @@ function siteContentOf(
 }
 
 /**
+ * The control token, and the one thing that makes rotation work.
+ *
+ * A holder rather than a string, because `POST /v1/token/rotate` replaces the value while the
+ * listener is bound. `serveControl` reads `current` per request; capturing it once would hand a
+ * caller a fresh token and then go on refusing it, which is the shape of defect this codebase has
+ * found repeatedly — a mechanism producing a new value while the thing that checks it reads the
+ * old one.
+ *
+ * Exported so the wiring can be exercised directly. The policy is testable through a double at the
+ * `serve.ts` level; what a double cannot show is whether the *shipping* holder actually replaces
+ * anything, and "declared and never assigned" is precisely the defect that hides behind a double.
+ *
+ * Never written to a file or an environment variable, before or after a rotation: a token in a
+ * config file is a token in a backup, in a screenshot and in a support ticket.
+ */
+export function rotatingToken(): { current: () => string; rotate: () => string } {
+  let value = randomBytes(TOKEN_BYTES).toString('base64url');
+  return {
+    current: () => value,
+    rotate: () => {
+      value = randomBytes(TOKEN_BYTES).toString('base64url');
+      return value;
+    },
+  };
+}
+
+/**
  * A content port that serves only what the pin set still holds.
  *
  * Extracted and exported so the behaviour can be exercised as data rather than by binding a
@@ -1454,7 +1481,7 @@ async function cmdServe(args: Args): Promise<number> {
   // Generated per run, never read from a file or an environment variable. A token in a config
   // file is a token in a backup, in a screenshot and in a support ticket; one that lives only in
   // this process's memory and this run's stdout cannot outlive the process that needs it.
-  const token = randomBytes(TOKEN_BYTES).toString('base64url');
+  const token = rotatingToken();
 
   const socketPath =
     args.flags.get('socket') ??
@@ -1488,7 +1515,7 @@ async function cmdServe(args: Args): Promise<number> {
   let diagnostics = false;
   const control = await serveControl({
     path: socketPath,
-    token,
+    token: token.current,
     ports: {
       status: () => ({
         mode: 'clearnet',
@@ -1566,6 +1593,10 @@ async function cmdServe(args: Args): Promise<number> {
           ),
       pin: (cid) => pinned.add(cid),
       unpin: (cid) => pinned.remove(cid),
+      // The new token is returned to the caller and goes nowhere else — not to stdout, which
+      // already carries the startup one and would otherwise leave two live-looking tokens in one
+      // terminal, and not to a file.
+      rotateToken: () => token.rotate(),
     },
   });
 
@@ -1620,7 +1651,7 @@ async function cmdServe(args: Args): Promise<number> {
   out(`control API      ${control.address}  (mode 0600)`);
   out('');
   out('control token (this run only, not written to disk):');
-  out(`  ${token}`);
+  out(`  ${token.current()}`);
   out('');
   out('Point a browser at the proxy. Ctrl-C to stop.');
 

@@ -19,7 +19,14 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { main, pinGated, pointerFor, resolverPortsFor, siteFilesFor } from './cli.ts';
+import {
+  main,
+  pinGated,
+  pointerFor,
+  resolverPortsFor,
+  rotatingToken,
+  siteFilesFor,
+} from './cli.ts';
 import { PinSet } from './pins.ts';
 import type { ContentPort } from './proxy.ts';
 import { CID_PARAMETERS, cidBytes, encodeCid, sha256 } from './content.ts';
@@ -1048,4 +1055,25 @@ test('unpinning stops the proxy serving the site, which is what a local unpin me
   // And a CID that was never pinned is refused without ever reaching the inner port.
   const other = gated.fetch({ type: 'cid', value: 'bafkreiotherotherotherother' }, '/');
   assert.equal(other.ok, false);
+});
+
+test('MUTATION: the shipping token holder really replaces the value, and issues a fresh one', () => {
+  // The rotation policy is exercised through a double at the `serve.ts` level — the old token
+  // stops working, the new one starts. What a double cannot show is whether the holder that
+  // actually ships replaces anything, and "declared and never assigned" is exactly the defect a
+  // double hides. Asserted here on the real one.
+  const token = rotatingToken();
+  const first = token.current();
+  assert.equal(Buffer.from(first, 'base64url').length, 32, 'a full-length token to begin with');
+
+  const second = token.rotate();
+  assert.notEqual(second, first, 'a rotation that returns the same value has rotated nothing');
+  assert.equal(token.current(), second, 'and `current` must answer with the NEW one');
+  assert.equal(Buffer.from(second, 'base64url').length, 32);
+
+  // Fresh randomness rather than a counter or a derivation: a token predictable from its
+  // predecessor is a token the holder of the predecessor still has.
+  const seen = new Set([first, second]);
+  for (let i = 0; i < 8; i += 1) seen.add(token.rotate());
+  assert.equal(seen.size, 10, 'every rotation issues a distinct token');
 });

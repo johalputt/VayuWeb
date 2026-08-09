@@ -162,6 +162,7 @@ const controlPorts: ControlPorts = {
   peers: () => ({ joined: false, peers: 0, detail: 'not joined' }),
   pin: () => 'not_held' as const,
   unpin: () => false,
+  rotateToken: () => randomBytes(32).toString('base64url'),
 };
 
 async function withListener(make: () => Promise<Listener>, run: (l: Listener) => Promise<void>) {
@@ -296,7 +297,7 @@ test('the control API refuses a TCP address before it binds anything', async () 
         serveControl({
           ports: controlPorts,
           path: bad,
-          token: randomBytes(32).toString('base64url'),
+          token: () => randomBytes(32).toString('base64url'),
         }),
       /TCP|address|socket/i,
       bad,
@@ -316,7 +317,7 @@ test('a control token that could never authenticate is refused at bind', async (
   for (const bad of ['a'.repeat(64), 'short', '', randomBytes(16).toString('base64url')]) {
     await assert.rejects(
       async () =>
-        serveControl({ ports: controlPorts, path: join(directory, 'x.sock'), token: bad }),
+        serveControl({ ports: controlPorts, path: join(directory, 'x.sock'), token: () => bad }),
       /could ever authenticate/,
       JSON.stringify(bad.slice(0, 12)),
     );
@@ -334,7 +335,12 @@ test('the control socket is 0600 inside a 0700 directory', async () => {
   chmodSync(join(directory, 'nested'), 0o777);
   assert.equal(statSync(join(directory, 'nested')).mode & 0o777, 0o777, 'fixture must start open');
   await withListener(
-    () => serveControl({ ports: controlPorts, path, token: randomBytes(32).toString('base64url') }),
+    () =>
+      serveControl({
+        ports: controlPorts,
+        path,
+        token: () => randomBytes(32).toString('base64url'),
+      }),
     async () => {
       // A socket anyone on the machine can connect to is a control API anyone on the machine has;
       // a 0600 socket in a world-writable directory is one anybody can replace. Both halves are
@@ -363,7 +369,7 @@ test('the control API answers over the socket and refuses a wrong token', async 
   const path = join(directory, 'control.sock');
   const token = randomBytes(32).toString('base64url');
   await withListener(
-    () => serveControl({ ports: controlPorts, path, token }),
+    () => serveControl({ ports: controlPorts, path, token: () => token }),
     async (listener) => {
       const good = await speak(listener.address, authorised('/v1/status', token));
       assert.match(good, /^HTTP\/1\.1 200 /);
@@ -403,7 +409,7 @@ test('the control API does not disclose a secret it was handed', async () => {
   const path = join(directory, 'control.sock');
   const token = randomBytes(32).toString('base64url');
   await withListener(
-    () => serveControl({ ports: controlPorts, path, token }),
+    () => serveControl({ ports: controlPorts, path, token: () => token }),
     async (listener) => {
       const answer = await speak(listener.address, authorised('/v1/config', token));
       // The request must actually SUCCEED, or the assertion below is about a 403 body.
@@ -655,7 +661,7 @@ test('AUDIT: a control port that throws does not take the control API with it', 
       },
     },
     path,
-    token,
+    token: () => token,
   });
   try {
     const answer = await speak(listener.address, authorised('/v1/status', token));
@@ -885,7 +891,7 @@ async function withControl(run: (address: string, token: string) => Promise<void
   const listener = await serveControl({
     ports: controlPorts,
     path: join(directory, 'control.sock'),
-    token,
+    token: () => token,
   });
   try {
     await run(listener.address, token);
@@ -985,4 +991,77 @@ test('the body limit is refused before the token is even consulted', async () =>
     );
     assert.match(answer, /^HTTP\/1\.1 413 /, answer);
   });
+});
+
+/* -------------------------------------------------------------------------- */
+/* POST /v1/token/rotate — the one endpoint that changes who may call again    */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: a rotated token takes effect on the very next request, and the old one dies', async () => {
+  // The defect this is written against is the one this codebase keeps finding: a mechanism that
+  // returns a new value while the thing that checks it keeps comparing against the old. A listener
+  // capturing the token once at bind time would answer 200 to `POST /v1/token/rotate`, hand back a
+  // fresh token, and then refuse it — leaving the operator holding a credential nothing accepts
+  // and a resolver only a restart can recover. Every assertion here is about a SECOND request,
+  // because the first one cannot tell the two arrangements apart.
+  const first = randomBytes(32).toString('base64url');
+  let current = first;
+  const directory = mkdtempSync(join(tmpdir(), 'vayuweb-rotate-'));
+  const listener = await serveControl({
+    ports: {
+      ...controlPorts,
+      rotateToken: () => {
+        current = randomBytes(32).toString('base64url');
+        return current;
+      },
+    },
+    path: join(directory, 'control.sock'),
+    // Read per request rather than captured, which is the property under test.
+    token: () => current,
+  });
+  try {
+    const rotated = await speakTo(listener.address, post('/v1/token/rotate', first, '{}'));
+    assert.match(rotated, /^HTTP\/1\.1 200 /, rotated);
+    const issued = /"token":"([A-Za-z0-9_-]+)"/.exec(rotated);
+    assert.ok(issued, `the response must carry the new token: ${rotated}`);
+    const next = issued[1] as string;
+
+    assert.notEqual(next, first, 'a rotation that returns the same token has rotated nothing');
+    assert.equal(Buffer.from(next, 'base64url').length, 32, 'and it is a full-length token');
+
+    // The two assertions that matter, both on a later request.
+    const withOld = await speakTo(listener.address, authorised('/v1/status', first));
+    assert.match(withOld, /^HTTP\/1\.1 401 /, `the old token must stop working: ${withOld}`);
+    const withNew = await speakTo(listener.address, authorised('/v1/status', next));
+    assert.match(withNew, /^HTTP\/1\.1 200 /, `the new token must work: ${withNew}`);
+  } finally {
+    await listener.close();
+  }
+});
+
+test('rotation is behind the token, so a stranger cannot lock the operator out', async () => {
+  // Otherwise the endpoint is a denial of service with an authentication step nobody passed:
+  // rotate, discard the response, and the operator's token is dead.
+  const token = randomBytes(32).toString('base64url');
+  const directory = mkdtempSync(join(tmpdir(), 'vayuweb-rotate-auth-'));
+  let rotations = 0;
+  const listener = await serveControl({
+    ports: {
+      ...controlPorts,
+      rotateToken: () => {
+        rotations += 1;
+        return token;
+      },
+    },
+    path: join(directory, 'control.sock'),
+    token: () => token,
+  });
+  try {
+    const wrong = randomBytes(32).toString('base64url');
+    const refused = await speakTo(listener.address, post('/v1/token/rotate', wrong, '{}'));
+    assert.match(refused, /^HTTP\/1\.1 401 /);
+    assert.equal(rotations, 0, 'and the rotation never happened');
+  } finally {
+    await listener.close();
+  }
 });

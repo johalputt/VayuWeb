@@ -53,6 +53,7 @@ const ports = (): ControlPorts => {
     // the refusal and a double that accepted everything could not exhibit it.
     pin: (cid) => pinned.add(cid),
     unpin: (cid) => pinned.remove(cid),
+    rotateToken: () => randomBytes(TOKEN_BYTES).toString('base64url'),
   };
 };
 

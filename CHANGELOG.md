@@ -10,6 +10,36 @@ it.
 
 ## [Unreleased]
 
+### Added — token rotation, and the reason it needed a holder rather than a string
+
+`POST /v1/token/rotate` ships, taking the endpoint count to seventeen of eighteen. The endpoint is
+three lines; what took the work is the thing that makes it real.
+
+**The listener reads the token per request rather than capturing it at bind time.** A listener that
+captured it would answer 200 to a rotation, hand back a fresh token, and then go on refusing it —
+leaving an operator holding a credential nothing accepts and a resolver only a restart can recover.
+That is the shape of defect this codebase has found repeatedly: a mechanism produces a new value
+while the thing that checks it keeps reading the old one. Every assertion in the test is about a
+*second* request, because the first one cannot tell the two arrangements apart.
+
+The token is now a holder — `rotatingToken()` — rather than a `string`, and it is exported so the
+wiring can be exercised directly. The policy is testable through a double at the `serve.ts` level;
+what a double cannot show is whether the *shipping* holder replaces anything, and "declared and
+never assigned" is exactly the defect a double hides. Every rotation issues fresh randomness rather
+than a derivation, because a token predictable from its predecessor is a token the holder of the
+predecessor still has.
+
+The new token is the only copy that leaves the process: not stdout, which already carries the
+startup token and would otherwise leave two live-looking tokens in one terminal, and not a file.
+The operational consequence is **stated rather than designed around** — if the response is lost, the
+resolver is unreachable until it is restarted, and no arrangement that keeps a recovery copy
+somewhere is compatible with not having a copy somewhere.
+
+Rotation sits past the token check like everything else. Otherwise the endpoint is a denial of
+service with an authentication step nobody passed: rotate, discard the response, and the operator's
+credential is dead. Four mutations, all killed — including the capture-at-bind-time one this entry
+is mostly about.
+
 ### Added — a pin set that refuses to pin what the node does not hold
 
 `POST /v1/pin` and `DELETE /v1/pin/{cid}` ship, taking the endpoint count to sixteen of eighteen.
