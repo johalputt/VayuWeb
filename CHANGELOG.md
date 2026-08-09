@@ -10,6 +10,33 @@ it.
 
 ## [Unreleased]
 
+### Changed — the inclusion verifier no longer looks as though it checks the leaf position
+
+`verifyInclusion` computed `index: flatIndex(proof.leafIndex, 1)` into the leaf node and then never
+read the field on any path: the first parent overwrites it with 0, and `parentHash` does not look at
+it. An untrusted field consumed inside a verifier and discarded is worse than no line at all —
+the next reader takes the position for authenticated on the strength of it.
+
+**Nothing is being fixed in the fold, because nothing there is wrong.** Found by moving `leafIndex`
+on a real proof and watching `light-verify` still print `verified`, then checking REGISTRY.md rather
+than assuming: `parent(left, right)` is normatively `0x01 || uint64be(lsize + rsize) || lhash ||
+rhash`, with no index in it, and the document says why — it "is what lets an inclusion proof be a
+bare list of sibling hashes carrying no shape metadata". The index selects which leaf the caller is
+asking about; the fold proves that *this data* is in the tree, not where. Binding it would be a
+change to a wire-visible hash construction, which is a VWIP and not a bug fix.
+
+So the change is to stop implying otherwise, and to write down what is and is not established. Two
+tests pin it: every in-range `leafIndex` verifies and so does a doctored sibling `index`, while
+every size and every sibling hash is refused. They document rather than repair, which is said here
+rather than left for a reader to infer from a green run.
+
+The peak comparison carried the same kind of overstatement in its comment — "the reconstructed peak
+must be the one the proof claims, **byte for byte**" over code that reads one field of three. It
+compares hashes, and it does not need to do more, because `treeHash` binds every peak's `index` and
+`size` one line further down. That is a real guarantee and it is not that comparison's; the second
+test asserts it rather than leaving "it is covered elsewhere" as the sentence that turns out to be
+false.
+
 ### Fixed — a `serve` that could not bind its proxy hung forever holding a socket
 
 Run `serve` twice on one port and the second one **never returns**. It prints `listen EADDRINUSE:

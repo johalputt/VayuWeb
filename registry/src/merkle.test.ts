@@ -241,3 +241,82 @@ test('proving a leaf outside the log is an error rather than a fabrication', () 
   assert.throws(() => proveInclusion(all, -1), MerkleError);
   assert.throws(() => proveInclusion([], 0), MerkleError);
 });
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT: what an inclusion proof does NOT bind, said out loud                  */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: leafIndex selects a leaf and is not authenticated by the fold', () => {
+  // Found by moving it on a real proof and watching `light-verify` still print `verified`.
+  //
+  // **This is the specification working, not a defect** — REGISTRY.md's hash construction is
+  // normative and `parent(left, right)` hashes `0x01 || uint64be(lsize + rsize) || lhash || rhash`
+  // with no index in it, precisely so that "an inclusion proof be a bare list of sibling hashes
+  // carrying no shape metadata". The position is a selector the verifier is told; it is not a
+  // claim the fold checks.
+  //
+  // It is pinned here because the verifier used to LOOK as though it checked. It computed
+  // `index: flatIndex(proof.leafIndex, 1)` into the leaf node and then never read the field again
+  // — the first parent overwrites it with 0 and `parentHash` ignores it on every path. A line that
+  // consumes an untrusted field inside a verifier and discards the result is worse than no line:
+  // the next reader takes the position for authenticated because the code appears to use it.
+  const leaves = entries(5);
+  const root = treeOf(leaves).root();
+  const proof = proveInclusion(leaves, 2);
+
+  assert.equal(verifyInclusion(leaves[2]!, proof, root), true);
+  // Any in-range position verifies, because none of them is hashed.
+  for (const moved of [0, 1, 3, 4]) {
+    assert.equal(
+      verifyInclusion(leaves[2]!, { ...proof, leafIndex: moved }, root),
+      true,
+      `leafIndex ${moved}: the fold cannot see it, so it must not appear to`,
+    );
+  }
+  // A sibling's `index` is the same: carried in the structure, never hashed.
+  const siblings = proof.siblings.map((s, i) => (i === 0 ? { ...s, index: 999 } : s));
+  assert.equal(verifyInclusion(leaves[2]!, { ...proof, siblings }, root), true);
+
+  // What IS bound, so the line above is a statement about indices and not about proofs. Sizes go
+  // into every parent hash, and the leaf's own size is checked against the data before anything.
+  assert.equal(
+    verifyInclusion(leaves[2]!, { ...proof, leafSize: proof.leafSize + 1 }, root),
+    false,
+  );
+  assert.equal(
+    verifyInclusion(
+      leaves[2]!,
+      { ...proof, siblings: proof.siblings.map((s, i) => (i === 0 ? { ...s, size: 9999 } : s)) },
+      root,
+    ),
+    false,
+  );
+});
+
+test('AUDIT: comparing the reconstructed peak by hash alone is enough, and only because of treeHash', () => {
+  // The peak comparison reads `claimed.hash` and nothing else, under a comment that said the peak
+  // must match "byte for byte". It does not compare `index` or `size` — and it does not need to,
+  // because `treeHash` hashes `hash || uint64be(index) || uint64be(size)` for every peak, so a
+  // roots array with a doctored index or size cannot reach the expected root. The comment claimed
+  // a check the function does not perform; the guarantee comes from one line further down.
+  //
+  // Asserted rather than reasoned about, because "it is covered elsewhere" is exactly the sentence
+  // that turns out to be false.
+  const leaves = entries(5);
+  const root = treeOf(leaves).root();
+  const proof = proveInclusion(leaves, 2);
+
+  const doctoredIndex = proof.roots.map((r, i) =>
+    i === proof.rootIndex ? { ...r, index: r.index + 2 } : r,
+  );
+  assert.equal(
+    verifyInclusion(leaves[2]!, { ...proof, roots: doctoredIndex }, root),
+    false,
+    "a peak's index is bound by treeHash even though the peak comparison ignores it",
+  );
+
+  const doctoredSize = proof.roots.map((r, i) =>
+    i === proof.rootIndex ? { ...r, size: r.size + 1 } : r,
+  );
+  assert.equal(verifyInclusion(leaves[2]!, { ...proof, roots: doctoredSize }, root), false);
+});

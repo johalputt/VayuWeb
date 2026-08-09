@@ -298,11 +298,19 @@ export function verifyInclusion(data: Uint8Array, proof: Proof, expectedRoot: Ui
   if (proof.siblings.length !== proof.siblingIsLeft.length) return false;
   if (proof.rootIndex < 0 || proof.rootIndex >= proof.roots.length) return false;
 
-  let node: Root = {
-    hash: leafHash(data),
-    index: flatIndex(proof.leafIndex, 1),
-    size: data.length,
-  };
+  // `index: 0`, deliberately, and the same value every parent below uses. It used to be
+  // `flatIndex(proof.leafIndex, 1)` — computed from an untrusted field, assigned, and then never
+  // read on any path: the first parent overwrites it and `parentHash` does not look at it. A line
+  // that consumes an untrusted input inside a verifier and discards the result is worse than no
+  // line, because the next reader takes the position for authenticated on the strength of it.
+  //
+  // Nothing here binds `proof.leafIndex`, and that is REGISTRY.md's construction rather than an
+  // omission: `parent(left, right)` is `0x01 || uint64be(lsize + rsize) || lhash || rhash`, with no
+  // index, "which is what lets an inclusion proof be a bare list of sibling hashes carrying no
+  // shape metadata". The index selects which leaf the caller is asking about; the fold proves that
+  // THIS data is in the tree, not where. `checkpoint.ts` bounds it against the log length; nothing
+  // else may treat it as evidence.
+  let node: Root = { hash: leafHash(data), index: 0, size: data.length };
 
   // Fold upward. Siblings are ordered nearest-first, so they are consumed in reverse.
   for (let i = proof.siblings.length - 1; i >= 0; i -= 1) {
@@ -317,9 +325,15 @@ export function verifyInclusion(data: Uint8Array, proof: Proof, expectedRoot: Ui
     };
   }
 
-  // The reconstructed peak must be the one the proof claims, byte for byte. Comparing only the
-  // final root would let a proof substitute a different peak and still reach the same root when
-  // the substituted peak was itself supplied in `roots`.
+  // The reconstructed peak must be the one the proof claims. Comparing only the final root would
+  // let a proof substitute a different peak and still reach the same root when the substituted
+  // peak was itself supplied in `roots`.
+  //
+  // By HASH, and only by hash — this said "byte for byte" while reading one field of three. The
+  // peak's `index` and `size` are bound one line further down, where `treeHash` hashes
+  // `hash || uint64be(index) || uint64be(size)` for every peak, so a doctored roots array cannot
+  // reach the expected root. That is a real guarantee and it is not this comparison's; saying so
+  // is the difference between a check and the appearance of one.
   const claimed = proof.roots[proof.rootIndex]!;
   if (claimed.hash.length !== node.hash.length) return false;
   let mismatch = 0;
