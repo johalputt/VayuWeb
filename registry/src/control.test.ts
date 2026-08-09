@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 
+import { PinSet, report } from './pins.ts';
+
 import {
   CONTROL_HEADER,
   TOKEN_BYTES,
@@ -18,6 +20,7 @@ const TOKEN = randomBytes(TOKEN_BYTES).toString('base64url');
 
 const ports = (): ControlPorts => {
   let diagnostics = false;
+  const pinned = new PinSet((cid) => cid === HELD_CID);
   return {
     status: () => ({ mode: 'clearnet', uptime: 42, listeners: ['proxy'] }),
     version: () => '0.2.0-test',
@@ -31,7 +34,10 @@ const ports = (): ControlPorts => {
     setDiagnostics: (on: boolean) => {
       diagnostics = on;
     },
-    pins: () => [],
+    pins: () =>
+      pinned
+        .list()
+        .map((cid) => report(cid, 0, [{ holder: { kind: 'self' }, observedAt: 1 }], 300, 1)),
     // Deliberately no `name` field: the router owns that one, and a double that returns it too
     // masks whether the router's echo is the validated name or the bytes that were sent. It did,
     // and a mutation replacing the echo with the raw path went unnoticed because of it.
@@ -43,6 +49,10 @@ const ports = (): ControlPorts => {
     cacheStats: () => ({ negative: 1, positive: 2, manifests: 3, hits: 4, misses: 5 }),
     flushCache: (name) => (name === null ? 6 : 1),
     peers: () => ({ joined: false, peers: 0, detail: 'not joined' }),
+    // A real PinSet over a node that holds exactly one CID, because the interesting behaviour is
+    // the refusal and a double that accepted everything could not exhibit it.
+    pin: (cid) => pinned.add(cid),
+    unpin: (cid) => pinned.remove(cid),
   };
 };
 
@@ -633,4 +643,107 @@ test('a body on an endpoint that takes none changes nothing about the answer', (
     TOKEN,
   );
   assert.deepEqual(noisy.body, plain.body);
+});
+
+/* -------------------------------------------------------------------------- */
+/* POST /v1/pin and DELETE /v1/pin/{cid}                                       */
+/* -------------------------------------------------------------------------- */
+
+const HELD_CID = 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e';
+const ABSENT_CID = 'bafkreiaxlvczbcuvhwjrwqmz2s6lrx3zjrxpjnpbcvi3ohbrhkuuwqmxbe';
+
+test('a pin is refused for content this node cannot serve, and says so', () => {
+  // The endpoint's whole risk is becoming a register of intentions that reads like a register of
+  // holdings. A node with no fetcher cannot make itself hold a stranger's CID, and answering 200
+  // would put that fiction into `GET /v1/pins` beside a real one.
+  const control = ports();
+  const response = handleControlRequest(
+    withBody('POST', '/v1/pin', JSON.stringify({ cid: ABSENT_CID })),
+    control,
+    TOKEN,
+  );
+  assert.equal(response.status, 409);
+  assert.deepEqual(response.body, { error: 'not_held' });
+});
+
+test('a pin is taken for content this node holds, and shows up in the pin list', () => {
+  const control = ports();
+  const taken = handleControlRequest(
+    withBody('POST', '/v1/pin', JSON.stringify({ cid: HELD_CID })),
+    control,
+    TOKEN,
+  );
+  assert.equal(taken.status, 200);
+  assert.deepEqual(taken.body, { cid: HELD_CID, outcome: 'pinned' });
+
+  const listed = handleControlRequest(request('GET', '/v1/pins'), control, TOKEN);
+  const body = listed.body as { pins: Array<Record<string, unknown>> };
+  assert.equal(body.pins.length, 1);
+  assert.equal(body.pins[0]?.['cid'], HELD_CID);
+});
+
+test('a CID is validated before it is used for anything at all', () => {
+  // LOCAL-SURFACE.md 3.1's ordering, applied to the other kind of value a user types. A CID that
+  // is not a CID must never reach a pin set, a log line or an echo.
+  const control = ports();
+  for (const bad of ['', 'not-a-cid', '../../etc/passwd', 'Qm' + 'a'.repeat(44), 'bafkrei!!!']) {
+    const response = handleControlRequest(
+      withBody('POST', '/v1/pin', JSON.stringify({ cid: bad })),
+      control,
+      TOKEN,
+    );
+    assert.equal(response.status, 400, JSON.stringify(bad));
+    assert.deepEqual(response.body, { error: 'bad_cid' }, JSON.stringify(bad));
+  }
+});
+
+test('unpinning is idempotent and reports which of the two happened', () => {
+  const control = ports();
+  handleControlRequest(withBody('POST', '/v1/pin', JSON.stringify({ cid: HELD_CID })), control, TOKEN);
+
+  const first = handleControlRequest(request('DELETE', `/v1/pin/${HELD_CID}`), control, TOKEN);
+  assert.equal(first.status, 200);
+  assert.deepEqual(first.body, { cid: HELD_CID, unpinned: true });
+
+  const again = handleControlRequest(request('DELETE', `/v1/pin/${HELD_CID}`), control, TOKEN);
+  assert.equal(again.status, 200, 'DELETE is idempotent; the second is not an error');
+  assert.deepEqual(again.body, { cid: HELD_CID, unpinned: false });
+});
+
+test('an unpin path carrying something that is not a CID is a 400, not a 404', () => {
+  // The truthful distinction between "no such endpoint" and "that is not a CID" — the same one
+  // `namedRoute` draws for names.
+  const control = ports();
+  for (const bad of ['not-a-cid', '..%2f..%2fetc', 'bafkrei!!!']) {
+    const response = handleControlRequest(request('DELETE', `/v1/pin/${bad}`), control, TOKEN);
+    assert.equal(response.status, 400, bad);
+    assert.deepEqual(response.body, { error: 'bad_cid' }, bad);
+  }
+});
+
+test('the pin routes are behind the token like every other one', () => {
+  const control = ports();
+  const posted = handleControlRequest(
+    {
+      method: 'POST',
+      path: '/v1/pin',
+      headers: new Map([[CONTROL_HEADER, '1']]),
+      body: new TextEncoder().encode(JSON.stringify({ cid: HELD_CID })),
+    },
+    control,
+    TOKEN,
+  );
+  assert.equal(posted.status, 401);
+  const deleted = handleControlRequest(
+    {
+      method: 'DELETE',
+      path: `/v1/pin/${HELD_CID}`,
+      headers: new Map([[CONTROL_HEADER, '1']]),
+      body: new Uint8Array(0),
+    },
+    control,
+    TOKEN,
+  );
+  assert.equal(deleted.status, 401);
+  assert.equal(control.pins().length, 0, 'and neither reached the pin set');
 });

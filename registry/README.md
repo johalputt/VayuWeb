@@ -150,11 +150,11 @@ path before they publish actually has. Every other pointer resolves to null.
 
 ### The control API answers about a name, and forgets what it remembers
 
-Fourteen of the eighteen endpoints RESOLUTION.md lists now exist: `GET /v1/records/{name}` (the
+Sixteen of the eighteen endpoints RESOLUTION.md lists now exist: `GET /v1/records/{name}` (the
 record and what this resolver resolves it to), `POST /v1/resolve`, `GET /v1/cache/stats`,
-`DELETE /v1/cache`, `DELETE /v1/cache/{name}`, and `GET /v1/peers` — which answers `joined: false`
-from `serve`, because `sync` is where a peer connection lives and a zero that reads like a
-measurement is worse than a sentence.
+`DELETE /v1/cache`, `DELETE /v1/cache/{name}`, `POST /v1/pin`, `DELETE /v1/pin/{cid}`, and
+`GET /v1/peers` — which answers `joined: false` from `serve`, because `sync` is where a peer
+connection lives and a zero that reads like a measurement is worse than a sentence.
 
 A name is **the first value a user types that reaches this API's routing**; every other endpoint is
 a constant. It is validated against the grammar before it is echoed, keyed, logged or passed onward
@@ -168,10 +168,21 @@ through the more permissive one.
 nothing measures the memory an entry occupies, and a figure derived from an encoding length would
 be a guess wearing the clothes of a measurement. An operator would size a cache with it.
 
-The four that remain are `POST /v1/pin`, `DELETE /v1/pin/{cid}`, `PATCH /v1/config` and
-`POST /v1/token/rotate`. Every one of them changes state this process does not yet own — a mutable
-pin set, a mutable configuration, a token file it can rewrite — and none of them is blocked on the
-transport any more. Reading a body was the shared blocker and it is gone: `serve.ts` now has a
+**A pin is refused for content this node does not hold**, with 409 `not_held`. That refusal is the
+point of the endpoint rather than a limitation of it: this build's only source of blocks is the site
+it imported, and recording a pin for a stranger's CID would put an intention into `GET /v1/pins`
+beside a holding with nothing distinguishing the two — the single thing `pins.ts` exists to prevent.
+A full set refuses rather than evicting, the same stance the equivocation ledger takes, because
+making room by forgetting a pin is how an operator learns from a reader that their site went away.
+
+**`DELETE /v1/pin/{cid}` has teeth.** Article 19.2's second guaranteed act is "unpin it locally", so
+the proxy's content port is gated on the pin set: unpinning a root stops it being served. The blocks
+stay in memory — nothing here can shred them — and what changes is that this node stops undertaking
+to hand them out, which is the whole of what a local unpin can honestly mean.
+
+The two that remain are `PATCH /v1/config` and `POST /v1/token/rotate`. Both change state this
+process does not yet own — a mutable configuration, a token file it can rewrite — and neither is
+blocked on the transport. Reading a body was the shared blocker and it is gone: `serve.ts` now has a
 bounded reader, refusing `Transfer-Encoding` outright so one field decides the length, checking
 that length against `SERVE_LIMITS.bodyBytes` before a byte is buffered, refusing any byte past it
 rather than ignoring it, and holding the head deadline armed across the body so a sender that

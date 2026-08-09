@@ -298,6 +298,7 @@ function reason(status: number): string {
     403: 'Forbidden',
     404: 'Not Found',
     405: 'Method Not Allowed',
+    409: 'Conflict',
     410: 'Gone',
     413: 'Payload Too Large',
     431: 'Request Header Fields Too Large',

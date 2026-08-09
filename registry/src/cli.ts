@@ -49,6 +49,7 @@ import { EquivocationLedger, ledgerPathFor, type LedgerEntry } from './equivocat
 import { CheckpointLedger } from './checkpoint.ts';
 import {
   OBSERVATION_STALE_SECONDS,
+  PinSet,
   UNPUBLISH_EFFECTS,
   onlyThisNodeHoldsIt,
   report,
@@ -1222,6 +1223,27 @@ function siteContentOf(
 }
 
 /**
+ * A content port that serves only what the pin set still holds.
+ *
+ * Extracted and exported so the behaviour can be exercised as data rather than by binding a
+ * listener — the same split `serve.ts` keeps, and the reason a refusal expressed as a function is
+ * testable while one expressed as "the socket stopped answering" is not.
+ *
+ * This is what gives `DELETE /v1/pin/{cid}` teeth. Article 19.2's second guaranteed act is "unpin
+ * it locally", and an unpin that left the proxy handing out the same bytes would be the interface
+ * saying one thing and the socket doing another. The blocks remain in memory; what changes is that
+ * this node stops undertaking to serve them, which is the whole of what a local unpin can mean.
+ */
+export function pinGated(inner: ContentPort, pinned: PinSet): ContentPort {
+  return {
+    fetch: (chosen, path) =>
+      chosen.type === 'cid' && pinned.has(chosen.value)
+        ? inner.fetch(chosen, path)
+        : { ok: false, error: 'CONTENT_UNAVAILABLE' },
+  };
+}
+
+/**
  * The resolver's view of a local log.
  *
  * **An empty log is a resolver that has not synchronised, not a namespace with nothing in it.**
@@ -1447,6 +1469,20 @@ async function cmdServe(args: Args): Promise<number> {
   // API's `DELETE /v1/cache` empties it. A second cache would make the flush a lie.
   const cache = new ResolutionCache();
   const site = siteContentOf(args.flags.get('site'));
+
+  // Publishing a site IS pinning it: this node holds the blocks and undertakes to serve them, and
+  // a pin set that started empty would make `GET /v1/pins` report nothing while the proxy served
+  // the site regardless. `holds` is the honest predicate — the only CID this build can obtain
+  // bytes for is the one it just imported, so every other pin is refused rather than recorded as
+  // an intention that reads like a holding.
+  const pinned = new PinSet((cid) => site !== null && cid === site.root);
+  if (site !== null) pinned.add(site.root);
+
+  // The wrapper is what gives `DELETE /v1/pin/{cid}` teeth. Article 19.2's second guaranteed act
+  // is "unpin it locally", and an unpin that left the proxy serving the same bytes would be the
+  // interface saying one thing and the socket doing another. The blocks stay in memory; what
+  // changes is that this node stops undertaking to hand them out.
+  const served: ContentPort | null = site === null ? null : pinGated(site.content, pinned);
   const pointer = pointerFor(args.flags.get('pointer'), site?.root ?? null);
 
   let diagnostics = false;
@@ -1517,17 +1553,19 @@ async function cmdServe(args: Args): Promise<number> {
         detail: 'this command does not join a swarm; replication is `vayuweb-registry sync`',
       }),
       pins: () =>
-        site === null
-          ? []
-          : [
-              report(
-                site.root,
-                0,
-                [{ holder: { kind: 'self' }, observedAt: clock() }],
-                OBSERVATION_STALE_SECONDS,
-                clock(),
-              ),
-            ],
+        pinned
+          .list()
+          .map((cid) =>
+            report(
+              cid,
+              0,
+              [{ holder: { kind: 'self' }, observedAt: clock() }],
+              OBSERVATION_STALE_SECONDS,
+              clock(),
+            ),
+          ),
+      pin: (cid) => pinned.add(cid),
+      unpin: (cid) => pinned.remove(cid),
     },
   });
 
@@ -1540,7 +1578,7 @@ async function cmdServe(args: Args): Promise<number> {
       get diagnostics() {
         return diagnostics;
       },
-      ...(site === null ? {} : { content: site.content }),
+      ...(served === null ? {} : { content: served }),
       ...(pointer === null ? {} : { ipns: pointer }),
     },
     ports: resolverPortsFor(store),

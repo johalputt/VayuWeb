@@ -275,3 +275,75 @@ export const UNPUBLISH_EFFECTS = {
 export function tombstonedBindingExpired(observedAt: number, now: number): boolean {
   return now - observedAt >= TOMBSTONE_CACHE_SECONDS;
 }
+
+/** Bounds on what an operator may ask this node to keep. */
+export const PIN_LIMITS = {
+  /**
+   * Distinct CIDs pinned.
+   *
+   * Bounded because the control API is reachable by anything with the token, and an unbounded set
+   * is an unbounded allocation behind one. 256 is far above what a node serving its own sites
+   * needs, and the failure at the limit is a refusal rather than an eviction — see {@link PinSet}.
+   */
+  entries: 256,
+} as const;
+
+/** What happened when a pin was asked for. */
+export type PinOutcome = 'pinned' | 'already' | 'not_held' | 'full';
+
+/**
+ * The set of CIDs this node undertakes to keep and serve.
+ *
+ * **A pin is refused for content the node does not hold**, and that refusal is the reason this
+ * class is in `pins.ts` rather than anywhere else. Everything in this module exists to stop
+ * availability being stated more strongly than it is known, and a pin set that accepted any CID
+ * would be exactly where the overstatement got in: `GET /v1/pins` would report an intention beside
+ * a holding with nothing distinguishing them, and `summarise` would be handed a report about bytes
+ * nobody has. Whether the node holds it is asked of the caller — `holds` — because this module
+ * knows about availability and not about blockstores.
+ *
+ * **Full refuses; it does not evict.** The same stance as {@link EquivocationLedger}: making room
+ * by dropping the oldest entry turns a bound into a mechanism for silently forgetting something
+ * the node promised to keep, and the operator finds out from a reader. A freed slot is reusable,
+ * so the bound is on what is held at once rather than a lifetime quota.
+ */
+export class PinSet {
+  private readonly pinned = new Set<string>();
+  private readonly holds: (cid: string) => boolean;
+  private readonly cap: number;
+
+  constructor(holds: (cid: string) => boolean, cap: number = PIN_LIMITS.entries) {
+    this.holds = holds;
+    this.cap = cap;
+  }
+
+  /**
+   * Take a pin, or say why not.
+   *
+   * Order matters: an already-pinned CID is answered before the capacity check, so a node at its
+   * limit still answers truthfully about what it already holds rather than reporting `full` for
+   * something that is in fact pinned.
+   */
+  add(cid: string): PinOutcome {
+    if (this.pinned.has(cid)) return 'already';
+    if (!this.holds(cid)) return 'not_held';
+    if (this.pinned.size >= this.cap) return 'full';
+    this.pinned.add(cid);
+    return 'pinned';
+  }
+
+  /** Release a pin. `false` means it was not pinned, which is not an error. */
+  remove(cid: string): boolean {
+    return this.pinned.delete(cid);
+  }
+
+  /** Whether this node undertakes to serve `cid`. */
+  has(cid: string): boolean {
+    return this.pinned.has(cid);
+  }
+
+  /** Every pinned CID, in the order they were taken. */
+  list(): string[] {
+    return [...this.pinned];
+  }
+}

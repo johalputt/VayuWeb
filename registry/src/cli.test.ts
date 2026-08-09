@@ -19,7 +19,9 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { main, pointerFor, resolverPortsFor, siteFilesFor } from './cli.ts';
+import { main, pinGated, pointerFor, resolverPortsFor, siteFilesFor } from './cli.ts';
+import { PinSet } from './pins.ts';
+import type { ContentPort } from './proxy.ts';
 import { CID_PARAMETERS, cidBytes, encodeCid, sha256 } from './content.ts';
 import { Store } from './store.ts';
 
@@ -1017,4 +1019,33 @@ test('MUTATION: a proof built at one length is refused against another, and says
   } finally {
     done();
   }
+});
+
+test('unpinning stops the proxy serving the site, which is what a local unpin means', () => {
+  // Article 19.2's second guaranteed act is "unpin it locally". An unpin that left the proxy
+  // handing out the same bytes would be the interface saying one thing and the socket doing
+  // another — and until this gate existed, `DELETE /v1/pin/{cid}` would have been exactly that.
+  const CID = 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e';
+  const inner: ContentPort = {
+    fetch: () => ({
+      ok: true,
+      bytes: new TextEncoder().encode('the app shell'),
+      contentType: 'text/html',
+    }),
+  };
+  const pinned = new PinSet(() => true);
+  const gated = pinGated(inner, pinned);
+
+  pinned.add(CID);
+  const served = gated.fetch({ type: 'cid', value: CID }, '/index.html');
+  assert.equal(served.ok, true, 'a pinned root is served');
+
+  pinned.remove(CID);
+  const refused = gated.fetch({ type: 'cid', value: CID }, '/index.html');
+  assert.equal(refused.ok, false);
+  assert.equal(refused.ok === false && refused.error, 'CONTENT_UNAVAILABLE');
+
+  // And a CID that was never pinned is refused without ever reaching the inner port.
+  const other = gated.fetch({ type: 'cid', value: 'bafkreiotherotherotherother' }, '/');
+  assert.equal(other.ok, false);
 });

@@ -10,6 +10,43 @@ it.
 
 ## [Unreleased]
 
+### Added — a pin set that refuses to pin what the node does not hold
+
+`POST /v1/pin` and `DELETE /v1/pin/{cid}` ship, taking the endpoint count to sixteen of eighteen.
+The interesting part is not that they exist; it is what the first one refuses.
+
+**A pin is refused for content this node does not hold**, with 409 `not_held`. This build's only
+source of blocks is the site it imported, so a pin for a stranger's CID could only ever be an
+intention — and recording it would put that intention into `GET /v1/pins` beside a real holding with
+nothing distinguishing the two. That is the one thing `pins.ts` exists to prevent, and a pin set is
+exactly where it would have got in. The predicate is passed in rather than assumed, because whether
+bytes are held is a blockstore question and this module knows about availability.
+
+**A full set refuses rather than evicting**, the same stance `EquivocationLedger` takes. Making room
+by dropping the oldest pin turns a bound into a mechanism for silently forgetting something the node
+promised to keep, and the operator finds out from a reader. A freed slot is reusable, so the bound
+is on what is held at once rather than a lifetime quota.
+
+**`DELETE /v1/pin/{cid}` has teeth.** Article 19.2's second guaranteed act is "unpin it locally", so
+the proxy's content port is gated on the pin set — unpinning a root stops it being served, and
+`pinGated` is a function rather than an inline closure precisely so that can be exercised as data.
+The blocks stay in memory; nothing here can shred them. What changes is that the node stops
+undertaking to hand them out, which is the whole of what a local unpin can honestly mean, and an
+unpin that left the proxy serving the same bytes would be the interface saying one thing and the
+socket doing another.
+
+Both endpoints validate the CID through one function, `parseControlCid`, for the same reason
+`parseControlName` exists: one grammar spelled twice is two grammars, and whoever finds the
+disagreement finds it through the more permissive one. `decodeCid` is that grammar, and it excludes
+every traversal spelling by construction rather than by a check that has to think of them.
+
+Ten mutations, **one survivor**: swapping the `already` check with the two below it. `add`'s own
+comment claimed that ordering mattered and nothing tested it. Both wrong orderings are wrong in ways
+an operator would notice — reporting `full` for a pin that already exists tells them to free a slot
+they do not need, and reporting `not_held` for one tells them to re-pin something already pinned,
+when `remove` is what actually clears it. Whether the node still holds the bytes can change under a
+pin; the pin has not stopped existing when it does. Re-run: eleven mutations, all killed.
+
 ### Fixed — a comment that justified an export by a caller that does not exist
 
 `fitsInOneLeaf` said it was "exposed because the publish flow branches on it". The publish flow does

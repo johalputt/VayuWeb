@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 import {
   PinError,
+  PinSet,
   TOMBSTONE_CACHE_SECONDS,
   UNPUBLISH_EFFECTS,
   onlyThisNodeHoldsIt,
@@ -225,4 +226,81 @@ test('the charter still says what this module implements', () => {
   );
   assert.match(charter, /MUST NOT retain a tombstoned binding in any cache for longer than 3600/);
   assert.match(charter, /does not guarantee\nerasure/);
+});
+
+/* -------------------------------------------------------------------------- */
+/* The pin set — what this node undertakes to keep, and nothing more           */
+/* -------------------------------------------------------------------------- */
+
+test('a pin is refused for content this node does not hold', () => {
+  // The whole module exists to stop availability being overstated, so the pin set must not become
+  // the place where it is. A node that recorded a pin for bytes it has no way to obtain would be
+  // publishing an intention as if it were a holding, and `GET /v1/pins` would report it beside
+  // real ones with nothing distinguishing the two.
+  const held = new Set([CID]);
+  const pins = new PinSet((cid) => held.has(cid));
+  assert.equal(pins.add('bafkreiaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'), 'not_held');
+  assert.equal(pins.list().length, 0, 'a refused pin takes no slot');
+  assert.equal(pins.add(CID), 'pinned');
+  assert.deepEqual(pins.list(), [CID]);
+});
+
+test('pinning twice is idempotent and does not consume a second slot', () => {
+  const pins = new PinSet(() => true, 2);
+  assert.equal(pins.add(CID), 'pinned');
+  assert.equal(pins.add(CID), 'already');
+  assert.deepEqual(pins.list(), [CID]);
+});
+
+test('a full pin set refuses rather than evicting', () => {
+  // The same stance as the equivocation ledger: dropping the oldest entry to make room turns a
+  // bound into a mechanism for erasing what the node had promised to keep. Refusing is legible;
+  // silently forgetting a pin is the failure an operator finds out about from a reader.
+  const pins = new PinSet(() => true, 2);
+  assert.equal(pins.add('bafkreia'), 'pinned');
+  assert.equal(pins.add('bafkreib'), 'pinned');
+  assert.equal(pins.add('bafkreic'), 'full');
+  assert.deepEqual(pins.list(), ['bafkreia', 'bafkreib'], 'the earlier pins survive');
+});
+
+test('unpinning is idempotent, and says which of the two happened', () => {
+  const pins = new PinSet(() => true);
+  pins.add(CID);
+  assert.equal(pins.remove(CID), true);
+  assert.equal(pins.remove(CID), false, 'removing what is not pinned is not an error');
+  assert.equal(pins.list().length, 0);
+  // A slot freed by unpinning is usable again — otherwise the bound is a lifetime quota.
+  assert.equal(pins.add(CID), 'pinned');
+});
+
+test('the pin set answers whether it holds a CID, which is what serving consults', () => {
+  const pins = new PinSet(() => true);
+  assert.equal(pins.has(CID), false);
+  pins.add(CID);
+  assert.equal(pins.has(CID), true);
+  pins.remove(CID);
+  assert.equal(pins.has(CID), false, 'unpinning stops the node undertaking to serve it');
+});
+
+test('MUTATION: a pin already taken is answered before capacity and before holding', () => {
+  // `add`'s own comment claims this ordering matters and nothing tested it, so swapping the two
+  // checks survived the suite. Both orderings are wrong in a way an operator would notice.
+  //
+  // Already-before-full: a node at its limit must still answer truthfully about a pin it already
+  // holds. Reporting `full` for something that IS pinned tells an operator to free a slot for a
+  // pin they already have.
+  const full = new PinSet(() => true, 1);
+  assert.equal(full.add(CID), 'pinned');
+  assert.equal(full.add('bafkreiother'), 'full', 'the set really is full');
+  assert.equal(full.add(CID), 'already', 'and the existing pin is still reported as existing');
+
+  // Already-before-not_held: whether the node still holds the bytes can change under a pin, and
+  // when it does the pin has not stopped existing. Answering `not_held` would invite the operator
+  // to re-pin something that is already in the set, and `remove` is what actually clears it.
+  let holding = true;
+  const drifting = new PinSet(() => holding);
+  assert.equal(drifting.add(CID), 'pinned');
+  holding = false;
+  assert.equal(drifting.add(CID), 'already', 'the pin exists whatever the blockstore now says');
+  assert.equal(drifting.has(CID), true);
 });

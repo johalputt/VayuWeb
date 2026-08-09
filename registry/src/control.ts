@@ -38,6 +38,8 @@
 
 import { onlyThisNodeHoldsIt, summarise, type AvailabilityReport } from './pins.ts';
 import { isRatifiedTld, labelRejection } from './names.ts';
+import { decodeCid } from './content.ts';
+import type { PinOutcome } from './pins.ts';
 import { timingSafeEqual } from 'node:crypto';
 
 /** The header a caller must send. RESOLUTION.md, "The control API". */
@@ -107,6 +109,15 @@ export interface ControlPorts {
   flushCache(name: { label: string; tld: string } | null): number;
   /** Peer count and swarm state. */
   peers(): { joined: boolean; peers: number; detail: string };
+  /**
+   * Undertake to keep and serve an **already-validated** CID, or say why not.
+   *
+   * The outcome is `pins.ts`'s, not this module's, because refusing to pin what the node does not
+   * hold is an availability decision and that is where availability decisions live.
+   */
+  pin(cid: string): PinOutcome;
+  /** Release a pin. `false` means it was not pinned, which is not an error. */
+  unpin(cid: string): boolean;
 }
 
 /**
@@ -209,6 +220,14 @@ export function handleControlRequest(
   // **before it is used for anything** — not echoed, not used as a cache key, not passed onward
   // until the grammar has accepted it. That is LOCAL-SURFACE.md 3.1's rule; it is written for the
   // browsing proxy and the reason applies here unchanged.
+  // Same ordering as the name-carrying routes below, for the same reason: a CID is the other
+  // value a user types, and it is validated before it reaches a pin set, an echo or a log line.
+  if (request.method === 'DELETE' && request.path.startsWith(PIN_PREFIX)) {
+    const cid = parseControlCid(request.path.slice(PIN_PREFIX.length));
+    if (cid === null) return deny(400, 'bad_cid');
+    return ok({ cid, unpinned: ports.unpin(cid) });
+  }
+
   const named = namedRoute(request.method, request.path);
   if (named !== null) {
     if (named.name === null) return deny(400, 'bad_name');
@@ -246,6 +265,22 @@ export function handleControlRequest(
         ...(ports.resolve(name.label, name.tld) as object),
         name: `${name.label}.${name.tld}`,
       });
+    }
+    case 'POST /v1/pin': {
+      const fields = jsonObject(request.body);
+      if (fields === null) return deny(400, 'bad_request');
+      const asked = fields['cid'];
+      if (typeof asked !== 'string') return deny(400, 'bad_request');
+      const cid = parseControlCid(asked);
+      if (cid === null) return deny(400, 'bad_cid');
+      const outcome = ports.pin(cid);
+      // `not_held` is 409 rather than 404 or 400: the request is well formed and the CID is real,
+      // and what is wrong is the state of this node. Answering 200 would put an intention into
+      // `GET /v1/pins` beside a holding with nothing distinguishing them, which is the single
+      // thing `pins.ts` exists to prevent.
+      if (outcome === 'not_held') return deny(409, 'not_held');
+      if (outcome === 'full') return deny(409, 'pin_set_full');
+      return ok({ cid, outcome });
     }
     case 'GET /v1/health':
       return ok({ ok: true });
@@ -356,6 +391,37 @@ export function parseControlName(raw: string): { label: string; tld: string } | 
   const tld = decoded.slice(dot + 1).toLowerCase();
   if (!isRatifiedTld(tld) || labelRejection(label) !== null) return null;
   return { label, tld };
+}
+
+const PIN_PREFIX = '/v1/pin/';
+
+/**
+ * The one place a CID reaching the control API is validated, or refused.
+ *
+ * Shared by `POST /v1/pin`, which takes it in a body, and `DELETE /v1/pin/{cid}`, which takes it in
+ * a path — deliberately, and for the reason {@link parseControlName} gives about names: two
+ * spellings of one grammar are two spellings that disagree later, and the disagreement is found by
+ * whoever gets past the more permissive of them.
+ *
+ * `decodeCid` is the grammar. It refuses anything that is not a base32 CIDv1, which excludes every
+ * traversal spelling by construction rather than by a check that has to think of them — `..%2f..`
+ * is not base32 and neither is `../..`. Percent-decoding runs first so a legitimately encoded CID
+ * is accepted; it is not what makes this safe.
+ */
+export function parseControlCid(raw: string): string | null {
+  if (raw.length === 0) return null;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+  try {
+    decodeCid(decoded);
+  } catch {
+    return null;
+  }
+  return decoded;
 }
 
 /**

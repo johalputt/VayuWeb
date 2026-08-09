@@ -160,6 +160,8 @@ const controlPorts: ControlPorts = {
   cacheStats: () => ({ negative: 1, positive: 2, manifests: 3, hits: 4, misses: 5 }),
   flushCache: (name) => (name === null ? 6 : 1),
   peers: () => ({ joined: false, peers: 0, detail: 'not joined' }),
+  pin: () => 'not_held' as const,
+  unpin: () => false,
 };
 
 async function withListener(make: () => Promise<Listener>, run: (l: Listener) => Promise<void>) {
