@@ -88,6 +88,7 @@ REACHED_ONLY_BY_TESTS = {
     # package is a node", and that was the wrong reading. Two commands were missing, not a separate
     # product: `prove` has the log and produces the proof, `light-verify` holds nothing and checks
     # it. All three entries went stale at once when those landed, and this table said so.
+
     # Block exchange: the wire format only, by design. VWIP-0005 is a Draft and ROADMAP.md says
     # code written before a specification settles is code that will be thrown away.
     "blockx.ts:decodeBlockMessage": "VWIP-0005 is Draft; the session and transport wait for it.",
@@ -106,9 +107,17 @@ REACHED_ONLY_BY_TESTS = {
     "keys.ts:decodeByOwnerKey": "Decoder for the keyspace above; nothing reads those keys back.",
     "keys.ts:decodeExpiryKey": "Decoder for the keyspace above; nothing reads those keys back.",
     "keys.ts:decodeRateKey": "Decoder for the keyspace above; nothing reads those keys back.",
-    # Unpublishing. The endpoint that would use it is DELETE /v1/pin/{cid} and there is no mutable
-    # pin set; building one so a constant has a caller would be this defect wearing a hat.
-    "pins.ts:tombstonedBindingExpired": "Article 19.4's window; no unpin path exists to apply it.",
+    # Unpublishing. **This entry's reason was stale before its subject was**: it said "no unpin path
+    # exists to apply it", and `DELETE /v1/pin/{cid}` now does. The real blocker is one level up and
+    # always was -- Article 19.4's window runs from observing a TOMBSTONE, and REGISTRY.md's
+    # operation table records TOMBSTONE as absent. A window measured from an observation nothing can
+    # make has no caller because it has no event, not because it has no endpoint.
+    #
+    # Worth noting that this check cannot catch a reason that has gone false while the entry stays
+    # true. It verifies that an exempt export is still unreached, not that the sentence beside it is
+    # still accurate. That one is on the reader.
+    "pins.ts:tombstonedBindingExpired":
+        "Article 19.4's window runs from observing a TOMBSTONE, and no TOMBSTONE record exists.",
     # The Hyperswarm binding. Not a dependency -- installing it took the package to 601 resolved
     # packages against a ceiling of 40 -- so nothing here can call it, which is the design.
     "swarm.ts:joinSwarm": "Takes an injected Hyperswarm; this package deliberately has none.",
@@ -136,17 +145,28 @@ REACHED_ONLY_BY_TESTS = {
     # it actually lacked was any command willing to say what unpublishing does. This gate's second
     # direction is what noticed, which is the whole argument for checking a table both ways.
 
-    # **A second way to do something the shipping path does differently.** Not waiting on anything
-    # — waiting on a decision. Each of these is a public function whose job is already done by
-    # another one that ships, so either it has a caller nobody has written or it should go. Named
-    # here so the next pass reconciles them rather than rediscovering them.
-    "domain.ts:recordHash": "Hashes a parsed record; everything that ships hashes bytes with recordHashFromBytes.",
-    "lifecycle.ts:resolves": "Asks whether a name resolves now; callers use stateAt and read the state.",
-    "names.ts:isValidLabel": "Boolean form of labelRejection, which is what every caller uses.",
-    "pow.ts:checkRecordPow": "Record-shaped wrapper over verifyPow, which is what the store calls.",
-    "signature.ts:assertValidSignature": "Throwing form of verifyStrict, which is what every caller uses.",
+    # **The "second way" group, reconciled.** It was a list of undecided exports; each now has a
+    # decision instead of a description. Four went, one was connected to the shipping path, and the
+    # two that remain stayed for a stated reason rather than for want of a choice:
+    #
+    #   recordHash      DELETED -- the shorter name re-serialised, which REGISTRY.md forbids for a
+    #                   record you did not author. It was safe only because cbor.ts refuses
+    #                   non-canonical input on decode: a guarantee made in another module and
+    #                   written down in neither.
+    #   checkRecordPow  DELETED as a WEAKER spelling. Its single `windowCount` cannot express the
+    #                   epoch tolerance `Store.requiredBitsFor` needs, so connecting it would have
+    #                   been a downgrade. The "only sound together" property moved to the store,
+    #                   and its test now asserts the composition callers actually write.
+    #   resolves        DELETED -- `stateAt(...) === 'LIVE'` under a second name.
+    #   isValidLabel    DELETED -- the boolean form of `labelRejection`, whose reason every caller
+    #                   wants.
+    #   rawLeafCid      CONNECTED -- `unixfs.ts` built the same CID inline in two places, so one
+    #                   rule had three spellings. Now it has one.
+    "signature.ts:assertValidSignature":
+        "Kept: the only producer of SignatureError's named codes. verifyStrict returns a bare "
+        "boolean and is what the record loop uses, because a verifier that throws per record is "
+        "the wrong shape -- deleting this would orphan the whole code taxonomy.",
     "signature.ts:isCanonicalScalar": "A component of the strict check, exported for direct attack.",
-    "content.ts:rawLeafCid": "Convenience over cidFromBytes; the importer builds leaves itself.",
     "content.ts:fitsInOneLeaf": "Chunking predicate; unixfs.ts decides chunk boundaries inline.",
 }
 

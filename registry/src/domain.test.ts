@@ -8,7 +8,6 @@ import {
   ZERO_HASH,
   core,
   signingInput,
-  recordHash,
   recordHashFromBytes,
   bytesEqual,
   isZeroHash,
@@ -128,17 +127,16 @@ test('unknown fields are covered by the signature', () => {
 /* -------------------------------------------------------------------------- */
 
 test('record hash is 32 bytes and covers the signature fields', () => {
-  const withSigA = recordHash(sampleRecord({ sig: new Uint8Array(64).fill(0x01) }));
-  const withSigB = recordHash(sampleRecord({ sig: new Uint8Array(64).fill(0x02) }));
+  const withSigA = recordHashFromBytes(
+    encode(sampleRecord({ sig: new Uint8Array(64).fill(0x01) })),
+  );
+  const withSigB = recordHashFromBytes(
+    encode(sampleRecord({ sig: new Uint8Array(64).fill(0x02) })),
+  );
 
   assert.equal(withSigA.length, RECORD_HASH_LENGTH);
   // prevHash chains to the record as it exists on the wire, signature included.
   assert.notEqual(toHex(withSigA), toHex(withSigB));
-});
-
-test('hashing bytes directly agrees with hashing the decoded map', () => {
-  const record = sampleRecord();
-  assert.equal(toHex(recordHashFromBytes(encode(record))), toHex(recordHash(record)));
 });
 
 test('the hash domain differs from the signing domain for identical bodies', () => {
@@ -153,8 +151,8 @@ test('the hash domain differs from the signing domain for identical bodies', () 
 
 test('record hash is stable across runs', () => {
   // A moving hash would mean prevHash chains break between peers on identical input.
-  const first = toHex(recordHash(sampleRecord()));
-  const second = toHex(recordHash(sampleRecord()));
+  const first = toHex(recordHashFromBytes(encode(sampleRecord())));
+  const second = toHex(recordHashFromBytes(encode(sampleRecord())));
   assert.equal(first, second);
 });
 

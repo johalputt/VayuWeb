@@ -131,22 +131,21 @@ export function signingInput(record: CborMap): Uint8Array {
 }
 
 /**
- * BLAKE2b-256 over the domain-separated encoding of the complete record.
+ * The record hash: BLAKE2b-256 over the domain-separated bytes, hashed as they arrived.
  *
- * Takes the full map including `sig` and `coSig`: the hash identifies the record as it exists
- * on the wire, which is what `prevHash` chains to and what the convergence tie-break compares.
- */
-export function recordHash(record: CborMap): Uint8Array {
-  return blake2b(withDomain(HASH_PREFIX_BYTES, encode(record)), { dkLen: RECORD_HASH_LENGTH });
-}
-
-/**
- * Record hash computed from bytes received from a peer, without re-serialising.
+ * It covers the full record including `sig` and `coSig`, because the hash identifies the record as
+ * it exists on the wire — which is what `prevHash` chains to and what the convergence tie-break
+ * compares.
  *
  * REGISTRY.md: "A peer MUST NOT re-serialise a record it did not author: received bytes are
- * stored and replicated verbatim". Decoding and re-encoding to compute a hash would defeat
- * that, so received bytes are hashed as they arrived. The caller is responsible for having
- * already established that those bytes are deterministic CBOR.
+ * stored and replicated verbatim". Decoding and re-encoding to compute a hash would defeat that,
+ * so this takes bytes and there is no longer a sibling that takes a map.
+ *
+ * **There was one, called `recordHash`, and the shorter name did the forbidden thing.** Anyone
+ * reaching for "hash a record" found it first and got a hash that is right only if the record
+ * re-encodes byte-identically — true here, but only because `cbor.ts` refuses non-canonical input
+ * on decode, which is a guarantee made in another module and stated in neither. Nothing authored a
+ * record and needed its hash from the map, so the trap went rather than being documented.
  */
 export function recordHashFromBytes(recordBytes: Uint8Array): Uint8Array {
   return blake2b(withDomain(HASH_PREFIX_BYTES, recordBytes), { dkLen: RECORD_HASH_LENGTH });

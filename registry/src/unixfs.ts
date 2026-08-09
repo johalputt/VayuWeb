@@ -31,7 +31,15 @@
  * than a tidiness convention.
  */
 
-import { CID_PARAMETERS, ContentError, encodeCid, sha256, chunk, decodeCid } from './content.ts';
+import {
+  CID_PARAMETERS,
+  ContentError,
+  chunk,
+  decodeCid,
+  encodeCid,
+  rawLeafCid,
+  sha256,
+} from './content.ts';
 
 /** UnixFS `Data.Type` values. Only the two a site needs are defined. */
 export const UNIXFS_TYPE = {
@@ -197,22 +205,14 @@ export function fileBlocks(bytes: Uint8Array): { blocks: Block[]; cid: string; t
 
   if (chunks.length === 1) {
     const leaf = chunks[0]!;
-    const cid = encodeCid({
-      version: 1,
-      codec: CID_PARAMETERS.codecRaw,
-      digest: sha256(leaf),
-    });
+    const cid = rawLeafCid(leaf);
     return { blocks: [{ cid, bytes: leaf }], cid, tsize: leaf.length };
   }
 
   const blocks: Block[] = [];
   const links: Link[] = [];
   for (const piece of chunks) {
-    const cid = encodeCid({
-      version: 1,
-      codec: CID_PARAMETERS.codecRaw,
-      digest: sha256(piece),
-    });
+    const cid = rawLeafCid(piece);
     blocks.push({ cid, bytes: piece });
     links.push({ cid, name: '', tsize: piece.length });
   }

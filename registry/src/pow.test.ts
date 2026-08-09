@@ -14,7 +14,6 @@ import {
   powTag,
   tagSatisfies,
   verifyPow,
-  checkRecordPow,
   solvePow,
 } from './pow.ts';
 import { parseRecord, RecordError } from './record.ts';
@@ -328,22 +327,26 @@ test('verifyPow refuses a malformed proof before spending an Argon2id evaluation
   });
 });
 
-test('checkRecordPow ties the verdict to the recomputed difficulty, not the claim', () => {
-  // A proof claiming 10 bits but solved for 4 must fail once the requirement is recomputed,
-  // however loudly the record asserts otherwise.
+test('the verdict is tied to the RECOMPUTED difficulty, not to the claim in the record', () => {
+  // The two halves are only sound together: verifying the tag without recomputing the requirement
+  // accepts a proof at whatever difficulty its author felt like claiming, and that mistake looks
+  // like working code. `pow.ts` used to bundle them in a wrapper, which was deleted rather than
+  // adopted — its single `windowCount` could not express the epoch tolerance `Store` needs, so it
+  // was a weaker spelling of a rule the shipping path implements more completely. The property
+  // outlives the wrapper: this asserts the composition, spelled the way callers spell it.
   const target = record({ powProof: proof({ bits: 4 }) });
   const nonce = solvePow(target, 4, { limit: 4096 });
   assert.ok(nonce);
   const solved = record({ powProof: proof({ bits: 4, nonce }) });
 
   // 'atlas' is 5 characters -> base 7, and a quiet TLD adds nothing. 7 > 4, so this is refused.
-  assert.deepEqual(checkRecordPow(solved, 5, 0), {
+  assert.deepEqual(verifyPow(solved, requiredBits(5, 0)), {
     ok: false,
     code: 'POW_INSUFFICIENT_DIFFICULTY',
   });
 
   // A 16-character label in the same quiet TLD requires 4 bits, which this proof meets.
-  assert.deepEqual(checkRecordPow(solved, 16, 0), { ok: true });
+  assert.deepEqual(verifyPow(solved, requiredBits(16, 0)), { ok: true });
 });
 
 test('the tag is deterministic for one nonce and salt', () => {

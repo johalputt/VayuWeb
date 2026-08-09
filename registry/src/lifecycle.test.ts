@@ -7,7 +7,6 @@ import {
   stateAt,
   isFullyReleased,
   acceptsSuccessor,
-  resolves,
   GRACE_SECONDS,
   QUARANTINE_SECONDS,
 } from './lifecycle.ts';
@@ -71,7 +70,7 @@ test('a name in grace no longer resolves but still accepts a renewal', () => {
   // who never re-queried.
   const r = registration();
   const inGrace = NOW + TERM + 1;
-  assert.equal(resolves(r, inGrace), false, 'an expired name must stop resolving');
+  assert.equal(stateAt(r, inGrace), 'GRACE', 'an expired name must stop resolving');
   assert.equal(acceptsSuccessor(r, inGrace, 'RENEW'), true, 'the owner may still renew');
   assert.equal(acceptsSuccessor(r, inGrace, 'UPDATE'), false, 'but there is nothing to update');
 });
@@ -114,7 +113,7 @@ test('RELINQUISH skips grace but not quarantine', () => {
 test('a released name stops resolving immediately', () => {
   const at = NOW + 600;
   const r = make('RELINQUISH', { notBefore: at, notAfter: at });
-  assert.equal(resolves(r, at), false);
+  assert.notEqual(stateAt(r, at), 'LIVE');
   assert.equal(acceptsSuccessor(r, at, 'RENEW'), false);
 });
 
@@ -128,7 +127,7 @@ test('REVOKE stops resolution at once and freezes the name for the rest of its t
   const life = lifecycleOf(r);
 
   assert.equal(life.revoked, true);
-  assert.equal(resolves(r, at), false, 'a revoked name stops resolving immediately');
+  assert.notEqual(stateAt(r, at), 'LIVE', 'a revoked name stops resolving immediately');
   assert.equal(life.graceUntil, NOW + TERM, 'frozen for the remainder of the term');
   assert.equal(life.quarantineUntil, NOW + TERM + QUARANTINE_SECONDS);
 });

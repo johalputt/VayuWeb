@@ -6,7 +6,6 @@ import {
   RATIFIED_TLDS,
   MAX_LABEL_LENGTH,
   labelRejection,
-  isValidLabel,
   isWellShapedTld,
   RESERVED_LABELS,
   isRatifiedTld,
@@ -86,7 +85,7 @@ test('every ratified TLD satisfies the TLD grammar', () => {
 test('ordinary labels of three characters and up are valid', () => {
   for (const label of ['atlas', 'abc', 'a-b', 'a1', 'my-long-project-name', '0abc', 'a0-0z']) {
     if (label.length <= 2) continue;
-    assert.ok(isValidLabel(label), `${label} should be valid`);
+    assert.ok(labelRejection(label) === null, `${label} should be valid`);
   }
 });
 
@@ -102,8 +101,8 @@ test('the xx-- shape is reserved for a future IDN encoding', () => {
   assert.equal(labelRejection('ab--cd'), 'RESERVED_IDN_SHAPE');
   assert.equal(labelRejection('xn--abc'), 'RESERVED_IDN_SHAPE');
   // Hyphens at 3 and 4 specifically — not merely two hyphens anywhere.
-  assert.ok(isValidLabel('abc--de'), 'hyphens at 4 and 5 are fine');
-  assert.ok(isValidLabel('a-b-c'), 'separated hyphens are fine');
+  assert.ok(labelRejection('abc--de') === null, 'hyphens at 4 and 5 are fine');
+  assert.ok(labelRejection('a-b-c') === null, 'separated hyphens are fine');
 });
 
 test('all one and two character labels are reserved in every TLD', () => {
@@ -118,7 +117,8 @@ test('all one and two character labels are reserved in every TLD', () => {
   // Exhaustive over the two-character space, since "1,296" is a claim worth checking.
   const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
   let registrable = 0;
-  for (const a of alphabet) for (const b of alphabet) if (isValidLabel(a + b)) registrable++;
+  for (const a of alphabet)
+    for (const b of alphabet) if (labelRejection(a + b) === null) registrable++;
   assert.equal(registrable, 0, 'no two-character label may be registrable');
 });
 
@@ -194,7 +194,7 @@ test('non-ASCII and uppercase are rejected rather than normalised', () => {
 
 test('length bounds are enforced at the boundary', () => {
   assert.equal(labelRejection(''), 'EMPTY');
-  assert.ok(isValidLabel('a'.repeat(MAX_LABEL_LENGTH)));
+  assert.equal(labelRejection('a'.repeat(MAX_LABEL_LENGTH)), null);
   assert.equal(labelRejection('a'.repeat(MAX_LABEL_LENGTH + 1)), 'TOO_LONG');
 });
 

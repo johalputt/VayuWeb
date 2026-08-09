@@ -205,28 +205,6 @@ export function verifyPow(
 }
 
 /**
- * The composition a `RegistryView.powVerified` implementation should use: recompute the
- * required difficulty from the log, then verify the proof against it.
- *
- * Offered as a function rather than left to each caller because the two halves are only sound
- * together. Verifying the tag without recomputing the requirement accepts a proof at whatever
- * difficulty its author felt like claiming, and that mistake looks like working code.
- *
- * `windowCount` is the number of accepted registrations and renewals in the record's TLD over
- * the window returned by {@link rateWindow} — index state the caller supplies.
- *
- * PROOF-OF-WORK.md permits the epoch of `notBefore` or the one immediately before it, so a
- * caller MAY pass the lower of the two counts to absorb propagation delay.
- */
-export function checkRecordPow(
-  record: CborMap,
-  labelLength: number,
-  windowCount: number,
-): { ok: true } | { ok: false; code: PowRejection } {
-  return verifyPow(record, requiredBits(labelLength, windowCount));
-}
-
-/**
  * Search for a nonce satisfying `bits`. Used by the registrant, never by the verifier.
  *
  * The expected number of evaluations is 2^bits and the distribution is geometric, so an

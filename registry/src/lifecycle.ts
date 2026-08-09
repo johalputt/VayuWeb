@@ -130,14 +130,3 @@ export function acceptsSuccessor(record: RegistryRecord, now: number, op: Operat
   if (now < life.liveFrom) return false;
   return op === 'RENEW' ? now < life.graceUntil : now < life.liveUntil;
 }
-
-/**
- * Does this name resolve right now?
- *
- * Distinct from {@link acceptsSuccessor}: a name in grace still accepts a renewal but MUST NOT
- * resolve, or an expired registration would keep serving content indefinitely to anyone who
- * never re-queried.
- */
-export function resolves(record: RegistryRecord, now: number): boolean {
-  return stateAt(record, now) === 'LIVE';
-}

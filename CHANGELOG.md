@@ -10,6 +10,50 @@ it.
 
 ## [Unreleased]
 
+### Changed — the "second way to do something" exports, each given a decision
+
+The dead-code gate's table carried seven exports described as "waiting on a decision" rather than
+waiting on anything. Descriptions are not decisions, and a list of them is a list that grows. Each
+now has one, and the reasoning differed enough per entry to be worth recording:
+
+**`recordHash` — deleted, and it was a trap rather than mere duplication.** It hashed a *parsed*
+record, which means re-serialising, and `recordHashFromBytes`'s own comment already quotes
+REGISTRY.md forbidding exactly that: "A peer MUST NOT re-serialise a record it did not author".
+The shorter, more obvious name did the forbidden thing, and anyone reaching for "hash a record"
+found it first. It is safe today — but only because `cbor.ts` refuses non-canonical input on
+decode, so every accepted record round-trips byte-identically. That is a guarantee made in another
+module and written down in neither, which is the kind of safety that stops being true quietly. The
+survivor takes bytes and there is no sibling that takes a map.
+
+**`checkRecordPow` — deleted as a *weaker* spelling, not a redundant one.** Its docstring named a
+real property: the two halves are only sound together, because verifying the tag without
+recomputing the requirement accepts a proof at whatever difficulty its author claimed. But its
+single `windowCount` parameter cannot express the epoch tolerance `Store.requiredBitsFor` needs —
+the lower of two epochs' counts, to absorb propagation delay — so connecting it would have been a
+downgrade. The property moved to the store, where the composition actually happens, and its test
+now asserts the composition callers write instead of the wrapper nobody used.
+
+**`rawLeafCid` — connected, not deleted.** `unixfs.ts` built the same CID inline in two places, so
+one rule had three spellings. It now has one.
+
+**`resolves` and `isValidLabel` — deleted.** `stateAt(...) === 'LIVE'` and
+`labelRejection(...) === null` under second names; the second is worse than redundant, since a
+boolean form invites losing the reason every caller wants.
+
+**`assertValidSignature` — kept, with the reason stated.** It is the only producer of
+`SignatureError`'s named codes. `verifyStrict` returns a bare boolean and is what the record loop
+uses, because a verifier that throws per record is the wrong shape — so deleting this would orphan
+the whole code taxonomy to tidy one line. That is a decision, not a deferral, and the table now
+says so.
+
+The exemption count falls from 35 to 30. One more correction while in there: the
+`tombstonedBindingExpired` entry claimed it was waiting because "no unpin path exists", and
+`DELETE /v1/pin/{cid}` shipped hours earlier. The real blocker is a level up and always was —
+Article 19.4's window runs from observing a TOMBSTONE, and REGISTRY.md's operation table records
+TOMBSTONE as absent. **The gate cannot catch that class of staleness**: it verifies an exempt
+export is still unreached, not that the sentence beside it is still true. Noted in the table so the
+next reader knows which half is machine-checked.
+
 ### Fixed — a control-API endpoint count that was never true, repeated three times
 
 `registry/README.md` has claimed the specification enumerates eighteen control-API endpoints. It

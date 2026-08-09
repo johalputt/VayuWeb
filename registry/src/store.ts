@@ -597,6 +597,19 @@ export class Store implements RegistryView {
    * Exposed so a registrant can ask what it must solve for before spending the work, and so the
    * CLI reports the same number the verifier will apply rather than a second estimate of it.
    */
+  /**
+   * The difficulty this record had to meet, recomputed from the log rather than believed.
+   *
+   * **The two halves are only sound together.** Verifying the proof-of-work tag without
+   * recomputing the requirement accepts a proof at whatever difficulty its author felt like
+   * claiming, and that mistake looks like working code. `pow.ts` once offered a `checkRecordPow`
+   * that bundled them, and it was deleted rather than adopted: its single `windowCount` parameter
+   * cannot express the epoch tolerance below, so it was a weaker spelling of a rule this method
+   * already implements more completely.
+   *
+   * PROOF-OF-WORK.md permits the epoch of `notBefore` or the one immediately before it, so the
+   * lower of the two counts is taken to absorb propagation delay.
+   */
   requiredBitsFor(record: RegistryRecord): number {
     const thisEpoch = this.registrationsInWindow(record.tld, record.notBefore);
     const previousEpoch = this.registrationsInWindow(record.tld, record.notBefore - EPOCH_SECONDS);

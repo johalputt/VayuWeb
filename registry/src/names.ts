@@ -161,11 +161,6 @@ export function labelRejection(label: string): NameRejection | null {
   return null;
 }
 
-/** True when `label` satisfies the grammar and is not reserved. */
-export function isValidLabel(label: string): boolean {
-  return labelRejection(label) === null;
-}
-
 /**
  * Validate a TLD string's *shape*, independent of ratification.
  *
