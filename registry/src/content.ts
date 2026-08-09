@@ -271,9 +271,18 @@ export function rawLeafCid(bytes: Uint8Array): string {
 /**
  * Whether a file fits in one raw leaf, and therefore needs no dag-pb wrapper at all.
  *
- * Exposed because the publish flow branches on it and the branch is worth naming: a site of small
- * files is entirely raw leaves plus directory nodes, which is the common case and the one whose
- * CIDs are independently checkable.
+ * **This said it was "exposed because the publish flow branches on it", and the publish flow does
+ * not.** `importFile` branches on `chunk(bytes).length === 1`, which is the same question asked a
+ * second way — the shape that has already cost this codebase twice, once when a resolver path
+ * mapper and a content port each implemented a subset of one rule, and once when a name grammar
+ * was about to be spelled twice. The two agree today at every boundary, `chunk` having been
+ * written to return one empty chunk for an empty file rather than none, and `content.test.ts` now
+ * pins that agreement so they cannot drift apart quietly.
+ *
+ * Kept rather than deleted because the predicate names a real property of the format: a site of
+ * small files is entirely raw leaves plus directory nodes, which is the common case and the one
+ * whose CIDs a reader can check with a command-line hash tool. What it is not is the thing the
+ * importer consults, and the comment claiming otherwise was the defect.
  */
 export function fitsInOneLeaf(bytes: Uint8Array): boolean {
   return bytes.length <= CID_PARAMETERS.chunkBytes;

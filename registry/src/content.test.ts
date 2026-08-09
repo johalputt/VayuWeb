@@ -232,3 +232,23 @@ test('cidFromBytes makes every refusal decodeCid makes, without a base32 round t
   // An empty bstr reaches the varint reader with nothing to read.
   assert.throws(() => cidFromBytes(new Uint8Array(0)));
 });
+
+test('fitsInOneLeaf and the importer ask one question, and answer it the same way', () => {
+  // Two spellings of one rule. `fitsInOneLeaf` compares a length to `chunkBytes`; `importFile`
+  // branches on `chunk(bytes).length === 1`. Nothing tied them together, and this codebase has
+  // twice paid for a rule implemented in two places — a resolver path mapper against a content
+  // port, and very nearly a name grammar. Pinned at every boundary rather than described, so a
+  // change to either side fails here instead of producing two different sites.
+  const size = CID_PARAMETERS.chunkBytes;
+  for (const length of [0, 1, size - 1, size, size + 1, size * 2, size * 2 + 1]) {
+    const bytes = new Uint8Array(length);
+    assert.equal(
+      fitsInOneLeaf(bytes),
+      chunk(bytes).length === 1,
+      `they disagree at ${length} bytes`,
+    );
+  }
+  // The empty file is the input the two most easily disagree on: a chunker returning no chunks at
+  // all would send it down the multi-block path while the predicate calls it a single leaf.
+  assert.equal(chunk(new Uint8Array(0)).length, 1, 'an empty file is one empty chunk, not none');
+});

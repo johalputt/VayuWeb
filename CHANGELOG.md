@@ -10,6 +10,25 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a comment that justified an export by a caller that does not exist
+
+`fitsInOneLeaf` said it was "exposed because the publish flow branches on it". The publish flow does
+not: `importFile` branches on `chunk(bytes).length === 1`, which is the same question asked a second
+way. That is the shape this codebase has already paid for twice — a resolver path mapper and a
+content port each implementing a subset of one rule, and a name grammar that was about to be spelled
+twice — and here nothing tied the two spellings together at all.
+
+They agree today at every boundary, including the one they would most easily disagree on: `chunk`
+returns one empty chunk for an empty file rather than none, so a zero-byte file is a single raw leaf
+by both readings. That is now pinned at 0, 1, and either side of one and two chunk boundaries, so a
+change to either side fails a test instead of producing two different sites from one directory. Both
+mutations — an empty file becoming zero chunks, and the predicate excluding an exactly-`chunkBytes`
+file — are killed by it.
+
+The export stays. The predicate names a real property of the format, which is what makes a small
+site's CIDs checkable with a command-line hash tool; what it is not is the thing the importer
+consults, and the comment claiming otherwise was the defect.
+
 ### Added — the light client can be run, and refuses two things rather than answering them
 
 REGISTRY.md describes a procedure for verifying one name without the full history: obtain a
