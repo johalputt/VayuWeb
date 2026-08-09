@@ -7,6 +7,7 @@ import {
   TOKEN_BYTES,
   assertSocketAddress,
   handleControlRequest,
+  jsonObject,
   redact,
   tokenMatches,
   type ControlPorts,
@@ -49,6 +50,7 @@ function request(
   method: string,
   path: string,
   headers: Record<string, string> = {},
+  body: Uint8Array = new Uint8Array(0),
 ): ControlRequest {
   return {
     method,
@@ -60,7 +62,13 @@ function request(
         ...headers,
       }),
     ),
+    body,
   };
+}
+
+/** A request carrying `text` as its body, exactly as the transport would hand it over. */
+function withBody(method: string, path: string, text: string): ControlRequest {
+  return request(method, path, {}, new TextEncoder().encode(text));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -109,6 +117,7 @@ test('the custom header is required, so a simple cross-origin request cannot be 
     method: 'GET',
     path: '/v1/status',
     headers: new Map([['authorization', `Bearer ${TOKEN}`]]),
+    body: new Uint8Array(0),
   };
   assert.equal(handleControlRequest(withoutHeader, ports(), TOKEN).status, 403);
 });
@@ -335,7 +344,12 @@ test('a pin nobody was asked about says so, rather than reporting a zero', () =>
 
 test('the pins endpoint is behind the token like everything else', () => {
   const unauthenticated = handleControlRequest(
-    { method: 'GET', path: '/v1/pins', headers: new Map([[CONTROL_HEADER, '1']]) },
+    {
+      method: 'GET',
+      path: '/v1/pins',
+      headers: new Map([[CONTROL_HEADER, '1']]),
+      body: new Uint8Array(0),
+    },
     ports(),
     TOKEN,
   );
@@ -455,6 +469,7 @@ test('the named routes are behind the token like every other one', () => {
         method: path.includes('records') ? 'GET' : 'DELETE',
         path,
         headers: new Map([[CONTROL_HEADER, '1']]),
+        body: new Uint8Array(0),
       },
       ports(),
       TOKEN,
@@ -485,4 +500,137 @@ test('a port cannot overwrite the name the router validated', () => {
     TOKEN,
   );
   assert.equal((answered.body as Record<string, unknown>)['name'], 'atlasobservatory.vayu');
+});
+
+/* -------------------------------------------------------------------------- */
+/* POST /v1/resolve — the first endpoint whose argument is not a path          */
+/* -------------------------------------------------------------------------- */
+
+test('a name in a body is validated by the same grammar as a name in a path', () => {
+  // Two spellings of one grammar is how the two disagree later, and whoever finds the
+  // disagreement finds it through the more permissive one. `parseControlName` is the only
+  // implementation; this asserts the body route reaches it rather than reimplementing it.
+  for (const bad of [
+    '../../etc/passwd',
+    '..%2f..%2fetc%2fpasswd',
+    'atlasobservatory.notaratifiedtld',
+    'atlasobservatory',
+    '.vayu',
+    'atlasobservatory.',
+    'UPPER CASE.vayu',
+    'atlas observatory.vayu',
+    '%ZZ.vayu',
+  ]) {
+    const response = handleControlRequest(
+      withBody('POST', '/v1/resolve', JSON.stringify({ name: bad })),
+      ports(),
+      TOKEN,
+    );
+    assert.equal(response.status, 400, bad);
+    assert.deepEqual(response.body, { error: 'bad_name' }, bad);
+  }
+});
+
+test('a valid name in a body resolves, and the echo is the validated name', () => {
+  const response = handleControlRequest(
+    withBody('POST', '/v1/resolve', JSON.stringify({ name: 'AtlasObservatory.VAYU' })),
+    ports(),
+    TOKEN,
+  );
+  assert.equal(response.status, 200);
+  const body = response.body as Record<string, unknown>;
+  // Lowercased by the grammar, not echoed as sent — and the port saw the same two components.
+  assert.equal(body['name'], 'atlasobservatory.vayu');
+  assert.equal(body['asked'], 'atlasobservatory/vayu');
+});
+
+test('a body that is not a JSON object is refused, including the ones that nearly work', () => {
+  for (const raw of ['', 'not json', '[]', '"atlasobservatory.vayu"', 'null', '42', '{']) {
+    const response = handleControlRequest(withBody('POST', '/v1/resolve', raw), ports(), TOKEN);
+    assert.equal(response.status, 400, JSON.stringify(raw));
+    assert.deepEqual(response.body, { error: 'bad_request' }, JSON.stringify(raw));
+  }
+});
+
+test('MUTATION: an array is refused by the parser, which is the only place it is visible', () => {
+  // The test above cannot see this. `[]`, `"x"` and `null` all read `.name` as undefined and take
+  // the missing-field branch, so the handler answers `bad_request` whether or not arrays are
+  // rejected — the right answer by accident. Dropping `Array.isArray` survived the whole suite for
+  // exactly that reason, and an array's own keys are `"0"`, `"1"`, … so no body can ever make the
+  // difference reach the handler. The property belongs to the parser, so it is asserted there.
+  const parse = (raw: string) => jsonObject(new TextEncoder().encode(raw));
+  assert.equal(parse('[]'), null, 'an array is not an object');
+  assert.equal(parse('[{"name":"atlasobservatory.vayu"}]'), null);
+  assert.equal(parse('null'), null);
+  assert.equal(parse('"atlasobservatory.vayu"'), null);
+  assert.equal(parse('42'), null);
+  const object = parse('{"name":"atlasobservatory.vayu"}');
+  assert.equal(object?.['name'], 'atlasobservatory.vayu', 'and an object is one');
+  // Null-prototype on purpose, so a body cannot reach `toString`, `constructor` or anything else
+  // it did not put there. Pinned because `deepEqual` is what noticed it, and a property noticed by
+  // accident is a property that gets removed by accident.
+  assert.equal(Object.getPrototypeOf(object), null, 'the parsed object has no prototype');
+});
+
+test('MUTATION: a body that is not valid UTF-8 is refused rather than silently repaired', () => {
+  // Dropping `{ fatal: true }` also survived, and this one is not cosmetic: an invalid byte
+  // becomes U+FFFD, the body then parses, and a request carrying bytes the client never sent is
+  // answered 200. The name is deliberately VALID here — with the decoder repairing, everything
+  // downstream succeeds and nothing reports that the body was altered on the way in.
+  const repaired = Buffer.from('{"name":"atlasobservatory.vayu","x":"\xff"}', 'latin1');
+  assert.equal(jsonObject(repaired), null, 'invalid UTF-8 is not a body');
+  const response = handleControlRequest(
+    request('POST', '/v1/resolve', {}, repaired),
+    ports(),
+    TOKEN,
+  );
+  assert.equal(response.status, 400, 'and the endpoint refuses it rather than answering 200');
+  assert.deepEqual(response.body, { error: 'bad_request' });
+});
+
+test('a `name` that is not a string is refused rather than coerced', () => {
+  for (const raw of ['{"name":null}', '{"name":42}', '{"name":["a.vayu"]}', '{"other":"a.vayu"}']) {
+    const response = handleControlRequest(withBody('POST', '/v1/resolve', raw), ports(), TOKEN);
+    assert.equal(response.status, 400, raw);
+    assert.deepEqual(response.body, { error: 'bad_request' }, raw);
+  }
+});
+
+test('a body cannot reach a property nobody put there', () => {
+  // JSON.parse produces an own `__proto__` key rather than setting a prototype, so a plain
+  // property read off the parsed object is not the risk a prototype-chain read would be. The
+  // assertion is that the handler still refuses: `name` is absent whatever `__proto__` says.
+  const response = handleControlRequest(
+    withBody('POST', '/v1/resolve', '{"__proto__":{"name":"atlasobservatory.vayu"}}'),
+    ports(),
+    TOKEN,
+  );
+  assert.equal(response.status, 400);
+  assert.deepEqual(response.body, { error: 'bad_request' });
+});
+
+test('a body is not accepted in place of the token', () => {
+  const response = handleControlRequest(
+    {
+      method: 'POST',
+      path: '/v1/resolve',
+      headers: new Map([[CONTROL_HEADER, '1']]),
+      body: new TextEncoder().encode(JSON.stringify({ name: 'atlasobservatory.vayu' })),
+    },
+    ports(),
+    TOKEN,
+  );
+  assert.equal(response.status, 401);
+});
+
+test('a body on an endpoint that takes none changes nothing about the answer', () => {
+  // The transport bounds the body; the handler decides who reads it. An endpoint that ignores one
+  // must ignore it completely rather than let it influence the response.
+  const plain = handleControlRequest(request('GET', '/v1/status'), ports(), TOKEN);
+  const noisy = handleControlRequest(
+    withBody('GET', '/v1/status', '{"mode":"tor","version":"9.9.9"}'),
+    ports(),
+    TOKEN,
+  );
+  assert.deepEqual(noisy.body, plain.body);
 });

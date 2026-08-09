@@ -10,6 +10,7 @@ import {
   ConnectionCounter,
   SERVE_LIMITS,
   ServeError,
+  framing,
   parseHead,
   serveControl,
   serveProxy,
@@ -694,11 +695,292 @@ test('AUDIT: the backstop, not the callers, is what makes a throw unable to reac
   // about a fixture rather than about the code that ships.
   const source = readFileSync(new URL('./serve.ts', import.meta.url), 'utf8');
   const body = source.slice(source.indexOf('function serveConnection'));
-  const guarded = /try\s*\{\s*answer = respond\(parsed\);\s*\}\s*catch/.test(body);
+  // Matched on `respond(<identifier>)` rather than on one spelling of the argument: the property
+  // is that the call is inside a try, and a test that fails when a variable is renamed reports a
+  // rename as an outage.
+  const call = /answer = respond\(\w+\);/.exec(body);
+  assert.ok(call, 'serveConnection must call respond() and assign its answer');
+  const guarded = new RegExp(
+    `try\\s*\\{\\s*${call[0].replace(/[()]/g, '\\$&')}\\s*\\}\\s*catch`,
+  ).test(body);
   assert.ok(guarded, 'serveConnection must not call respond() outside a try');
   // And the backstop must not be able to leak the exception either: no reference to the caught
   // value at all, which is stronger than checking what it formats.
-  const backstop = body.slice(body.indexOf('answer = respond(parsed)'));
+  const backstop = body.slice(body.indexOf(call[0]));
   const clause = backstop.slice(0, backstop.indexOf('writeHttp(socket, 500'));
   assert.doesNotMatch(clause, /catch\s*\(/, 'the backstop must not bind the error at all');
+});
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT: the units of the bound, and the bytes after the head                  */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: `headBytes` was a bound on code units, so a non-ASCII head was three times it', async () => {
+  // The field is named `headBytes` and its comment says "the whole request head — request line
+  // plus headers — in bytes". It was compared against a JavaScript string's `length`, which counts
+  // UTF-16 code units. Every character from U+0800 to U+FFFF is THREE bytes on the wire and ONE
+  // code unit in that string, so a sender could put three times the stated bound through the
+  // socket and be accepted — and, worse, the number that governs a request's size would be a
+  // number nobody could compute from the request.
+  //
+  // The consequence is small on its own and structural underneath: a body reader has to count
+  // bytes, because `Content-Length` is bytes. A reader built on a buffer measured in code units
+  // cannot agree with the header that frames it for any body that is not pure ASCII.
+  await withListener(
+    () => serveProxy({ ports: resolverPorts, port: 0, now: () => SERVE_NOW }),
+    async (listener) => {
+      // Under the bound in code units, comfortably over it in bytes.
+      const units = SERVE_LIMITS.headBytes - 200;
+      const pad = 'ࠀ'.repeat(units);
+      assert.ok(
+        units < SERVE_LIMITS.headBytes,
+        'the padding must be under the bound as characters',
+      );
+      assert.ok(
+        Buffer.byteLength(pad, 'utf8') > SERVE_LIMITS.headBytes,
+        'and over it as bytes, or this test proves nothing',
+      );
+      const answer = await speak(
+        listener.address,
+        `GET / HTTP/1.1\r\nHost: atlas.vayu\r\nx-pad: ${pad}\r\n\r\n`,
+      );
+      assert.match(answer, /^HTTP\/1\.1 431 /, 'a head over the byte bound must be refused');
+      assert.match(answer, /HEAD_TOO_LARGE/);
+    },
+  );
+});
+
+test('AUDIT: the proxy answered a request whose declared body it never read', async () => {
+  // Nothing on the browsing proxy takes a body, and the module said so — then accepted one
+  // silently. A request declaring `Content-Length: 11` was answered from its head alone and the
+  // eleven bytes were left in the socket buffer, unread and unmentioned.
+  //
+  // It is NOT a smuggling vulnerability today, and saying so is part of the finding: every
+  // response carries `connection: close` and the socket is ended, so no second request is ever
+  // parsed off those bytes. What it is, is a framing disagreement between the sender and the
+  // server that neither can observe — and a server that answers a request it has not finished
+  // reading is one refactor away from the bug the close is currently hiding.
+  await withListener(
+    () => serveProxy({ ports: resolverPorts, port: 0, now: () => SERVE_NOW }),
+    async (listener) => {
+      const answer = await speak(
+        listener.address,
+        'POST / HTTP/1.1\r\nHost: atlas.vayu\r\ncontent-length: 11\r\n\r\nhello there',
+      );
+      assert.match(answer, /^HTTP\/1\.1 400 /, 'a body on a surface that takes none is refused');
+      assert.match(answer, /UNEXPECTED_BODY/);
+    },
+  );
+});
+
+test('AUDIT: chunked framing was accepted and then ignored on both surfaces', async () => {
+  // `Transfer-Encoding: chunked` says the body's length is in the body. The parser never looked,
+  // so a chunked request was answered as though it had no body at all. One framing, decided by
+  // one field, is the only arrangement in which the sender and the server agree; the second
+  // framing exists so two parsers can disagree, and this program has no throughput requirement
+  // that would pay for it.
+  await withListener(
+    () => serveProxy({ ports: resolverPorts, port: 0, now: () => SERVE_NOW }),
+    async (listener) => {
+      const answer = await speak(
+        listener.address,
+        'POST / HTTP/1.1\r\nHost: atlas.vayu\r\ntransfer-encoding: chunked\r\n\r\n0\r\n\r\n',
+      );
+      assert.match(answer, /^HTTP\/1\.1 400 /);
+      assert.match(answer, /MALFORMED_FRAMING/);
+    },
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/* The bounded body reader                                                     */
+/* -------------------------------------------------------------------------- */
+
+test('framing refuses the second length field outright', () => {
+  // One framing and no other. Every request-smuggling defect in the literature is two parsers
+  // disagreeing about which of two length fields governs; the way not to have that argument is
+  // not to accept the second field, including its innocent-looking `identity` spelling.
+  for (const value of ['chunked', 'identity', 'gzip, chunked', '']) {
+    assert.equal(
+      refusal(() => framing(new Map([['transfer-encoding', value]]))),
+      'MALFORMED_FRAMING',
+      value,
+    );
+  }
+});
+
+test('framing refuses a content-length that is not a plain count of octets', () => {
+  // `Number()` accepts most of these. Every acceptance is a value some other parser reads
+  // differently, and the whole point of this function is that there is only one reading.
+  for (const value of [
+    '+5',
+    '-1',
+    ' 5',
+    '5 ',
+    '0x5',
+    '5, 5',
+    '1e3',
+    '5.0',
+    '',
+    'five',
+    '1234567890',
+  ]) {
+    assert.equal(
+      refusal(() => framing(new Map([['content-length', value]]))),
+      'MALFORMED_FRAMING',
+      JSON.stringify(value),
+    );
+  }
+});
+
+test('framing refuses an oversized body from the head alone, before anything is buffered', () => {
+  // The ceiling is checked against the number the sender STATED, so a request for a gigabyte
+  // costs this process one header line rather than the allocation it asked for.
+  assert.equal(
+    refusal(() => framing(new Map([['content-length', String(SERVE_LIMITS.bodyBytes + 1)]]))),
+    'BODY_TOO_LARGE',
+  );
+  assert.deepEqual(framing(new Map([['content-length', String(SERVE_LIMITS.bodyBytes)]])), {
+    kind: 'fixed',
+    length: SERVE_LIMITS.bodyBytes,
+  });
+});
+
+test('framing reads no body where none is declared, and none where zero is', () => {
+  assert.deepEqual(framing(new Map()), { kind: 'none' });
+  assert.deepEqual(framing(new Map([['content-length', '0']])), { kind: 'none' });
+  assert.deepEqual(framing(new Map([['content-length', '3']])), { kind: 'fixed', length: 3 });
+});
+
+/** Speak to a Unix socket and return the raw answer. */
+function speakTo(path: string, request: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(path);
+    let out = '';
+    socket.setEncoding('utf8');
+    socket.on('connect', () => socket.write(request));
+    socket.on('data', (chunk: string) => {
+      out += chunk;
+    });
+    socket.on('close', () => resolve(out));
+    socket.on('error', reject);
+  });
+}
+
+/** A control request with a JSON body, framed the way a correct client would frame it. */
+function post(path: string, token: string, json: string): string {
+  return (
+    `POST ${path} HTTP/1.1\r\n` +
+    `x-vayuweb-control: 1\r\n` +
+    `authorization: Bearer ${token}\r\n` +
+    `content-length: ${Buffer.byteLength(json, 'utf8')}\r\n\r\n${json}`
+  );
+}
+
+async function withControl(run: (address: string, token: string) => Promise<void>): Promise<void> {
+  const token = randomBytes(32).toString('base64url');
+  const directory = mkdtempSync(join(tmpdir(), 'vayuweb-body-'));
+  const listener = await serveControl({
+    ports: controlPorts,
+    path: join(directory, 'control.sock'),
+    token,
+  });
+  try {
+    await run(listener.address, token);
+  } finally {
+    await listener.close();
+  }
+}
+
+test('the control API reads a body and answers from it', async () => {
+  await withControl(async (address, token) => {
+    const answer = await speakTo(
+      address,
+      post('/v1/resolve', token, JSON.stringify({ name: 'atlasobservatory.vayu' })),
+    );
+    assert.match(answer, /^HTTP\/1\.1 200 /, answer);
+    assert.match(answer, /"name":"atlasobservatory\.vayu"/);
+  });
+});
+
+test('a body split across packets is read whole, not answered from the first piece', async () => {
+  // The defect this is written against is answering as soon as the head is complete. A sender
+  // that writes its head and its body in two writes is the ordinary case, not an attack.
+  await withControl(async (address, token) => {
+    const json = JSON.stringify({ name: 'atlasobservatory.vayu' });
+    const request = post('/v1/resolve', token, json);
+    const split = request.length - 5;
+    const answer = await new Promise<string>((resolve, reject) => {
+      const socket = connect(address);
+      let out = '';
+      socket.setEncoding('utf8');
+      socket.on('connect', () => {
+        socket.write(request.slice(0, split));
+        setTimeout(() => socket.write(request.slice(split)), 25);
+      });
+      socket.on('data', (chunk: string) => {
+        out += chunk;
+      });
+      socket.on('close', () => resolve(out));
+      socket.on('error', reject);
+    });
+    assert.match(answer, /^HTTP\/1\.1 200 /, answer);
+    assert.match(answer, /"name":"atlasobservatory\.vayu"/);
+  });
+});
+
+test('a sender that promises bytes and goes quiet is closed by the clock, not held', async () => {
+  // The deadline must be armed across the body, not only across the head. A deadline evaluated
+  // when the peer next speaks is no deadline at all, because the attack IS the peer not speaking.
+  // Asserted on the source rather than by waiting ten seconds: the property is that `finish` —
+  // which is what stops the timer — is not reached until the body is complete.
+  const source = readFileSync(new URL('./serve.ts', import.meta.url), 'utf8');
+  const reader = source.slice(source.indexOf('function serveConnection'));
+  const shortRead = reader.indexOf('if (have < wanted) return;');
+  const dispatch = reader.indexOf('finish(() => {');
+  assert.notEqual(shortRead, -1, 'the reader must have a short-read branch');
+  assert.ok(shortRead < dispatch, 'and it must return before the branch that clears the timer');
+});
+
+test('more bytes than were declared is a refusal, not a longer body', async () => {
+  await withControl(async (address, token) => {
+    const json = JSON.stringify({ name: 'atlasobservatory.vayu' });
+    const request =
+      `POST /v1/resolve HTTP/1.1\r\nx-vayuweb-control: 1\r\n` +
+      `authorization: Bearer ${token}\r\n` +
+      `content-length: ${Buffer.byteLength(json, 'utf8')}\r\n\r\n${json}` +
+      `POST /v1/diagnostics/on HTTP/1.1\r\n\r\n`;
+    const answer = await speakTo(address, request);
+    assert.match(answer, /^HTTP\/1\.1 400 /, answer);
+    assert.match(answer, /UNEXPECTED_BODY/);
+  });
+});
+
+test('an oversized body is refused with 413 from the head alone', async () => {
+  await withControl(async (address, token) => {
+    // No body is sent at all. If this were being read rather than refused from the declaration,
+    // the connection would sit open until the head deadline instead of answering immediately.
+    const answer = await speakTo(
+      address,
+      `POST /v1/resolve HTTP/1.1\r\nx-vayuweb-control: 1\r\n` +
+        `authorization: Bearer ${token}\r\n` +
+        `content-length: ${SERVE_LIMITS.bodyBytes + 1}\r\n\r\n`,
+    );
+    assert.match(answer, /^HTTP\/1\.1 413 /, answer);
+    assert.match(answer, /BODY_TOO_LARGE/);
+  });
+});
+
+test('the body limit is refused before the token is even consulted', async () => {
+  // A refusal that costs an allocation is a refusal an unauthenticated caller can spend. The
+  // transport bound runs first precisely so an unauthenticated peer cannot make this process
+  // allocate anything at all.
+  await withControl(async (address) => {
+    const answer = await speakTo(
+      address,
+      `POST /v1/resolve HTTP/1.1\r\nx-vayuweb-control: 1\r\n` +
+        `content-length: ${SERVE_LIMITS.bodyBytes + 1}\r\n\r\n`,
+    );
+    assert.match(answer, /^HTTP\/1\.1 413 /, answer);
+  });
 });

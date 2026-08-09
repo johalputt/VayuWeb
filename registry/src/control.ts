@@ -51,6 +51,15 @@ export interface ControlRequest {
   readonly path: string;
   /** Lowercased header names. */
   readonly headers: ReadonlyMap<string, string>;
+  /**
+   * The request body, already bounded by the transport, or zero bytes.
+   *
+   * `serve.ts` refuses anything over `SERVE_LIMITS.bodyBytes` before a byte of it is buffered, so
+   * this handler may parse what it is given without a length check of its own. That division is
+   * deliberate: a bound belongs where the allocation happens, and a handler that re-checked one it
+   * cannot enforce would be stating a guarantee it does not provide.
+   */
+  readonly body: Uint8Array;
 }
 
 export interface ControlResponse {
@@ -220,6 +229,24 @@ export function handleControlRequest(
   }
 
   switch (`${request.method} ${request.path}`) {
+    case 'POST /v1/resolve': {
+      // The only endpoint on this surface whose argument arrives in a body, and the validation is
+      // the SAME function the path-carrying routes use — `parseControlName`. Two spellings of one
+      // grammar is how the two disagree later, and this codebase has the habit already: a resolver
+      // path mapper and a content port each implemented a subset of one rule, and the part neither
+      // implemented went missing without anything looking wrong.
+      const fields = jsonObject(request.body);
+      if (fields === null) return deny(400, 'bad_request');
+      const asked = fields['name'];
+      if (typeof asked !== 'string') return deny(400, 'bad_request');
+      const name = parseControlName(asked);
+      if (name === null) return deny(400, 'bad_name');
+      // Spread first, validated name last, for the reason `records` gives above.
+      return ok({
+        ...(ports.resolve(name.label, name.tld) as object),
+        name: `${name.label}.${name.tld}`,
+      });
+    }
     case 'GET /v1/health':
       return ok({ ok: true });
     case 'GET /v1/status': {
@@ -295,24 +322,80 @@ export function namedRoute(
   ];
   for (const candidate of routes) {
     if (method !== candidate.method || !path.startsWith(candidate.prefix)) continue;
-    const raw = path.slice(candidate.prefix.length);
-    if (raw.length === 0) return { route: candidate.route, name: null };
-    let decoded: string;
-    try {
-      decoded = decodeURIComponent(raw);
-    } catch {
-      return { route: candidate.route, name: null };
-    }
-    const dot = decoded.lastIndexOf('.');
-    if (dot <= 0 || dot === decoded.length - 1) return { route: candidate.route, name: null };
-    const label = decoded.slice(0, dot).toLowerCase();
-    const tld = decoded.slice(dot + 1).toLowerCase();
-    if (!isRatifiedTld(tld) || labelRejection(label) !== null) {
-      return { route: candidate.route, name: null };
-    }
-    return { route: candidate.route, name: { label, tld } };
+    return { route: candidate.route, name: parseControlName(path.slice(candidate.prefix.length)) };
   }
   return null;
+}
+
+/**
+ * The one place a name reaching the control API is turned into a label and a TLD, or refused.
+ *
+ * Shared by the path-carrying routes and by `POST /v1/resolve`, deliberately: two implementations
+ * of one grammar are two implementations that will disagree, and the disagreement will be found by
+ * whoever gets past the more permissive of them.
+ *
+ * Percent-decoding runs first and it is not what makes this safe — the grammar is. `..%2f..` fails
+ * the label rules exactly as `../..` does, because neither `%` nor `/` nor `.` is in them.
+ * Decoding is here so a legitimately encoded name (`atlas%2Dsite`, `atlasobservatory%2Evayu`) is
+ * accepted, which makes the check *more* permissive rather than less. An earlier version of this
+ * comment credited the safety to the decoding, and the line credited with safety is the line
+ * somebody removes. `decodeURIComponent` throws on a malformed escape and the throw is caught: a
+ * bad escape is a bad name, not a 500.
+ */
+export function parseControlName(raw: string): { label: string; tld: string } | null {
+  if (raw.length === 0) return null;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+  const dot = decoded.lastIndexOf('.');
+  if (dot <= 0 || dot === decoded.length - 1) return null;
+  const label = decoded.slice(0, dot).toLowerCase();
+  const tld = decoded.slice(dot + 1).toLowerCase();
+  if (!isRatifiedTld(tld) || labelRejection(label) !== null) return null;
+  return { label, tld };
+}
+
+/**
+ * A JSON object from a request body, or null for anything else.
+ *
+ * Anything else means: not valid UTF-8, not valid JSON, or valid JSON that is not a plain object —
+ * an array, a string, a number, `null`.
+ *
+ * **Exported so its contract can be asserted directly**, and that is a finding rather than a
+ * preference. Two mutations of this function survived a suite that tested it only through
+ * `POST /v1/resolve`: dropping `Array.isArray` and dropping `fatal`. The first is invisible
+ * through that caller by construction — an array's own keys are `"0"`, `"1"`, … and never `name`,
+ * so the handler answers `bad_request` either way — and a property no caller can distinguish is a
+ * property that belongs to the function and has to be tested there. The same reasoning `parseHead`
+ * and `framing` are exported for.
+ *
+ * `fatal: true` is the load-bearing one and it is not defensive. Without it an invalid byte
+ * becomes U+FFFD and the body parses: `{"name":"atlasobservatory.vayu","x":"\xff"}` is refused
+ * with it and answered **200** without it. Silent repair means the bytes acted on are not the
+ * bytes sent, which is the disagreement between sender and server this whole surface is arranged
+ * to avoid.
+ *
+ * `Object.hasOwn` guards the read: `JSON.parse` will happily produce an own `__proto__` key, and a
+ * plain `in` or a prototype-chain lookup on the result is how a body reaches a property nobody
+ * put there.
+ */
+export function jsonObject(body: Uint8Array): Record<string, unknown> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body));
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const source = parsed as Record<string, unknown>;
+  const out: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  for (const key of Object.keys(source)) {
+    if (Object.hasOwn(source, key)) out[key] = source[key];
+  }
+  return out;
 }
 
 /**

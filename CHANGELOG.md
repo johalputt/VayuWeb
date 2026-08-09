@@ -10,6 +10,73 @@ it.
 
 ## [Unreleased]
 
+### Added — a bounded request-body reader, and the endpoint that was waiting for it
+
+`serve.ts` read no request body on either surface, and gave a reason: a body reader is an unbounded
+allocation controlled by whoever opened the connection. That was right about the danger and wrong
+about the conclusion. The danger is the *unbounded* part, and its own comment said so — "a future
+route that needs a body has to add a bounded reader deliberately, which is the point". This is that
+reader.
+
+What bounds it, each part answering something a body could otherwise do:
+
+- **One framing.** `Transfer-Encoding` is refused whatever its value, `identity` included. Every
+  request-smuggling defect in the literature is two parsers disagreeing about which of two length
+  fields governs, and the way not to have that argument is not to accept the second field.
+- **`Content-Length` is matched, not coerced.** `^[0-9]{1,9}$` and nothing else. `Number()` accepts
+  `+5`, `0x5`, `1e3`, `5.0` and a leading space, and every acceptance is a value some other parser
+  reads differently.
+- **The ceiling is checked from the declaration**, before a body byte is buffered, so a request
+  asking for a gigabyte costs one header line rather than the allocation it asked for.
+- **A byte past the declared length is a refusal, not an ignore.** More than was declared is not a
+  longer body; it is a second request, or a sender and a server disagreeing about where the first
+  one ended.
+- **The deadline stays armed across the body.** A deadline evaluated when the peer next speaks is
+  no deadline, because the attack is the peer not speaking — the same defect already found once in
+  this repository, in the WANT deadline.
+
+Two things the reader exposed on the way in, both fixed here:
+
+**`SERVE_LIMITS.headBytes` was not a bound on bytes.** The socket was in `utf8` string mode, so the
+field named `headBytes` was compared against a count of UTF-16 code units — three times looser than
+its name for any head in the range U+0800..U+FFFF, and a number nobody could compute from the
+request. Small on its own; an impossible foundation for a body reader, because `Content-Length`
+counts octets and a decoded string cannot be counted in them at all — invalid UTF-8 becomes U+FFFD
+and the byte count is gone. The connection buffer is now a `Buffer` and the head is decoded
+`latin1`, which also makes `parseHead`'s length checks exact rather than approximate.
+
+**The proxy answered requests it had not finished reading.** A `Content-Length: 11` was answered
+from the head alone and the eleven bytes were left unread; `Transfer-Encoding: chunked` was accepted
+and then treated as no body at all. Saying what this was *not* is part of the finding: it was not
+exploitable, because every response carries `connection: close` and the socket is ended, so no
+second request was ever parsed off those bytes. It was a framing disagreement neither side could
+observe, on a surface one refactor away from the close no longer hiding it. The proxy now refuses a
+body outright — nothing on it takes one — and the control API is the only surface that accepts one.
+
+**`POST /v1/resolve` ships**, the fourteenth of RESOLUTION.md's eighteen endpoints and the one the
+last entry said was waiting on exactly this. Its name goes through `parseControlName` — the *same*
+function the path-carrying routes use, extracted rather than reimplemented. Two spellings of one
+grammar are two spellings that disagree later, and this repository has the habit already: a resolver
+path mapper and a content port each implemented a subset of one rule, and the part neither
+implemented went missing without anything looking wrong.
+
+The four that remain — `POST /v1/pin`, `DELETE /v1/pin/{cid}`, `PATCH /v1/config`,
+`POST /v1/token/rotate` — each change state this process does not yet own. None of them is blocked
+on the transport any more.
+
+Eleven mutations, nine killed immediately and **two survivors**, both in the body parser and both
+the test's fault rather than the fix's:
+
+Dropping `Array.isArray` changed nothing observable, and could not have: an array's own keys are
+`"0"`, `"1"`, … and never `name`, so the handler answers `bad_request` either way — the right answer
+by accident, which is what the test was written to rule out and then reached only through a caller
+that cannot see it. Dropping `fatal: true` on the body decoder was the sharper one: an invalid byte
+becomes U+FFFD, the body then parses, and `{"name":"atlasobservatory.vayu","x":"\xff"}` is answered
+**200** instead of refused — a request acted on with bytes the client never sent. Both properties
+belong to the parser, so `jsonObject` is exported and asserted directly, the same reason `parseHead`
+and `framing` are. A third mutation found while pinning them — the parsed object keeping
+`Object.prototype` — is killed too.
+
 ### Added — the dead-code gate asks the second question, and answers it about itself
 
 The gate asked whether an export is imported or tested anywhere. That is a real question and it has

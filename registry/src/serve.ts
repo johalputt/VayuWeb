@@ -20,13 +20,33 @@
  * number is deliberately not written here: `scripts/check-listeners.py` refuses any mention of
  * it, precisely so that nobody can reintroduce it by copying a comment.
  *
- * ## What this file refuses to do
+ * ## Bodies, and what reading one costs
  *
- * No request body is read on either surface. Nothing in either API takes one, and a body reader
- * is an unbounded allocation controlled by whoever opened the connection. The proxy answers from
- * the request line and headers; the control API's mutating routes carry their argument in the
- * path. A future route that needs a body has to add a bounded reader deliberately, which is the
- * point.
+ * For most of this file's life no request body was read on either surface, on the grounds that a
+ * body reader is an unbounded allocation controlled by whoever opened the connection. That was
+ * right about the danger and wrong about the conclusion: the danger is the *unbounded* part, and
+ * `RESOLUTION.md` specifies four endpoints that carry their argument in a body. The comment here
+ * said a future route "has to add a bounded reader deliberately, which is the point" — so this is
+ * that reader, added deliberately.
+ *
+ * What bounds it: one framing and no other ({@link framing} refuses `Transfer-Encoding` outright,
+ * so the length is always a number the sender stated before sending anything); a hard ceiling of
+ * `SERVE_LIMITS.bodyBytes` checked against that number *before* a single body byte is buffered;
+ * a refusal of any byte beyond the stated length rather than an ignore; and the head deadline
+ * left armed across the body, so a sender that promises 8 KiB and then goes quiet is closed by
+ * the clock rather than held. The proxy passes `acceptsBody: false` and refuses a body outright —
+ * nothing on that surface takes one, and a surface that answers a request it has not finished
+ * reading is disagreeing with its sender about where the request ended.
+ *
+ * ## Bytes, not characters
+ *
+ * The connection buffer is a `Buffer` and every bound in this file is a count of octets. It used
+ * to be a string with `setEncoding('utf8')`, which made `SERVE_LIMITS.headBytes` a bound on UTF-16
+ * code units — three times looser than its name for any head in the range U+0800..U+FFFF. That
+ * was a small looseness on its own and an impossible foundation for a body reader, because
+ * `Content-Length` counts octets and a decoded string cannot be counted in them: invalid UTF-8
+ * becomes U+FFFD and the byte count is lost for good. The head is decoded `latin1`, one octet to
+ * one character, which also makes `parseHead`'s length checks exact rather than approximate.
  */
 
 import { createServer as createTcpServer, type Server, type Socket } from 'node:net';
@@ -61,6 +81,16 @@ export const SERVE_LIMITS = {
    * the proxy's own target and host limits are much tighter still.
    */
   headBytes: 16 * 1024,
+  /**
+   * The largest request body accepted, in bytes, on the one surface that takes one.
+   *
+   * Checked against the sender's declared `Content-Length` *before* any body byte is buffered, so
+   * an oversized body costs one header line rather than the allocation it asked for. 8 KiB is
+   * three orders of magnitude above every body `RESOLUTION.md` defines — the largest is a name,
+   * a CID or a handful of configuration fields — and the generosity is deliberate: a limit that
+   * is nowhere near a legitimate request is a limit nobody is tempted to raise.
+   */
+  bodyBytes: 8 * 1024,
   /** Header lines accepted before the head is refused, independent of total size. */
   headerLines: 100,
   /** How long a connection may stay open without completing its head, in milliseconds. */
@@ -75,13 +105,27 @@ export type ServeRejection =
   | 'TOO_MANY_HEADERS'
   | 'MALFORMED_REQUEST'
   | 'HEAD_TIMEOUT'
-  | 'TOO_MANY_CONNECTIONS';
+  | 'TOO_MANY_CONNECTIONS'
+  /** A body arrived on a surface that takes none, or ran past the length its sender declared. */
+  | 'UNEXPECTED_BODY'
+  /** The declared length is over `SERVE_LIMITS.bodyBytes`. Refused before anything is buffered. */
+  | 'BODY_TOO_LARGE'
+  /** Chunked encoding, or a `Content-Length` that is not a plain count of octets. */
+  | 'MALFORMED_FRAMING';
 
-/** A parsed request head. Bodies are never read; see the module comment. */
+/** A parsed request, head and body. The body is empty on every surface that takes none. */
 export interface RequestHead {
   readonly method: string;
   readonly target: string;
   readonly headers: ReadonlyMap<string, string>;
+  /**
+   * The request body, or zero bytes.
+   *
+   * Not optional, and that is a decision rather than an oversight: an optional body is a field a
+   * route forgets to check, and the whole reason this reader exists is that a route needs to read
+   * one. Zero bytes is the answer for every request that carries none.
+   */
+  readonly body: Uint8Array;
 }
 
 export class ServeError extends Error {
@@ -156,7 +200,53 @@ export function parseHead(text: string): RequestHead {
     }
     headers.set(name, value);
   }
-  return { method, target, headers };
+  // Head-only, so no body: `serveConnection` re-spreads this with whatever the reader collected.
+  // A parser that invented a body would be a parser deciding framing, which is the next function's
+  // job and is kept apart from this one so it can be attacked without a socket.
+  return { method, target, headers, body: EMPTY_BODY };
+}
+
+const EMPTY_BODY = new Uint8Array(0);
+
+/** How long a body is, decided from the head alone. */
+export type Framing =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'fixed'; readonly length: number };
+
+/**
+ * Decide a request's framing, or refuse it.
+ *
+ * **One framing and no other.** `Transfer-Encoding` is refused whatever its value, including
+ * `identity`: the whole class of request-smuggling defects is two parsers disagreeing about which
+ * of two length fields governs, and the way not to have that argument is not to accept the second
+ * field. This program speaks to one browser on loopback and one local control client, so there is
+ * no compatibility case on the other side of the trade.
+ *
+ * `Content-Length` must be a plain count of octets — `^[0-9]{1,9}$` and nothing else. `+5`, `5 `,
+ * ` 5`, `0x5`, `5, 5` and `-1` are all refused rather than coerced, because `Number()` accepts
+ * most of them and every acceptance is a value some other parser reads differently. (A duplicated
+ * header never reaches here: `parseHead` refuses duplicates outright.)
+ *
+ * The ceiling is checked HERE, against the declared number, rather than while reading — so a
+ * sender asking for a gigabyte is answered from its head and costs this process nothing.
+ */
+export function framing(
+  headers: ReadonlyMap<string, string>,
+  limit: number = SERVE_LIMITS.bodyBytes,
+): Framing {
+  if (headers.has('transfer-encoding')) {
+    throw new ServeError('MALFORMED_FRAMING', 'transfer-encoding is not accepted; use a length');
+  }
+  const declared = headers.get('content-length');
+  if (declared === undefined) return { kind: 'none' };
+  if (!/^[0-9]{1,9}$/.test(declared)) {
+    throw new ServeError('MALFORMED_FRAMING', 'content-length must be a plain count of octets');
+  }
+  const length = Number(declared);
+  if (length > limit) {
+    throw new ServeError('BODY_TOO_LARGE', `${length} bytes is over the limit of ${limit}`);
+  }
+  return length === 0 ? { kind: 'none' } : { kind: 'fixed', length };
 }
 
 /** Serialise a response head and body. */
@@ -219,9 +309,14 @@ function reason(status: number): string {
   return known[status] ?? 'Status';
 }
 
+/** The bytes that end a request head. Named because the reader has to skip exactly this many. */
+const HEAD_TERMINATOR = '\r\n\r\n';
+
 /** The status a pre-handler refusal answers with. */
 function statusFor(code: ServeRejection): number {
-  return code === 'HEAD_TOO_LARGE' || code === 'TOO_MANY_HEADERS' ? 431 : 400;
+  if (code === 'HEAD_TOO_LARGE' || code === 'TOO_MANY_HEADERS') return 431;
+  if (code === 'BODY_TOO_LARGE') return 413;
+  return 400;
 }
 
 /**
@@ -238,9 +333,21 @@ function serveConnection(
     headers: ReadonlyMap<string, string>;
     body: Uint8Array;
   },
+  /**
+   * Whether this surface takes a request body at all.
+   *
+   * A parameter rather than a property of the request, because it is a property of the SURFACE:
+   * the browsing proxy has no route that takes a body and never will, so a body arriving there is
+   * refused without any route being consulted. Defaulting to `false` keeps the refusal the thing
+   * a caller has to opt out of.
+   */
+  acceptsBody = false,
 ): void {
-  let buffer = '';
+  let buffer: Buffer = Buffer.alloc(0);
   let done = false;
+  let headEnd = -1;
+  let parsed: RequestHead | null = null;
+  let frame: Framing = { kind: 'none' };
 
   const timer = setTimeout(() => {
     if (done) return;
@@ -258,26 +365,61 @@ function serveConnection(
     run();
   };
 
-  socket.setEncoding('utf8');
-  socket.on('data', (chunk: string) => {
+  const refuse = (code: ServeRejection): void => {
+    finish(() => writeHttp(socket, statusFor(code), new Map(), asciiBody(code)));
+  };
+
+  // No `setEncoding`. The buffer is octets, because every bound in this file is a count of octets
+  // and `Content-Length` is one too. See the module comment.
+  socket.on('data', (chunk: Buffer) => {
     if (done) return;
-    buffer += chunk;
-    if (buffer.length > SERVE_LIMITS.headBytes) {
-      finish(() => writeHttp(socket, 431, new Map(), asciiBody('HEAD_TOO_LARGE')));
-      return;
-    }
-    const end = buffer.indexOf('\r\n\r\n');
-    if (end === -1) return;
-    const head = buffer.slice(0, end);
-    finish(() => {
-      let parsed: RequestHead;
-      try {
-        parsed = parseHead(head);
-      } catch (error) {
-        const code = error instanceof ServeError ? error.code : 'MALFORMED_REQUEST';
-        writeHttp(socket, statusFor(code), new Map(), asciiBody(code));
+    buffer = buffer.length === 0 ? chunk : Buffer.concat([buffer, chunk]);
+
+    if (headEnd === -1) {
+      // The head bound applies only until the head is complete. Afterwards the body has its own,
+      // already checked against the declared length, and a legitimate body must not be able to
+      // push a connection past a limit that was never about it.
+      if (buffer.length > SERVE_LIMITS.headBytes) {
+        refuse('HEAD_TOO_LARGE');
         return;
       }
+      const end = buffer.indexOf(HEAD_TERMINATOR);
+      if (end === -1) return;
+      headEnd = end;
+      try {
+        // `latin1`, one octet to one character, so `parseHead`'s length checks count what the
+        // sender sent. Any byte above 0x7f survives into a header value and is then refused by the
+        // grammar that reads it, which is where a charset decision belongs.
+        parsed = parseHead(buffer.subarray(0, end).toString('latin1'));
+        frame = framing(parsed.headers);
+      } catch (error) {
+        refuse(error instanceof ServeError ? error.code : 'MALFORMED_REQUEST');
+        return;
+      }
+      if (!acceptsBody && frame.kind === 'fixed') {
+        refuse('UNEXPECTED_BODY');
+        return;
+      }
+    }
+
+    const wanted = frame.kind === 'fixed' ? frame.length : 0;
+    const have = buffer.length - (headEnd + HEAD_TERMINATOR.length);
+    // More than was declared is not a longer body; it is a second request, or a sender and a
+    // server that disagree about where the first one ended. Refused rather than ignored — ignoring
+    // it is what let the old code answer a request it had not finished reading.
+    if (have > wanted) {
+      refuse('UNEXPECTED_BODY');
+      return;
+    }
+    // Fewer means the sender is still speaking, and the head deadline stays armed while it does.
+    // A body deadline that only advanced when the peer chose to send would be no deadline: the
+    // whole attack is a peer that promised bytes and then went quiet.
+    if (have < wanted) return;
+
+    const head = parsed as RequestHead;
+    const body = buffer.subarray(headEnd + HEAD_TERMINATOR.length);
+    finish(() => {
+      const request: RequestHead = { ...head, body };
       // **Nothing used to stand between a handler's throw and the process.**
       //
       // There is no `uncaughtException` handler anywhere in this package, so a throw from any
@@ -293,19 +435,19 @@ function serveConnection(
       // module rather than of its current call sites.
       let answer: { status: number; headers: ReadonlyMap<string, string>; body: Uint8Array };
       try {
-        answer = respond(parsed);
+        answer = respond(request);
       } catch {
         // The error itself is DISCARDED, not logged to the wire. An exception message is the
         // likeliest place in this program for a filesystem path, a token or a record's bytes to
         // be sitting, and LOCAL-SURFACE.md 2.4 forbids a refusal that confirms VayuWeb is even
         // running. RESOLUTION.md's catalogue entry 1500 is a bare 500 for exactly this reason.
-        writeHttp(socket, 500, new Map(), new Uint8Array(0), parsed.method === 'HEAD');
+        writeHttp(socket, 500, new Map(), new Uint8Array(0), request.method === 'HEAD');
         return;
       }
       // RFC 7230 3.3.3: a response to HEAD never carries an entity, whatever its status. Applied
       // here, once, for both surfaces — the handlers decide what the answer IS and this decides
       // how much of it goes on the wire, which is the split the rest of this file keeps.
-      writeHttp(socket, answer.status, answer.headers, answer.body, parsed.method === 'HEAD');
+      writeHttp(socket, answer.status, answer.headers, answer.body, request.method === 'HEAD');
     });
   });
 
@@ -529,37 +671,44 @@ export function serveControl(options: ControlServerOptions): Promise<Listener> {
 
   const server = withConnectionCap(
     createTcpServer((socket) => {
-      serveConnection(socket, (head) => {
-        const request: ControlRequest = {
-          method: head.method,
-          path: head.target,
-          headers: head.headers,
-        };
-        // Caught here as well as in `serveConnection`, for the same reason the proxy catches its
-        // own: the backstop can only emit a bare 500. This surface answers JSON, and an operator
-        // whose resolver has a failing port is exactly the person parsing this response.
-        //
-        // The reason is a CONSTANT, not the exception. `handleControlRequest` is reached only past
-        // the token check, so the caller is authenticated — but "authenticated" is not "entitled
-        // to a stack trace": an internal error's message is where a log path or a record's bytes
-        // would be, and this response ends up in support tickets and screenshots.
-        let response: ControlResponse;
-        try {
-          response = handleControlRequest(request, options.ports, options.token);
-        } catch {
-          response = { status: 500, headers: new Map(), body: { error: 'internal' } };
-        }
-        return {
-          status: response.status,
-          headers: response.headers,
-          // The control API answers JSON, so the encoding is decided here — at the one place that
-          // knows the body is text — rather than being left for the writer to guess at.
-          body:
-            response.body === undefined
-              ? new Uint8Array(0)
-              : Buffer.from(JSON.stringify(response.body), 'utf8'),
-        };
-      });
+      serveConnection(
+        socket,
+        (head) => {
+          const request: ControlRequest = {
+            method: head.method,
+            path: head.target,
+            headers: head.headers,
+            body: head.body,
+          };
+          // Caught here as well as in `serveConnection`, for the same reason the proxy catches its
+          // own: the backstop can only emit a bare 500. This surface answers JSON, and an operator
+          // whose resolver has a failing port is exactly the person parsing this response.
+          //
+          // The reason is a CONSTANT, not the exception. `handleControlRequest` is reached only past
+          // the token check, so the caller is authenticated — but "authenticated" is not "entitled
+          // to a stack trace": an internal error's message is where a log path or a record's bytes
+          // would be, and this response ends up in support tickets and screenshots.
+          let response: ControlResponse;
+          try {
+            response = handleControlRequest(request, options.ports, options.token);
+          } catch {
+            response = { status: 500, headers: new Map(), body: { error: 'internal' } };
+          }
+          return {
+            status: response.status,
+            headers: response.headers,
+            // The control API answers JSON, so the encoding is decided here — at the one place that
+            // knows the body is text — rather than being left for the writer to guess at.
+            body:
+              response.body === undefined
+                ? new Uint8Array(0)
+                : Buffer.from(JSON.stringify(response.body), 'utf8'),
+          };
+        },
+        // The one surface that takes a body. `RESOLUTION.md` gives four of its endpoints an
+        // argument that is not a path component, and `POST /v1/resolve` is the first of them.
+        true,
+      );
     }),
   );
 
