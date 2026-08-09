@@ -20,6 +20,7 @@ import {
   buildEquivocationVectors,
   buildPowVectors,
   buildBlockExchangeVectors,
+  buildReleaseVectors,
   VECTOR_NOW,
   VECTOR_OWNER_KEY,
   VECTOR_OTHER_KEY,
@@ -35,6 +36,7 @@ const replication = buildReplicationVectors();
 const equivocation = buildEquivocationVectors();
 const pow = buildPowVectors();
 const blockExchange = buildBlockExchangeVectors();
+const release = buildReleaseVectors();
 
 const artifact = {
   $comment:
@@ -73,9 +75,23 @@ const artifact = {
     ownerKey: toHex(VECTOR_OWNER_KEY),
     otherKey: toHex(VECTOR_OTHER_KEY),
     baseInstant: VECTOR_NOW,
+    release:
+      'A `release` vector is a predecessor record in hex and an instant, and the answer every ' +
+      'implementation must derive: is the name claimable again by anyone. It is the one thing ' +
+      'the record suite could not test, because `state.fullyReleased` is an INPUT there — every ' +
+      'other vector in this file is handed the answer and checked on what it does with it. Two ' +
+      'implementations deriving it differently accept different owners for the same name, and ' +
+      'neither ever rejects anything. REVOKE is why it is published rather than assumed: an ' +
+      'ordinary record is released at notAfter + 2592000 + 2592000, a revoked one at ' +
+      'notAfter + 2592000, because grace would be a window in which a compromised key could ' +
+      'renew. Applying the ordinary rule to both holds a revoked name for thirty days longer ' +
+      'than peers who do not. Read the `predecessor` bytes, compute the answer at `at`, compare ' +
+      'with `expectFullyReleased`; no internal state label is published, because the name being ' +
+      'available is the only part of this that peers see.',
     suites:
-      'record pins what a verifier accepts. convergence, resolution, replication, ' +
-      'equivocation and pow pin what implementations must AGREE about after that, which is ' +
+      'The suites, by their key in this file. `vectors` pins what a verifier accepts. ' +
+      '`convergence`, `resolution`, `replication`, `equivocation`, `pow` and `release` pin ' +
+      'what implementations must AGREE about after that, which is ' +
       'where a fork lives — every consensus-critical defect found in this project so far was ' +
       'invisible to record verification and visible only to the question "what would a second ' +
       'implementation do". blockExchange is the wire format of VWIP-0005, which is a DRAFT: ' +
@@ -98,12 +114,14 @@ const artifact = {
   equivocation,
   pow,
   blockExchange,
+  release,
 };
 
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8');
 process.stdout.write(
   `wrote ${vectors.length} record, ${convergence.length} convergence, ${resolution.length} ` +
-    `resolution, ${replication.length} replication, ${equivocation.length} equivocation and ` +
-    `${pow.length} proof-of-work and ${blockExchange.length} block-exchange vectors to ${OUT}\n`,
+    `resolution, ${replication.length} replication, ${equivocation.length} equivocation, ` +
+    `${pow.length} proof-of-work, ${blockExchange.length} block-exchange and ${release.length} ` +
+    `release vectors to ${OUT}\n`,
 );

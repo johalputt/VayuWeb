@@ -1891,3 +1891,118 @@ export function buildBlockExchangeVectors(): BlockExchangeVector[] {
 
   return vectors;
 }
+
+/* -------------------------------------------------------------------------- */
+/* When a name returns to the pool — the derivation every vector was handed    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A predecessor record and the instant at which a second implementation must agree the name is
+ * claimable again.
+ *
+ * **`VectorState.fullyReleased` is an INPUT to every other vector in this file.** The suite hands
+ * the verifier the answer and checks what it does with it, so an implementation deriving that
+ * answer by any rule at all passes. The derivation is the one that decides who owns a name: it is
+ * the difference between `NAME_TAKEN` and an accepted registration, so two peers computing it
+ * differently accept different owners for the same name and neither ever rejects anything.
+ *
+ * REVOKE is the case that makes this worth publishing rather than assuming. REGISTRY.md gives an
+ * ordinary expiry `notAfter + 2592000 + 2592000` — grace, then quarantine — and gives a revoked
+ * name `notAfter + 2592000`, quarantine alone, because "grace would be a window in which a
+ * compromised key could renew". An implementation that applied the ordinary rule to both would
+ * hold a revoked name for **thirty days longer** than its peers, refusing registrations they
+ * accept, for a month, without either side reporting an error.
+ *
+ * Only `fullyReleased` is stated, deliberately. The internal state label is not wire-visible —
+ * `stateAt` reports `GRACE` for a revoked name's frozen remainder, which is an accurate reading of
+ * its own boundaries and a poor thing to publish as a contract. What peers must agree on is
+ * whether the name is available, and that is what this says.
+ */
+export interface ReleaseVector {
+  readonly name: string;
+  readonly rule: string;
+  /** The record a peer holds for the name. */
+  readonly predecessor: string;
+  readonly at: number;
+  readonly expectFullyReleased: boolean;
+}
+
+export function buildReleaseVectors(): ReleaseVector[] {
+  const GRACE = 2_592_000;
+  const QUARANTINE = 2_592_000;
+  const expiry = VECTOR_NOW + TERM_SECONDS;
+
+  // An ordinary registration: grace, then quarantine, then the pool.
+  const held = toHex(registration());
+  // A revocation of it. `notAfter` is copied from the predecessor — REGISTRY.md requires it —
+  // so the two records expire together and only the interval AFTER expiry differs.
+  const revoked = toHex(
+    successor({ op: 'REVOKE', records: [], notAfter: expiry, notBefore: VECTOR_NOW + 600 }),
+  );
+
+  const cases: Array<[string, string, number, boolean, string]> = [
+    ['ordinary/during-the-term', held, expiry - 1, false, 'a live name is nobody else’s'],
+    ['ordinary/at-expiry', held, expiry, false, 'grace has begun; the holder may still renew'],
+    ['ordinary/last-second-of-grace', held, expiry + GRACE - 1, false, 'grace runs a full 30 days'],
+    [
+      'ordinary/first-second-of-quarantine',
+      held,
+      expiry + GRACE,
+      false,
+      'quarantine holds it back too',
+    ],
+    [
+      'ordinary/last-second-of-quarantine',
+      held,
+      expiry + GRACE + QUARANTINE - 1,
+      false,
+      'still held',
+    ],
+    [
+      'ordinary/released',
+      held,
+      expiry + GRACE + QUARANTINE,
+      true,
+      'and released on the instant, not after it',
+    ],
+    ['revoked/during-the-frozen-term', revoked, expiry - 1, false, 'frozen, and not yet anyone’s'],
+    [
+      'revoked/at-expiry',
+      revoked,
+      expiry,
+      false,
+      'quarantine begins here — a revoked name gets no grace',
+    ],
+    [
+      'revoked/last-second-of-quarantine',
+      revoked,
+      expiry + QUARANTINE - 1,
+      false,
+      'the one interval it does get',
+    ],
+    [
+      'revoked/released-thirty-days-early',
+      revoked,
+      expiry + QUARANTINE,
+      true,
+      'released a full month before an ordinary expiry would be',
+    ],
+    [
+      'revoked/still-released-later',
+      revoked,
+      expiry + GRACE + QUARANTINE,
+      true,
+      'and does not become held again',
+    ],
+  ];
+
+  return cases.map(([name, predecessor, at, expectFullyReleased, why]) => ({
+    name: `release/${name}`,
+    rule:
+      'REGISTRY.md: an ordinary record is released at notAfter + 2592000 + 2592000, a REVOKE at ' +
+      `notAfter + 2592000 — ${why}`,
+    predecessor,
+    at,
+    expectFullyReleased,
+  }));
+}

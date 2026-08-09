@@ -10,6 +10,40 @@ it.
 
 ## [Unreleased]
 
+### Added — a conformance suite for when a name returns to the pool, and a guard that was green on the count
+
+`state.fullyReleased` is an **input** to every vector in the record suite. The file hands the
+verifier the answer and checks what it does with it, so an implementation deriving that answer by
+any rule at all passes. The derivation is the one that decides who owns a name — `NAME_TAKEN` or an
+accepted registration — so two peers computing it differently accept different owners for the same
+name and neither ever reports an error.
+
+`REVOKE` is why this is published rather than assumed. REGISTRY.md releases an ordinary record at
+`notAfter + 2592000 + 2592000` — grace, then quarantine — and a revoked one at `notAfter + 2592000`,
+quarantine alone, "because grace would be a window in which a compromised key could renew". An
+implementation applying the ordinary rule to both holds a revoked name **thirty days longer** than
+its peers, refusing registrations they accept, for a month, silently. Eleven `release/*` vectors pin
+both intervals on the instant, and a test states the difference between them as one quarantine
+interval rather than as two absolutes, because the difference is the thing that forks.
+
+Measured before being written up: both mutations of that rule are **already caught** by this
+repository's unit tests. What the vectors add is the interop direction — a unit test protects this
+implementation, the artifact is what a second one runs. Said plainly rather than counted as a find.
+
+Only `fullyReleased` is published, not the internal state label. `stateAt` reports `GRACE` for a
+revoked name's frozen remainder, which is a correct reading of its own boundaries and a poor thing
+to put in a contract; `resolve` never shows it, reporting `REVOKED` at every instant, which was
+checked rather than assumed.
+
+**And the guard on the artifact was green about the wrong thing.** `AUDIT: every field a runner must
+act on is explained inside the artifact` asserted the number of suites and never that each was
+explained, so a suite with no note passed the moment the count was updated to match. Found by
+deleting the note and watching it stay green — then the first fix searched all of `notes` for the
+suite's name and **also** passed, because a suite deleted from its own note is still mentioned in
+passing by another. The check now requires each suite to appear in `notes.suites`, the one place a
+stranger reads to learn what is in the file. That defect was committed twice inside the check
+written to catch it.
+
 ### Added — conformance vectors for the term a renewal must produce, not merely accept
 
 Every vector in the `vectors` suite hands the verifier a finished record carrying a `notAfter` and

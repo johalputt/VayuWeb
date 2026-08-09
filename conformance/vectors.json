@@ -15,7 +15,8 @@
     "ownerKey": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12",
     "otherKey": "c853ad0f0cd2b619aea92ceec4fd56a24d6499d584ce79257e45cfd8139b60a7",
     "baseInstant": 1782518400,
-    "suites": "record pins what a verifier accepts. convergence, resolution, replication, equivocation and pow pin what implementations must AGREE about after that, which is where a fork lives — every consensus-critical defect found in this project so far was invisible to record verification and visible only to the question \"what would a second implementation do\". blockExchange is the wire format of VWIP-0005, which is a DRAFT: these vectors are generated so that the proposal carries executed encodings rather than transcribed ones, and they are not stable until it leaves Draft.",
+    "release": "A `release` vector is a predecessor record in hex and an instant, and the answer every implementation must derive: is the name claimable again by anyone. It is the one thing the record suite could not test, because `state.fullyReleased` is an INPUT there — every other vector in this file is handed the answer and checked on what it does with it. Two implementations deriving it differently accept different owners for the same name, and neither ever rejects anything. REVOKE is why it is published rather than assumed: an ordinary record is released at notAfter + 2592000 + 2592000, a revoked one at notAfter + 2592000, because grace would be a window in which a compromised key could renew. Applying the ordinary rule to both holds a revoked name for thirty days longer than peers who do not. Read the `predecessor` bytes, compute the answer at `at`, compare with `expectFullyReleased`; no internal state label is published, because the name being available is the only part of this that peers see.",
+    "suites": "The suites, by their key in this file. `vectors` pins what a verifier accepts. `convergence`, `resolution`, `replication`, `equivocation`, `pow` and `release` pin what implementations must AGREE about after that, which is where a fork lives — every consensus-critical defect found in this project so far was invisible to record verification and visible only to the question \"what would a second implementation do\". blockExchange is the wire format of VWIP-0005, which is a DRAFT: these vectors are generated so that the proposal carries executed encodings rather than transcribed ones, and they are not stable until it leaves Draft.",
     "construct": "A vector carries EITHER a `message` in hex OR a `construct` recipe, never neither. A recipe is used where publishing the bytes would publish no information: the one case today is a block one octet over the megabyte limit, which written out is 2.1 MB of hex zeros of which every byte after the first says nothing. Build the message from the recipe and decode it exactly as you would a hex one. Kinds: `blocks-of-zeros` — a BLOCKS message whose `blks` array holds `count` byte strings of `bytes` zero octets each, encoded as deterministic CBOR per REGISTRY.md. This list is closed; a runner meeting a kind it does not know must fail rather than skip, because a skipped vector reports as a passing one."
   },
   "vectors": [
@@ -2174,6 +2175,85 @@
         "decode": "ok",
         "type": "BDONE"
       }
+    }
+  ],
+  "release": [
+    {
+      "name": "release/ordinary/during-the-term",
+      "rule": "REGISTRY.md: an ordinary record is released at notAfter + 2592000 + 2592000, a REVOKE at notAfter + 2592000 — a live name is nobody else’s",
+      "predecessor": "ad626f706852454749535445526373657100637369675840859cf60530b0f672147dc595144fce3db1aabed26230bc5fd699161b63dacf4466ef5c085834816a2b1ec7e253c4881fea82ef647a480bbe02da06407556f00c63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656a763d76617975776562316776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "at": 1814054399,
+      "expectFullyReleased": false
+    },
+    {
+      "name": "release/ordinary/at-expiry",
+      "rule": "REGISTRY.md: an ordinary record is released at notAfter + 2592000 + 2592000, a REVOKE at notAfter + 2592000 — grace has begun; the holder may still renew",
+      "predecessor": "ad626f706852454749535445526373657100637369675840859cf60530b0f672147dc595144fce3db1aabed26230bc5fd699161b63dacf4466ef5c085834816a2b1ec7e253c4881fea82ef647a480bbe02da06407556f00c63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656a763d76617975776562316776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "at": 1814054400,
+      "expectFullyReleased": false
+    },
+    {
+      "name": "release/ordinary/last-second-of-grace",
+      "rule": "REGISTRY.md: an ordinary record is released at notAfter + 2592000 + 2592000, a REVOKE at notAfter + 2592000 — grace runs a full 30 days",
+      "predecessor": "ad626f706852454749535445526373657100637369675840859cf60530b0f672147dc595144fce3db1aabed26230bc5fd699161b63dacf4466ef5c085834816a2b1ec7e253c4881fea82ef647a480bbe02da06407556f00c63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656a763d76617975776562316776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "at": 1816646399,
+      "expectFullyReleased": false
+    },
+    {
+      "name": "release/ordinary/first-second-of-quarantine",
+      "rule": "REGISTRY.md: an ordinary record is released at notAfter + 2592000 + 2592000, a REVOKE at notAfter + 2592000 — quarantine holds it back too",
+      "predecessor": "ad626f706852454749535445526373657100637369675840859cf60530b0f672147dc595144fce3db1aabed26230bc5fd699161b63dacf4466ef5c085834816a2b1ec7e253c4881fea82ef647a480bbe02da06407556f00c63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656a763d76617975776562316776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "at": 1816646400,
+      "expectFullyReleased": false
+    },
+    {
+      "name": "release/ordinary/last-second-of-quarantine",
+      "rule": "REGISTRY.md: an ordinary record is released at notAfter + 2592000 + 2592000, a REVOKE at notAfter + 2592000 — still held",
+      "predecessor": "ad626f706852454749535445526373657100637369675840859cf60530b0f672147dc595144fce3db1aabed26230bc5fd699161b63dacf4466ef5c085834816a2b1ec7e253c4881fea82ef647a480bbe02da06407556f00c63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656a763d76617975776562316776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "at": 1819238399,
+      "expectFullyReleased": false
+    },
+    {
+      "name": "release/ordinary/released",
+      "rule": "REGISTRY.md: an ordinary record is released at notAfter + 2592000 + 2592000, a REVOKE at notAfter + 2592000 — and released on the instant, not after it",
+      "predecessor": "ad626f706852454749535445526373657100637369675840859cf60530b0f672147dc595144fce3db1aabed26230bc5fd699161b63dacf4466ef5c085834816a2b1ec7e253c4881fea82ef647a480bbe02da06407556f00c63746c646476617975646e616d656561746c617365737569746501677265636f72647381a26474797065637478746576616c75656a763d76617975776562316776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66a363616c6778196172676f6e3269642d7631392d6d36353533362d74322d703164626974730a656e6f6e6365500707070707070707070707070707070768707265764861736858200000000000000000000000000000000000000000000000000000000000000000696e6f744265666f72651a6a3f1280",
+      "at": 1819238400,
+      "expectFullyReleased": true
+    },
+    {
+      "name": "release/revoked/during-the-frozen-term",
+      "rule": "REGISTRY.md: an ordinary record is released at notAfter + 2592000 + 2592000, a REVOKE at notAfter + 2592000 — frozen, and not yet anyone’s",
+      "predecessor": "ad626f70665245564f4b45637365710163736967584091661ab2cc8515acac4cc93c38e971c8b84743cbbdd9abdfb2fa016b843971ae1dd875327c4b5fe8a6b734369299e63b646ca4292bb2a23c2f3cff70dbea9b0563746c646476617975646e616d656561746c617365737569746501677265636f726473806776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66f66870726576486173685820339aa2a96b991d731810495453cc3dc1d9b2bc27e54f7e5a81c9362f68554eb0696e6f744265666f72651a6a3f14d8",
+      "at": 1814054399,
+      "expectFullyReleased": false
+    },
+    {
+      "name": "release/revoked/at-expiry",
+      "rule": "REGISTRY.md: an ordinary record is released at notAfter + 2592000 + 2592000, a REVOKE at notAfter + 2592000 — quarantine begins here — a revoked name gets no grace",
+      "predecessor": "ad626f70665245564f4b45637365710163736967584091661ab2cc8515acac4cc93c38e971c8b84743cbbdd9abdfb2fa016b843971ae1dd875327c4b5fe8a6b734369299e63b646ca4292bb2a23c2f3cff70dbea9b0563746c646476617975646e616d656561746c617365737569746501677265636f726473806776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66f66870726576486173685820339aa2a96b991d731810495453cc3dc1d9b2bc27e54f7e5a81c9362f68554eb0696e6f744265666f72651a6a3f14d8",
+      "at": 1814054400,
+      "expectFullyReleased": false
+    },
+    {
+      "name": "release/revoked/last-second-of-quarantine",
+      "rule": "REGISTRY.md: an ordinary record is released at notAfter + 2592000 + 2592000, a REVOKE at notAfter + 2592000 — the one interval it does get",
+      "predecessor": "ad626f70665245564f4b45637365710163736967584091661ab2cc8515acac4cc93c38e971c8b84743cbbdd9abdfb2fa016b843971ae1dd875327c4b5fe8a6b734369299e63b646ca4292bb2a23c2f3cff70dbea9b0563746c646476617975646e616d656561746c617365737569746501677265636f726473806776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66f66870726576486173685820339aa2a96b991d731810495453cc3dc1d9b2bc27e54f7e5a81c9362f68554eb0696e6f744265666f72651a6a3f14d8",
+      "at": 1816646399,
+      "expectFullyReleased": false
+    },
+    {
+      "name": "release/revoked/released-thirty-days-early",
+      "rule": "REGISTRY.md: an ordinary record is released at notAfter + 2592000 + 2592000, a REVOKE at notAfter + 2592000 — released a full month before an ordinary expiry would be",
+      "predecessor": "ad626f70665245564f4b45637365710163736967584091661ab2cc8515acac4cc93c38e971c8b84743cbbdd9abdfb2fa016b843971ae1dd875327c4b5fe8a6b734369299e63b646ca4292bb2a23c2f3cff70dbea9b0563746c646476617975646e616d656561746c617365737569746501677265636f726473806776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66f66870726576486173685820339aa2a96b991d731810495453cc3dc1d9b2bc27e54f7e5a81c9362f68554eb0696e6f744265666f72651a6a3f14d8",
+      "at": 1816646400,
+      "expectFullyReleased": true
+    },
+    {
+      "name": "release/revoked/still-released-later",
+      "rule": "REGISTRY.md: an ordinary record is released at notAfter + 2592000 + 2592000, a REVOKE at notAfter + 2592000 — and does not become held again",
+      "predecessor": "ad626f70665245564f4b45637365710163736967584091661ab2cc8515acac4cc93c38e971c8b84743cbbdd9abdfb2fa016b843971ae1dd875327c4b5fe8a6b734369299e63b646ca4292bb2a23c2f3cff70dbea9b0563746c646476617975646e616d656561746c617365737569746501677265636f726473806776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66f66870726576486173685820339aa2a96b991d731810495453cc3dc1d9b2bc27e54f7e5a81c9362f68554eb0696e6f744265666f72651a6a3f14d8",
+      "at": 1819238400,
+      "expectFullyReleased": true
     }
   ]
 }

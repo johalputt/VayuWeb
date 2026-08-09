@@ -11,6 +11,7 @@ import {
   buildResolutionVectors,
   buildEquivocationVectors,
   buildPowVectors,
+  buildReleaseVectors,
   fromHex,
   toHex,
   type Vector,
@@ -29,6 +30,7 @@ import {
   type Verdict,
 } from './verify.ts';
 import { parseRecordBytes } from './record.ts';
+import { isFullyReleased } from './lifecycle.ts';
 import { baseBits, requiredBits, rateWindow, powSalt, tagSatisfies, RATE_FLOOR } from './pow.ts';
 import {
   BlockExchangeError,
@@ -587,7 +589,27 @@ test('AUDIT: every field a runner must act on is explained inside the artifact',
       v.length > 0 &&
       v.every((e) => typeof e === 'object' && e !== null && 'name' in e),
   ) as [string, Record<string, unknown>[]][];
-  assert.equal(suites.length, 7, 'the artifact carries exactly its seven vector suites');
+  // Eight since `release` was added. The number is asserted rather than counted from the artifact
+  // for the reason this whole test exists: a suite that appears without anyone declaring it is a
+  // suite nobody wrote an explanation for.
+  assert.equal(suites.length, 8, 'the artifact carries exactly its eight vector suites');
+
+  // **And each is named in the index, which the count alone never checked.** Adding a suite with
+  // no note passed this test the moment the count was updated to match. The first fix for that
+  // searched the whole of `notes` for the suite's name and ALSO passed, because a suite deleted
+  // from its own note is still mentioned in passing by another one — a check green on the word
+  // rather than on the explanation, which is the defect this file exists to catch, committed
+  // twice inside the check written to catch it.
+  //
+  // `notes.suites` specifically, because that is the one place a stranger reads to find out what
+  // is in this file. A suite absent from it is a suite they meet with no idea what to do.
+  const index = notes['suites'] ?? '';
+  for (const [suite] of suites) {
+    assert.ok(
+      index.includes(suite),
+      `the artifact carries a "${suite}" suite that notes.suites never mentions`,
+    );
+  }
 
   // Every recipe kind a runner would have to implement is named in the notes.
   const kinds = new Set<string>();
@@ -680,4 +702,35 @@ test('AUDIT: no published BWANT vector names the same identifier twice', () => {
   // Without this the test passes on an artifact with no identifier list in it at all, which is
   // the same failure mode as the check it replaces.
   assert.ok(checked >= 3, `only ${checked} identifier-carrying vectors were examined`);
+});
+
+test('every release vector is the answer this implementation derives', () => {
+  // The direction that was never checked. `fullyReleased` is an INPUT to every other vector here,
+  // so the suite handed the verifier the answer and tested what it did with it — an implementation
+  // deriving that answer by any rule at all passed the file. It is the derivation that decides who
+  // owns a name: `NAME_TAKEN` or an accepted registration, with no error either way.
+  for (const vector of buildReleaseVectors()) {
+    const record = parseRecordBytes(fromHex(vector.predecessor));
+    assert.equal(
+      isFullyReleased(record, vector.at),
+      vector.expectFullyReleased,
+      `${vector.name} at ${vector.at}: ${vector.rule}`,
+    );
+  }
+});
+
+test('a revoked name returns to the pool thirty days before an ordinary expiry would', () => {
+  // Stated as a difference rather than as two absolutes, because the absolutes are what a reader
+  // checks and the difference is what forks. An implementation that gave a revoked name the
+  // ordinary grace-then-quarantine would hold it a month longer than its peers, refusing
+  // registrations they accept, and nothing on either side would report a problem.
+  const released = buildReleaseVectors().filter((v) => v.expectFullyReleased);
+  const ordinary = released.find((v) => v.name === 'release/ordinary/released');
+  const revoked = released.find((v) => v.name === 'release/revoked/released-thirty-days-early');
+  assert.ok(ordinary && revoked, 'both boundary vectors must exist');
+  assert.equal(
+    ordinary.at - revoked.at,
+    2_592_000,
+    'exactly one quarantine interval, which is the grace a revoked name does not get',
+  );
 });

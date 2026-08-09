@@ -91,10 +91,20 @@ conforming peer can hold. It is unit-tested against a constructed predecessor, a
 activates a second suite must add the wire vector. A test also fails if an exempted code
 acquires a vector, so the excuse cannot outlive the reason for it.
 
-The file carries seven suites: `vectors` holds 91 record-verification vectors, and `convergence`,
-`resolution`, `replication`, `equivocation`, `pow` and `blockExchange` hold their own. Those six
-pin what implementations must *agree* about rather than what one of them accepts, which is where a
-fork lives.
+The file carries eight suites: `vectors` holds 91 record-verification vectors, and `convergence`,
+`resolution`, `replication`, `equivocation`, `pow`, `blockExchange` and `release` hold their own.
+Those seven pin what implementations must *agree* about rather than what one of them accepts, which
+is where a fork lives.
+
+**`release` answers the one question the record suite cannot ask.** `state.fullyReleased` is an
+*input* to every vector in `vectors`: the suite hands the verifier the answer and checks what it
+does with it, so an implementation deriving that answer by any rule at all passes the file. The
+derivation decides who owns a name — `NAME_TAKEN` or an accepted registration — so two peers
+computing it differently accept different owners and neither ever reports an error. `REVOKE` is why
+it is published rather than assumed: an ordinary record is released at `notAfter + 2592000 +
+2592000`, a revoked one at `notAfter + 2592000`, because grace would be a window in which a
+compromised key could renew. An implementation applying the ordinary rule to both holds a revoked
+name a month longer than its peers.
 
 **The `lifecycle/term-*` vectors pin what an implementation must COMPUTE**, which is a direction
 the rest of `vectors` does not cover. Every other vector hands the verifier a finished record and
