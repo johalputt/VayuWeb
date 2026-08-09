@@ -699,7 +699,11 @@ test('a CID is validated before it is used for anything at all', () => {
 
 test('unpinning is idempotent and reports which of the two happened', () => {
   const control = ports();
-  handleControlRequest(withBody('POST', '/v1/pin', JSON.stringify({ cid: HELD_CID })), control, TOKEN);
+  handleControlRequest(
+    withBody('POST', '/v1/pin', JSON.stringify({ cid: HELD_CID })),
+    control,
+    TOKEN,
+  );
 
   const first = handleControlRequest(request('DELETE', `/v1/pin/${HELD_CID}`), control, TOKEN);
   assert.equal(first.status, 200);
