@@ -25,10 +25,24 @@ a private key or the content-cache key on a platform without a keystore is **a r
 downgrade**. That rule is expressed as a type rather than a convention, so relaxing it does not
 compile.
 
+`src/identity.rs` generates the Ed25519 key pair, signs with it, and stores the secret key under
+the rule above — which is what finally gives `Sensitivity::KeystoreOnly` a private key to refuse
+about. The seed lives in the same zeroising `Secret` as every other secret and a signing key is
+rebuilt per signature, so there is one copy of the secret with one lifetime rather than two with
+two zeroisation stories. Verification is **strict**, and the test that pins why is worth reading:
+the Ed25519 identity point is a valid public-key encoding, and `(R = identity, s = 0)` satisfies the
+permissive verification equation for *every* message — so a permissive verifier attributes a
+signature nobody made, over bytes nobody chose, to a key nobody holds.
+
+Signing bytes is not building a record. Deterministic CBOR over a domain-separated input with a
+proof of work is the protocol's business and is not in this crate.
+
 `src/control.rs` is the client half of the resolver's control API. It existed as a claim before it
 existed as code — `Cargo.toml` has described this crate as "identity handling and the control-API
-client" since the crate held only the first half — which is the kind of statement that is true of
-the intention and not of the artifact.
+client" since before **either** half was written, which is the kind of statement that is true of
+the intention and not of the artifact. (An earlier version of this paragraph said the crate held
+the first half at the time. It did not: `ed25519-dalek` and `rand_core` sat in `Cargo.toml` with
+nothing importing them, which is what a promise looks like from the outside.)
 
 Its shape follows the server's. `ControlEndpoint` has **one variant**, a socket path, because the
 server refusing to bind TCP is worth nothing if the client offers to speak it: the pair is what an

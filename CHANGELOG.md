@@ -10,6 +10,34 @@ it.
 
 ## [Unreleased]
 
+### Added — identity generation, so the refusal that guards a private key has one to guard
+
+`client/Cargo.toml` has described this crate as "identity handling and the control-API client"
+since before either half existed, and `ed25519-dalek` and `rand_core` sat in it with nothing
+importing them. The sharper version of the same gap: `Sensitivity::KeystoreOnly` — the variant
+carrying PRIVACY.md 7.4's "a private key on a platform without a keystore is a refusal, not a
+downgrade" — had no private key in the crate to refuse about.
+
+`client/src/identity.rs` generates an Ed25519 key pair from the operating system's CSPRNG, signs,
+verifies, and stores the secret under that rule. The seed lives in the same zeroising `Secret` as
+every other secret and a signing key is rebuilt per signature, so there is one copy of the secret
+with one lifetime rather than two with two zeroisation stories — the awkward arrangement on
+purpose, because the second copy is the one nobody remembers.
+
+**Verification is strict, and the test that pins why is the interesting one.** The Ed25519 identity
+point is a valid public-key encoding, and the signature `(R = identity, s = 0)` satisfies the
+permissive verification equation for *every* message: `[0]B` is the identity, and `R + [h]A` is the
+identity too whatever `h` is. A permissive verifier therefore attributes a signature nobody made,
+over bytes nobody chose, to a key nobody holds — in a protocol where a public key *is* an owner.
+The registry refuses such a key at schema level for the same reason.
+
+Stated rather than implied: this is not a Tauri application, not a record builder, and not Phase 5.
+Signing bytes is not constructing a `REGISTER`, and the phase's acceptance test still needs a person
+who has never used a command line and a GUI this environment cannot compile or launch.
+
+`client/README.md` also said the crate "held only the first half" of what its description promised.
+It held neither.
+
 ### Fixed — three of the five wire messages had no vector a second implementation could pass
 
 The conformance artifact is the thing a *second* implementation runs, and `RECORDS`, `CHECKPOINT`

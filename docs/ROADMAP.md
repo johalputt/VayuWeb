@@ -386,6 +386,21 @@ disclosure text is attached to the value rather than left to each call site — 
 report", implemented as "the caller should probably mention it", is how a requirement becomes a
 comment.
 
+**Identity generation now exists**, which is the item this phase names first. `client/src/identity.rs`
+generates an Ed25519 key pair from the operating system's CSPRNG, holds the seed in the same
+zeroising `Secret` type as everything else, reconstructs a signing key per signature rather than
+keeping a second long-lived copy of the secret, and stores it under `Sensitivity::KeystoreOnly` —
+which is what finally gives that variant, and the refusal it carries, a private key to refuse about.
+Verification is strict rather than permissive, and a test pins the case where the difference is not
+academic: the identity point is a valid public-key encoding, and `(R = identity, s = 0)` satisfies
+the permissive equation for *every* message, so a permissive verifier attributes a signature nobody
+made to a key nobody holds.
+
+What it is not: a Tauri application, a record builder, or Phase 5. Signing bytes is not constructing
+a `REGISTER` — deterministic CBOR over a domain-separated input with a proof of work is none of it —
+and the phase's acceptance test still needs a person who has never used a command line and a GUI
+this environment cannot compile or launch.
+
 **What Rust buys here that a garbage-collected language cannot** is two of the four requirements
 outright: `Drop` runs at a known point, so zeroisation is not a hope, and requirement 3's "never
 placed in a garbage-collected string" is satisfied by construction. The crate builds and tests

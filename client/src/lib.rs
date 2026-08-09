@@ -10,4 +10,5 @@
 //! written by the same hands does not satisfy it and must not be reported as though it did.
 
 pub mod control;
+pub mod identity;
 pub mod secrets;
