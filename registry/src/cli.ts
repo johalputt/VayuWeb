@@ -87,15 +87,25 @@ function parseArgs(argv: readonly string[]): Args {
       positional.push(token);
       continue;
     }
+    // **Refused, not last-wins.** `register --name a.vayu --name b.vayu` used to spend a real
+    // Argon2id solve and register the SECOND -- an irreversible, publicly logged act on a name the
+    // operator typed but did not choose, with nothing said about which of their two answers was
+    // taken. The usage text already commits to the rule for a flag that cannot mean what it says:
+    // "`register --site ./public` is refused rather than accepted and dropped." Both spellings are
+    // the same flag, so mixing `--name=x` with `--name x` is caught by the same check.
+    const set = (name: string, value: string): void => {
+      if (flags.has(name)) throw new UsageError(`--${name} given more than once`);
+      flags.set(name, value);
+    };
     const eq = token.indexOf('=');
     if (eq !== -1) {
-      flags.set(token.slice(2, eq), token.slice(eq + 1));
+      set(token.slice(2, eq), token.slice(eq + 1));
     } else {
       const next = argv[i + 1];
       if (next === undefined || next.startsWith('--')) {
         throw new UsageError(`flag ${token} needs a value`);
       }
-      flags.set(token.slice(2), next);
+      set(token.slice(2), next);
       i += 1;
     }
   }
@@ -113,6 +123,24 @@ const number = (args: Args, flag: string, fallback: number): number => {
   if (raw === undefined) return fallback;
   const value = Number(raw);
   if (!Number.isInteger(value)) throw new UsageError(`--${flag} must be an integer`);
+  return value;
+};
+
+/**
+ * A TCP port, refused by this tool rather than by the runtime.
+ *
+ * `--port -1` and `--port 99999` are integers, so the check above passed them and they surfaced as
+ * node's own `options.port should be >= 0 and < 65536`, raised from inside `listen` after the site
+ * had been imported and the root CID printed. An operator debugging that is reading the runtime's
+ * vocabulary about a flag this tool owns.
+ *
+ * Zero stays valid: it asks the kernel for an ephemeral port, which `serve` then reports.
+ */
+const port = (args: Args, flag: string, fallback: number): number => {
+  const value = number(args, flag, fallback);
+  if (value < 0 || value > 65535) {
+    throw new UsageError(`--${flag} must be a port between 0 and 65535, not ${value}`);
+  }
   return value;
 };
 
@@ -1659,7 +1687,34 @@ async function cmdSync(args: Args): Promise<number> {
   return 0;
 }
 
+/**
+ * Bind the second listener, or take the first one down with it.
+ *
+ * A start that half-succeeds is worse than one that fails: the process cannot exit while a server
+ * holds the event loop, so the operator gets an error message and a shell that never comes back,
+ * and a control API stays on its socket answering for a resolver whose proxy does not exist.
+ *
+ * Generic over what it binds rather than written into `cmdServe`, because a decision that lives in
+ * that function's wiring is a decision no test reaches -- the lesson `rotatingToken` and the
+ * pointer guard each taught once already.
+ */
+async function bindProxy<T>(
+  bind: () => Promise<T | null>,
+  alreadyBound: { close: () => Promise<void> | void },
+): Promise<T | null> {
+  try {
+    return await bind();
+  } catch (error) {
+    await alreadyBound.close();
+    throw error;
+  }
+}
+
 async function cmdServe(args: Args): Promise<number> {
+  // Read before anything is opened, imported or bound. A flag refused after the site has been
+  // published into memory and its root CID printed reads as a failure of the publish rather than
+  // of the flag, which is how `--port 99999` came to be answered by node instead of by this tool.
+  const proxyPort = port(args, 'port', 7654);
   const store = Store.open(required(args, 'log'), Math.floor(Date.now() / 1000));
   const started = Math.floor(Date.now() / 1000);
 
@@ -1825,28 +1880,35 @@ async function cmdServe(args: Args): Promise<number> {
     out('The control API below still answers about names.');
   }
 
-  const proxy =
-    served === null
-      ? null
-      : await serveProxy({
-          port: number(args, 'port', 7654),
-          // The process boundary is where the real clock is allowed to exist; every module below this
-          // takes it as a parameter.
-          now: () => Math.floor(Date.now() / 1000),
-          options: {
-            get diagnostics() {
-              return diagnostics;
-            },
-            ...(served === null ? {} : { content: served }),
-            ...(pointer === null ? {} : { ipns: pointer }),
-          },
-          ports: resolverPortsFor(store),
-          cache,
-          // The log's length is the registry's generation: every operation that could change an answer
-          // this resolver has cached is an append, so a length that has not moved is a registry whose
-          // answers cannot have changed.
-          generation: () => store.length,
-        });
+  // **Wrapped, because the control socket is already bound by the time this runs.** A proxy that
+  // cannot take its port -- `EADDRINUSE` is the ordinary way, from running `serve` twice -- used to
+  // reject out of `cmdServe` with the control server still listening. The process printed the error
+  // and then never returned: the event loop cannot empty while a server holds it, so the operator's
+  // shell hung and a control API belonging to a resolver with no proxy stayed on the socket,
+  // answering. That is the site-less defect from the other side, a listener bound by a process that
+  // cannot do the thing the listener is for.
+  const proxy = await bindProxy(async () => {
+    if (served === null) return null;
+    return serveProxy({
+      port: proxyPort,
+      // The process boundary is where the real clock is allowed to exist; every module below this
+      // takes it as a parameter.
+      now: () => Math.floor(Date.now() / 1000),
+      options: {
+        get diagnostics() {
+          return diagnostics;
+        },
+        ...(served === null ? {} : { content: served }),
+        ...(pointer === null ? {} : { ipns: pointer }),
+      },
+      ports: resolverPortsFor(store),
+      cache,
+      // The log's length is the registry's generation: every operation that could change an answer
+      // this resolver has cached is an append, so a length that has not moved is a registry whose
+      // answers cannot have changed.
+      generation: () => store.length,
+    });
+  }, control);
 
   // HOSTING.md's first mitigation, said out loud. "One always-on node is the difference between a
   // site that loads and a site that does not", and this is precisely the state a publisher cannot

@@ -10,6 +10,44 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a `serve` that could not bind its proxy hung forever holding a socket
+
+Run `serve` twice on one port and the second one **never returns**. It prints `listen EADDRINUSE:
+address already in use` and then hangs: the control socket is bound first, and a listening server
+keeps the event loop from emptying, so the process cannot exit. Measured under `timeout` — fifteen
+seconds, exit 124, socket still on disk and still accepting.
+
+What it leaves behind is worse than the hang. A control API belonging to a resolver whose proxy does
+not exist is the site-less defect from the other side: a listener bound by a process that cannot do
+the thing the listener is for. `GET /v1/status` on it cannot even answer, because the `proxy`
+binding it reads is still in its temporal dead zone.
+
+`bindProxy` now takes the already-bound listener down before the failure propagates, so the command
+exits 1 immediately and leaves nothing answering. It is a named function rather than a `try` inside
+`cmdServe` for a reason this session has learned twice: a decision that lives in that function's
+wiring is a decision no test reaches.
+
+The test spawns a child process on purpose. In-process, the orphaned socket holds the test runner
+open too, so the failure arrives as a suite that never finishes rather than as a test that fails —
+and a hang in CI reads as an infrastructure problem, not a defect.
+
+### Fixed — `--port 99999` was answered by node, and a flag given twice took the last value
+
+`--port abc` and `--port 1.5` already answered `usage: --port must be an integer`. `-1` and `99999`
+are integers, so they went through and surfaced as node's own `options.port should be >= 0 and <
+65536`, raised from inside `listen` **after** the site had been imported and its root CID printed —
+the runtime's vocabulary about a flag the tool owns, at a moment that reads as a failure of the
+publish. The port is now read and refused before anything is opened, imported or bound. Zero stays
+valid: it asks the kernel for an ephemeral port, which `serve` then reports.
+
+Separately, `parseArgs` overwrote a repeated flag and nothing looked. `register --name a.vayu --name
+b.vayu` spent a real Argon2id solve and registered the **second** — an irreversible, publicly logged
+act on a name the operator typed but did not choose, with nothing said about which of their two
+answers was taken. The usage text already commits to the opposite rule for a flag that cannot mean
+what it says: "`register --site ./public` is refused rather than accepted and dropped." A repeated
+flag is the same defect one step earlier. Both spellings count as the same flag, so mixing
+`--name=x` with `--name x` is caught by the same check.
+
 ### Fixed — `PATCH /v1/config` would raise a cache bound to any number at all
 
 `{"cacheSizes":{"negativeEntries":1000000000}}` answered **200**. So did

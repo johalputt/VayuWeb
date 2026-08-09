@@ -17,7 +17,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { createServer } from 'node:net';
+import { createConnection, createServer } from 'node:net';
+import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 
 import {
@@ -38,6 +39,14 @@ import { contentCacheKey } from './proxy.ts';
 import type { ContentPort } from './proxy.ts';
 import { CID_PARAMETERS, cidBytes, encodeCid, sha256 } from './content.ts';
 import { Store } from './store.ts';
+
+/** A one-file site inside a scratch directory, for the tests that need `serve` to have content. */
+function siteDirectory(dir: string): string {
+  const site = join(dir, 'site');
+  mkdirSync(site, { recursive: true });
+  writeFileSync(join(site, 'index.html'), '<h1>real</h1>');
+  return site;
+}
 
 /** A scratch directory that cleans itself up, so a failing test cannot leak into the next one. */
 function scratch(): { dir: string; done: () => void } {
@@ -1527,6 +1536,148 @@ test('AUDIT: a DIRECTORY where the manifest belongs is named in the report, not 
     assert.match(report, /\s\.vayu\/manifest\.json$/m, 'the directory itself is what is named');
     assert.doesNotMatch(report, /inner\.txt/, 'not the files inside a directory nothing reads');
   } finally {
+    done();
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/* AUDIT: two ways a flag failed to mean what the operator typed              */
+/* -------------------------------------------------------------------------- */
+
+test('AUDIT: a port outside the port range is refused by the tool, not by node', async () => {
+  // `--port abc` and `--port 1.5` already answered `usage: --port must be an integer`. `--port -1`
+  // and `--port 99999` are integers, so they went through — and surfaced as node's own
+  // `options.port should be >= 0 and < 65536. Received type number (-1)`, raised from inside
+  // `listen` AFTER the site had been imported and the root CID printed. An operator debugging that
+  // message is reading the runtime's vocabulary about a flag the tool owns.
+  //
+  // Port 0 stays valid on purpose: it asks the kernel for an ephemeral port, `serve` reports the
+  // one it got, and the acceptance script depends on being able to ask for one.
+  const { dir, done } = scratch();
+  try {
+    for (const bad of ['-1', '99999', '65536', '-0.0001']) {
+      // An explicit socket inside the scratch directory, and `runAsync` because `serve` is the one
+      // command that returns a promise. The refusal must land before anything is bound, or this
+      // test leaves a listener behind and the suite never exits.
+      const refused = await runAsync([
+        'serve',
+        '--log',
+        join(dir, 'log'),
+        '--socket',
+        join(dir, `${bad.replace(/[^0-9a-z]/gi, '_')}.sock`),
+        '--port',
+        bad,
+      ]);
+      assert.equal(refused.code, 1, bad);
+      assert.match(refused.err, /^usage: --port/m, bad);
+      assert.doesNotMatch(refused.err, /options\.port/, `${bad}: node's message, not the tool's`);
+    }
+  } finally {
+    done();
+  }
+});
+
+test('AUDIT: naming a flag twice is refused rather than quietly taking the last one', () => {
+  // `register --name aaaaaaaaaaaaaaaa.vayu --name bbbbbbbbbbbbbbbb.vayu` spent a real Argon2id
+  // solve and registered the SECOND — an irreversible, publicly logged act on a name the operator
+  // typed but did not choose. `parseArgs` overwrote the map entry and nothing looked.
+  //
+  // The usage text already commits to the opposite rule for a flag that cannot mean what it says:
+  // "`register --site ./public` is refused rather than accepted and dropped." A repeated flag is
+  // the same defect one step earlier — the tool picks one of the operator's two answers and does
+  // not say which.
+  const { dir, done } = scratch();
+  try {
+    const twice = run([
+      'resolve',
+      '--log',
+      join(dir, 'log'),
+      '--name',
+      'atlasobservatory.vayu',
+      '--name',
+      'somewhereelse.vayu',
+    ]);
+    assert.equal(twice.code, 1);
+    assert.match(twice.err, /^usage: --name given more than once/m);
+
+    // `--flag=value` is the same flag by another spelling, so mixing the two forms is caught too.
+    const mixed = run(['resolve', '--log', join(dir, 'log'), '--name=a.vayu', '--name', 'b.vayu']);
+    assert.equal(mixed.code, 1);
+    assert.match(mixed.err, /given more than once/);
+
+    // And naming it once still works, which is the half a blanket refusal would break.
+    const once = run(['resolve', '--log', join(dir, 'log'), '--name', 'atlasobservatory.vayu']);
+    assert.doesNotMatch(once.err, /more than once/);
+  } finally {
+    done();
+  }
+});
+
+test('AUDIT: a proxy that cannot bind takes the control socket down with it', async () => {
+  // **Run twice on one port and the second `serve` never returns.** It prints
+  // `listen EADDRINUSE: address already in use 127.0.0.1:7891` and then hangs: the control socket
+  // was bound first and is still listening, so the event loop never empties and the operator's
+  // shell never comes back. Measured under `timeout`, not reasoned about — fifteen seconds, exit
+  // 124, socket still on disk and still accepting.
+  //
+  // What is left behind is worse than the hang. A control API belonging to a resolver whose proxy
+  // does not exist is the defect the site-less fix closed from the other side: a listener bound by
+  // a process that cannot do the thing the listener is for. `GET /v1/status` on it cannot even
+  // answer, because the `proxy` binding it reads is still in its temporal dead zone.
+  //
+  // **Run as a CHILD PROCESS on purpose.** In-process, the orphaned socket holds the test runner
+  // open too, so the failure arrives as a suite that never finishes rather than as a test that
+  // fails — and a hang in CI reads as an infrastructure problem, not a defect. Spawning it also
+  // measures the thing the operator actually experiences: whether the command comes back.
+  const { dir, done } = scratch();
+  const blocker = createServer();
+  try {
+    await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve));
+    const taken = (blocker.address() as { port: number }).port;
+    const socket = join(dir, 'control.sock');
+
+    const child = spawn(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        join(import.meta.dirname, '..', 'bin', 'vayuweb-registry.ts'),
+        'serve',
+        '--log',
+        join(dir, 'log'),
+        '--site',
+        siteDirectory(dir),
+        '--port',
+        String(taken),
+        '--socket',
+        socket,
+      ],
+      { stdio: 'ignore' },
+    );
+    const exited = await new Promise<number | null>((resolve) => {
+      const giveUp = setTimeout(() => {
+        child.kill('SIGKILL');
+        resolve(null);
+      }, 20_000);
+      child.on('exit', (code) => {
+        clearTimeout(giveUp);
+        resolve(code);
+      });
+    });
+
+    assert.notEqual(exited, null, 'the command must come back rather than hang holding a socket');
+    assert.equal(exited, 1, 'a start that could not bind is a failure, and says so by exiting 1');
+
+    const reachable = await new Promise<boolean>((resolve) => {
+      const probe = createConnection(socket);
+      probe.on('connect', () => {
+        probe.destroy();
+        resolve(true);
+      });
+      probe.on('error', () => resolve(false));
+    });
+    assert.equal(reachable, false, 'the control socket must not outlive the start that failed');
+  } finally {
+    blocker.close();
     done();
   }
 });
