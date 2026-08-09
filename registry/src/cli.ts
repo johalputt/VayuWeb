@@ -42,7 +42,8 @@ import { importSite, type SiteFile } from './unixfs.ts';
 import { cidBytes, decodeCid } from './content.ts';
 import { memorySource } from './blockstore.ts';
 import { fetchPath, FetchError } from './fetch.ts';
-import { treeOf } from './merkle.ts';
+import { proveInclusion, treeOf, type Proof, type Root } from './merkle.ts';
+import { greatestCorroboratedLength, verifyNameInclusion } from './checkpoint.ts';
 import { TOKEN_BYTES } from './control.ts';
 import { EquivocationLedger, ledgerPathFor, type LedgerEntry } from './equivocation.ts';
 import { CheckpointLedger } from './checkpoint.ts';
@@ -257,6 +258,8 @@ const FLAGS_FOR: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['renew', new Set(['log', 'key', 'name', 'bits', 'at', 'clear', ...ENTRY_FLAGS])],
   ['transfer', new Set(['log', 'key', 'name', 'to', 'cosign', 'at', 'clear', ...ENTRY_FLAGS])],
   ['release', new Set(['log', 'key', 'name', 'at'])],
+  ['prove', new Set(['log', 'name', 'at'])],
+  ['light-verify', new Set(['proof', 'claims', 'name', 'quorum', 'at'])],
   ['revoke', new Set(['log', 'key', 'name', 'at'])],
   ['resolve', new Set(['log', 'name', 'at'])],
   ['list', new Set(['log', 'at'])],
@@ -787,6 +790,295 @@ function cmdVectors(): number {
  * things a running process owns that a pure function cannot -- a generated token and a signal
  * handler that puts the socket away.
  */
+/* -------------------------------------------------------------------------- */
+/* The light client — REGISTRY.md, "A light client verifies one name"          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Every entry in the log, as the leaves a merkle tree is built over.
+ *
+ * Read out rather than held, because `Store` is a file-backed log and the tree is derived state.
+ * The cost is honest and stated in `proveInclusion`'s own comment: a production node keeps interior
+ * nodes; this rebuilds. The *verification* side is O(log n) either way, and that is the side a
+ * light client runs.
+ */
+function leavesOf(store: Store): Uint8Array[] {
+  const leaves: Uint8Array[] = [];
+  for (let i = 0; i < store.length; i += 1) {
+    const entry = store.entryAt(i);
+    if (entry === null) break;
+    leaves.push(entry.bytes);
+  }
+  return leaves;
+}
+
+const rootToJson = (root: Root): unknown => ({
+  hash: toHex(root.hash),
+  index: root.index,
+  size: root.size,
+});
+
+/**
+ * Read one node of a proof back, refusing anything that is not one.
+ *
+ * A proof arrives from a peer, so every field is attacker-chosen and none may be assumed. The
+ * refusals are deliberately blunt — a malformed proof is a refusal, never a partially trusted
+ * structure — because a verifier that repairs its input has stopped verifying it.
+ */
+function rootFromJson(value: unknown, where: string): Root {
+  if (value === null || typeof value !== 'object')
+    throw new UsageError(`${where} is not an object`);
+  const node = value as Record<string, unknown>;
+  const hash = node['hash'];
+  const index = node['index'];
+  const size = node['size'];
+  if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/i.test(hash)) {
+    throw new UsageError(`${where}.hash must be 32 bytes of hex`);
+  }
+  if (!Number.isInteger(index) || (index as number) < 0) {
+    throw new UsageError(`${where}.index must be a non-negative integer`);
+  }
+  if (!Number.isInteger(size) || (size as number) < 0) {
+    throw new UsageError(`${where}.size must be a non-negative integer`);
+  }
+  return { hash: fromHex(hash), index: index as number, size: size as number };
+}
+
+/**
+ * Prove one name's presence in this log, for someone who does not hold it.
+ *
+ * Step 2 of REGISTRY.md's light-client procedure, from the side that has the log. What goes out is
+ * the record's bytes and the sibling hashes needed to fold them up to a root.
+ *
+ * **The document deliberately carries no `treeRoot`.** `Proof`'s own comment says a proof that
+ * carried its own leaf "would let a peer prove inclusion of something the light client never asked
+ * about"; a proof carrying the root it is checked against is that defect one level up, with the
+ * peer supplying both the evidence and the standard it is judged by. The root has to come from the
+ * claims, which is why `light-verify` takes them separately and why this command prints its own
+ * root to stderr, next to the sentence saying not to trust it from here.
+ */
+function cmdProve(args: Args): number {
+  const now = clockOf(args);
+  const store = Store.open(required(args, 'log'), now);
+  const { label, tld } = splitName(required(args, 'name'));
+
+  const held = store.lookup(label, tld);
+  if (held === null) {
+    err(`${label}.${tld} has no history in this log`);
+    return 3;
+  }
+
+  const leaves = leavesOf(store);
+  const leaf = leaves[held.logIndex];
+  if (leaf === undefined) {
+    err(`${label}.${tld} is indexed at ${held.logIndex}, past a log of ${leaves.length}`);
+    return 1;
+  }
+  const proof = proveInclusion(leaves, held.logIndex);
+  out(
+    JSON.stringify({
+      name: `${label}.${tld}`,
+      logLength: leaves.length,
+      // The LEAF, not a re-encoding of the parsed record. The proof is about these exact
+      // bytes, and anything that round-tripped through a decoder would be a different
+      // artefact that happens to mean the same thing.
+      record: toHex(leaf),
+      proof: {
+        leafIndex: proof.leafIndex,
+        leafSize: proof.leafSize,
+        siblings: proof.siblings.map(rootToJson),
+        siblingIsLeft: proof.siblingIsLeft,
+        roots: proof.roots.map(rootToJson),
+        rootIndex: proof.rootIndex,
+      },
+    }),
+  );
+  // On stderr, so piping the document to a file keeps the two apart — which is the point.
+  err(`tree root at length ${leaves.length}: ${toHex(treeOf(leaves).root())}`);
+  err("That root is THIS log's claim about itself. A light client must obtain the length and");
+  err('root from peers instead; taking both from one source proves only self-consistency.');
+  return 0;
+}
+
+/** One peer's checkpoint claim, as the light client receives it. */
+interface Claim {
+  readonly logLength: number;
+  readonly treeRoot: string;
+}
+
+function claimsFrom(path: string): Claim[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (error) {
+    throw new UsageError(
+      `--claims ${path}: ${error instanceof Error ? error.message : 'unreadable'}`,
+    );
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new UsageError(`--claims ${path}: expected a non-empty array of {logLength, treeRoot}`);
+  }
+  return parsed.map((value, i) => {
+    if (value === null || typeof value !== 'object')
+      throw new UsageError(`claim ${i} is not an object`);
+    const claim = value as Record<string, unknown>;
+    const logLength = claim['logLength'];
+    const treeRoot = claim['treeRoot'];
+    if (!Number.isInteger(logLength) || (logLength as number) < 0) {
+      throw new UsageError(`claim ${i}: logLength must be a non-negative integer`);
+    }
+    if (typeof treeRoot !== 'string' || !/^[0-9a-f]{64}$/i.test(treeRoot)) {
+      throw new UsageError(`claim ${i}: treeRoot must be 32 bytes of hex`);
+    }
+    return { logLength: logLength as number, treeRoot: treeRoot.toLowerCase() };
+  });
+}
+
+/**
+ * Verify one name against peers' claims, holding no log at all.
+ *
+ * Steps 1 and 2 of REGISTRY.md's light-client procedure. **Step 3 is not done here and the output
+ * says so**: verifying the record's own chain — signatures, `prevHash` links, proof of work — is
+ * `vw verify`'s job, and a command that implied it had checked the chain would be claiming the
+ * more valuable half of the procedure on the strength of the cheaper one.
+ *
+ * Three refusals, each for a different reason a light client can be lied to:
+ *
+ * - **No corroborated length.** `greatestCorroboratedLength` takes the greatest length claimed by
+ *   at least `--quorum` peers, which fails toward staleness rather than toward believing a single
+ *   stranger. One peer therefore proves nothing by default, and `--quorum 1` is available and says
+ *   in the answer what it gave up.
+ * - **A fork.** Peers claiming the same length with different roots are surfaced and neither is
+ *   taken — REPLICATION.md 7.3 says surface and MUST NOT pick one, and picking the first or the
+ *   majority would be picking.
+ * - **A proof for a different length.** The peaks in a proof are the peaks at the length it was
+ *   built for, so checking it against another length's root would fail obscurely. Said plainly
+ *   instead.
+ */
+function cmdLightVerify(args: Args): number {
+  const now = clockOf(args);
+  const { label, tld } = splitName(required(args, 'name'));
+  const name = `${label}.${tld}`;
+  const quorum = number(args, 'quorum', 2);
+  if (quorum < 1) throw new UsageError('--quorum must be at least 1');
+
+  let document: Record<string, unknown>;
+  try {
+    document = JSON.parse(readFileSync(required(args, 'proof'), 'utf8')) as Record<string, unknown>;
+  } catch (error) {
+    throw new UsageError(`--proof: ${error instanceof Error ? error.message : 'unreadable'}`);
+  }
+  if (document['name'] !== name) {
+    err(`the proof is about ${String(document['name'])}, not ${name}`);
+    return 1;
+  }
+  if (document['treeRoot'] !== undefined) {
+    // Refused rather than ignored. A document that carries a root is one somebody built to be
+    // checked against itself, and accepting it quietly would make that the normal shape.
+    err('the proof carries a treeRoot; a proof checked against a root from the same source');
+    err('proves only that the source is self-consistent. Obtain the root from peers.');
+    return 1;
+  }
+  const record = document['record'];
+  if (typeof record !== 'string' || !/^([0-9a-f]{2})+$/i.test(record)) {
+    throw new UsageError("the proof's record must be a hex string");
+  }
+  const proofLength = document['logLength'];
+  if (!Number.isInteger(proofLength) || (proofLength as number) <= 0) {
+    throw new UsageError("the proof's logLength must be a positive integer");
+  }
+  const proof = proofFromJson(document['proof']);
+
+  const claims = claimsFrom(required(args, 'claims'));
+  const chosen = greatestCorroboratedLength(
+    claims.map((c) => c.logLength),
+    quorum,
+  );
+  if (chosen === null) {
+    err(`no log length is corroborated by ${quorum} of the ${claims.length} claim(s) supplied`);
+    err('A length one peer asserts is a length one peer can invent. Ask more peers, or');
+    err('pass --quorum 1 and read the answer knowing what it rests on.');
+    return 1;
+  }
+
+  const atLength = claims.filter((c) => c.logLength === chosen.length);
+  const roots = new Set(atLength.map((c) => c.treeRoot));
+  if (roots.size > 1) {
+    err(`FORK at log length ${chosen.length}: ${roots.size} peers disagree about the tree root`);
+    for (const root of roots) err(`  ${root}`);
+    err('Neither is chosen. REPLICATION.md 7.3 surfaces a fork and does not resolve one, because');
+    err('nothing on this side is evidence about which history is the real one.');
+    return 1;
+  }
+  const treeRoot = atLength[0]!.treeRoot;
+
+  if (proofLength !== chosen.length) {
+    err(`the proof is for log length ${String(proofLength)}, and ${chosen.length} is what peers`);
+    err('corroborate. A proof carries the tree peaks at its own length, so it can only be checked');
+    err('against the root at that length. Ask the prover for a proof at the corroborated length.');
+    return 1;
+  }
+
+  const answer = verifyNameInclusion(
+    name,
+    fromHex(record),
+    proof,
+    fromHex(treeRoot),
+    chosen.length,
+    now,
+    chosen.peersAgreeing,
+  );
+
+  out(`${answer.verified ? 'verified' : 'NOT verified'}  ${answer.name}`);
+  out(`  ${answer.detail}`);
+  out(`  log length ${answer.logLength}, observed at ${answer.observedAt}`);
+  // Unconditional, on both outcomes. REGISTRY.md: "show that length and the observation time with
+  // every answer", and the freshness gap is the thing an inclusion proof most invites a reader to
+  // forget it has not closed.
+  out('  freshness is UNPROVEN: no inclusion proof shows the length handed over is current, so a');
+  out('  peer withholding recent entries can present a stale but internally consistent view.');
+  out('  This is steps 1 and 2 only. Run `verify` for the record chain — step 3.');
+  return answer.verified ? 0 : 1;
+}
+
+/** Read a proof back from a document, refusing anything that is not one. */
+function proofFromJson(value: unknown): Proof {
+  if (value === null || typeof value !== 'object') throw new UsageError('the proof is missing');
+  const raw = value as Record<string, unknown>;
+  const leafIndex = raw['leafIndex'];
+  const leafSize = raw['leafSize'];
+  const rootIndex = raw['rootIndex'];
+  for (const [field, at] of [
+    ['leafIndex', leafIndex],
+    ['leafSize', leafSize],
+    ['rootIndex', rootIndex],
+  ] as const) {
+    if (!Number.isInteger(at) || (at as number) < 0) {
+      throw new UsageError(`proof.${field} must be a non-negative integer`);
+    }
+  }
+  const siblings = raw['siblings'];
+  const siblingIsLeft = raw['siblingIsLeft'];
+  const roots = raw['roots'];
+  if (!Array.isArray(siblings) || !Array.isArray(roots) || !Array.isArray(siblingIsLeft)) {
+    throw new UsageError('proof.siblings, proof.siblingIsLeft and proof.roots must be arrays');
+  }
+  if (siblings.length !== siblingIsLeft.length) {
+    throw new UsageError('proof.siblings and proof.siblingIsLeft must be the same length');
+  }
+  if (!siblingIsLeft.every((flag) => typeof flag === 'boolean')) {
+    throw new UsageError('proof.siblingIsLeft must be booleans');
+  }
+  return {
+    leafIndex: leafIndex as number,
+    leafSize: leafSize as number,
+    siblings: siblings.map((s, i) => rootFromJson(s, `proof.siblings[${i}]`)),
+    siblingIsLeft: siblingIsLeft as boolean[],
+    roots: roots.map((r, i) => rootFromJson(r, `proof.roots[${i}]`)),
+    rootIndex: rootIndex as number,
+  };
+}
+
 /** The merkle root over the log's current entries, recomputed rather than remembered. */
 function merkleRootOf(store: Store, length: number): Uint8Array {
   const entries: Uint8Array[] = [];
@@ -1322,6 +1614,9 @@ const USAGE = `vayuweb-registry — local name registry (Phase 1: no network)
   release    --log <file> --key <file> --name <label.tld> [--at <unix>]
   revoke     --log <file> --key <file> --name <label.tld> [--at <unix>]
   resolve    --log <file> --name <label.tld> [--at <unix>]
+  prove      --log <file> --name <label.tld> [--at <unix>]
+  light-verify --proof <file> --claims <file> --name <label.tld> [--quorum <n>]
+             [--at <unix>]
   list       --log <file> [--at <unix>]
   equivocations --log <file>
   difficulty --log <file> --name <label.tld> [--at <unix>]
@@ -1374,6 +1669,10 @@ export function main(argv: readonly string[]): number | Promise<number> {
         return cmdSuccessor('REVOKE', args);
       case 'resolve':
         return cmdResolve(args);
+      case 'prove':
+        return cmdProve(args);
+      case 'light-verify':
+        return cmdLightVerify(args);
       case 'equivocations':
         return cmdEquivocations(args);
       case 'list':

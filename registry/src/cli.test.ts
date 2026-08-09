@@ -740,3 +740,281 @@ test('AUDIT: the version the control API discloses was two releases behind the p
     'the disclosed version must equal the package version; bump both in the release commit',
   );
 });
+
+/* -------------------------------------------------------------------------- */
+/* The light client, which had every part except a way to run it              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Prove a name; return the document and, separately, the root the prover claims.
+ *
+ * They come back on different streams because `prove` puts them on different streams: the document
+ * on stdout, the root on stderr next to the sentence saying a light client must get it from peers
+ * instead. Keeping them apart here is not tidiness — a test that read both out of one blob would
+ * be modelling exactly the shortcut the command refuses to offer.
+ */
+function proveName(
+  log: string,
+  name = NAME,
+): { document: Record<string, unknown>; claimedRoot: string } {
+  const proved = run(['prove', '--log', log, '--name', name, '--at', String(NOW)]);
+  assert.equal(proved.code, 0, proved.out + proved.err);
+  const root = /tree root at length \d+: ([0-9a-f]{64})/.exec(proved.err);
+  assert.ok(root, `prove must state the root it computed: ${proved.err}`);
+  return {
+    document: JSON.parse(proved.out) as Record<string, unknown>,
+    claimedRoot: root[1] as string,
+  };
+}
+
+/** Write peer claims — what checkpoint gossip hands a light client — to a file. */
+function claimsFile(dir: string, claims: Array<{ logLength: number; treeRoot: string }>): string {
+  const path = join(dir, `claims-${claims.length}-${claims[0]?.logLength ?? 0}.json`);
+  writeFileSync(path, JSON.stringify(claims));
+  return path;
+}
+
+test('a name is proved and then verified without the log that proved it', () => {
+  // REGISTRY.md's light-client procedure: obtain a length and root from peers, check an inclusion
+  // proof against that root, verify the record chain. Every piece existed — `proveInclusion`,
+  // `verifyNameInclusion`, `greatestCorroboratedLength` — and no command could run any of them,
+  // so the procedure the specification describes was not something this tool could do.
+  const { dir, done } = scratch();
+  try {
+    const { log } = registeredLog(dir);
+    const { document, claimedRoot: root } = proveName(log);
+    const proofPath = join(dir, 'proof.json');
+    writeFileSync(proofPath, JSON.stringify(document));
+    const claims = claimsFile(dir, [
+      { logLength: 1, treeRoot: root },
+      { logLength: 1, treeRoot: root },
+    ]);
+    const verified = run([
+      'light-verify',
+      '--proof',
+      proofPath,
+      '--name',
+      NAME,
+      '--claims',
+      claims,
+      '--at',
+      String(NOW),
+    ]);
+    assert.equal(verified.code, 0, verified.out + verified.err);
+    assert.match(verified.out, /verified/i);
+    assert.match(verified.out, /corroborated by 2 peers/i);
+    // REGISTRY.md: "show that length and the observation time with every answer", and nothing here
+    // proves the length is current.
+    assert.match(verified.out, /freshness/i);
+    assert.match(verified.out, /log length 1/i);
+  } finally {
+    done();
+  }
+});
+
+test('the proof document carries no root, so it cannot verify itself', () => {
+  // `Proof`'s own comment says a proof that carried its own leaf "would let a peer prove inclusion
+  // of something the light client never asked about". A proof carrying the root it is checked
+  // against is the same defect one level up: the peer supplying the evidence would also be
+  // supplying the standard it is judged by. The root must come from the claims.
+  const { dir, done } = scratch();
+  try {
+    const { log } = registeredLog(dir);
+    const { document } = proveName(log);
+    assert.equal(document['treeRoot'], undefined, 'a proof must not carry its own root');
+    assert.equal(typeof document['logLength'], 'number');
+    assert.equal(typeof document['record'], 'string');
+  } finally {
+    done();
+  }
+});
+
+test('a tampered record does not verify against an honest root', () => {
+  const { dir, done } = scratch();
+  try {
+    const { log } = registeredLog(dir);
+    const { document, claimedRoot: root } = proveName(log);
+    const record = document['record'] as string;
+    // Flip one nibble of the record the proof is about.
+    document['record'] = `${record.slice(0, -1)}${record.endsWith('0') ? '1' : '0'}`;
+    const proofPath = join(dir, 'tampered.json');
+    writeFileSync(proofPath, JSON.stringify(document));
+    const claims = claimsFile(dir, [
+      { logLength: 1, treeRoot: root },
+      { logLength: 1, treeRoot: root },
+    ]);
+    const verified = run([
+      'light-verify',
+      '--proof',
+      proofPath,
+      '--name',
+      NAME,
+      '--claims',
+      claims,
+      '--at',
+      String(NOW),
+    ]);
+    assert.notEqual(verified.code, 0);
+    assert.match(`${verified.out}${verified.err}`, /does not check out|not verified/i);
+  } finally {
+    done();
+  }
+});
+
+test('one peer is not corroboration, and the answer says which it had', () => {
+  const { dir, done } = scratch();
+  try {
+    const { log } = registeredLog(dir);
+    const { document, claimedRoot: root } = proveName(log);
+    const proofPath = join(dir, 'proof.json');
+    writeFileSync(proofPath, JSON.stringify(document));
+    const single = claimsFile(dir, [{ logLength: 1, treeRoot: root }]);
+
+    // Default quorum is 2, so one claim corroborates nothing and there is no length to trust.
+    const refused = run([
+      'light-verify',
+      '--proof',
+      proofPath,
+      '--name',
+      NAME,
+      '--claims',
+      single,
+      '--at',
+      String(NOW),
+    ]);
+    assert.notEqual(refused.code, 0);
+    assert.match(`${refused.out}${refused.err}`, /corroborat/i);
+
+    // Asked for explicitly, a single peer verifies — and says a withholding peer is undetectable.
+    const accepted = run([
+      'light-verify',
+      '--proof',
+      proofPath,
+      '--name',
+      NAME,
+      '--claims',
+      single,
+      '--quorum',
+      '1',
+      '--at',
+      String(NOW),
+    ]);
+    assert.equal(accepted.code, 0, accepted.out + accepted.err);
+    assert.match(accepted.out, /single peer|undetectable/i);
+  } finally {
+    done();
+  }
+});
+
+test('peers disagreeing about the root at one length is a fork, and neither is chosen', () => {
+  // REPLICATION.md 7.3: surface a fork and MUST NOT pick one. A light client that took the first
+  // root, or the majority root, would be choosing — and the whole reason forks are surfaced rather
+  // than resolved is that this side has no evidence with which to choose.
+  const { dir, done } = scratch();
+  try {
+    const { log } = registeredLog(dir);
+    const { document, claimedRoot: root } = proveName(log);
+    const proofPath = join(dir, 'proof.json');
+    writeFileSync(proofPath, JSON.stringify(document));
+    const forked = claimsFile(dir, [
+      { logLength: 1, treeRoot: root },
+      { logLength: 1, treeRoot: 'ff'.repeat(32) },
+    ]);
+    const answered = run([
+      'light-verify',
+      '--proof',
+      proofPath,
+      '--name',
+      NAME,
+      '--claims',
+      forked,
+      '--at',
+      String(NOW),
+    ]);
+    assert.notEqual(answered.code, 0);
+    const said = `${answered.out}${answered.err}`;
+    assert.match(said, /fork/i);
+    assert.doesNotMatch(said, /verified: true/i, 'a fork must not resolve to an answer');
+  } finally {
+    done();
+  }
+});
+
+test('MUTATION: a proof document that carries its own root is refused, not ignored', () => {
+  // The test above checks that `prove` does not EMIT a root. That is the easy half, and removing
+  // the refusal in `light-verify` survived the whole suite because of it — nothing ever handed the
+  // verifier a rooted document. The refusal is the half that matters: `prove` is friendly, and the
+  // document a light client actually receives comes from a peer who is not.
+  const { dir, done } = scratch();
+  try {
+    const { log } = registeredLog(dir);
+    const { document, claimedRoot: root } = proveName(log);
+    document['treeRoot'] = root;
+    const proofPath = join(dir, 'self-rooted.json');
+    writeFileSync(proofPath, JSON.stringify(document));
+    const claims = claimsFile(dir, [
+      { logLength: 1, treeRoot: root },
+      { logLength: 1, treeRoot: root },
+    ]);
+    const answered = run([
+      'light-verify',
+      '--proof',
+      proofPath,
+      '--name',
+      NAME,
+      '--claims',
+      claims,
+      '--at',
+      String(NOW),
+    ]);
+    // Refused even though the root it carries is the CORRECT one — the objection is to the shape,
+    // not to the value. A verifier that accepted a correct self-supplied root would accept an
+    // incorrect one by the same code path.
+    assert.notEqual(answered.code, 0);
+    assert.match(`${answered.out}${answered.err}`, /self-consistent|carries a treeRoot/i);
+  } finally {
+    done();
+  }
+});
+
+test('MUTATION: a proof built at one length is refused against another, and says which', () => {
+  // The peaks in a proof are the peaks at the length it was built for, so checking it against a
+  // different length's root can only fail — obscurely, as an inclusion mismatch, which reads like
+  // a forged record rather than a mismatched request.
+  //
+  // This test also pins the guard that makes the call below it correct: with it, the corroborated
+  // length and the proof's own length are equal by the time `verifyNameInclusion` is reached, so
+  // swapping one for the other there is a NO-OP mutation rather than an untested branch. Deleting
+  // the guard is the mutation that matters, and this is what fails when it goes.
+  const { dir, done } = scratch();
+  try {
+    const { log } = registeredLog(dir);
+    const { document, claimedRoot: root } = proveName(log);
+    assert.equal(document['logLength'], 1, 'the fixture log holds one record');
+    const proofPath = join(dir, 'proof.json');
+    writeFileSync(proofPath, JSON.stringify(document));
+    // Two peers agreeing on a LONGER log than the proof was built for.
+    const ahead = claimsFile(dir, [
+      { logLength: 2, treeRoot: root },
+      { logLength: 2, treeRoot: root },
+    ]);
+    const answered = run([
+      'light-verify',
+      '--proof',
+      proofPath,
+      '--name',
+      NAME,
+      '--claims',
+      ahead,
+      '--at',
+      String(NOW),
+    ]);
+    assert.notEqual(answered.code, 0);
+    const said = `${answered.out}${answered.err}`;
+    assert.match(said, /log length 1/i, 'it must name the length the proof is for');
+    assert.match(said, /2 is what peers/i, 'and the length the peers corroborate');
+    assert.doesNotMatch(said, /does not check out/i, 'not reported as a bad proof');
+  } finally {
+    done();
+  }
+});

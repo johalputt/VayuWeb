@@ -10,6 +10,67 @@ it.
 
 ## [Unreleased]
 
+### Added — the light client can be run, and refuses two things rather than answering them
+
+REGISTRY.md describes a procedure for verifying one name without the full history: obtain a
+`logLength` and `treeRoot` from peers, check an inclusion proof against that root, verify the
+record's own chain. Every part was implemented — `proveInclusion`, `verifyNameInclusion`,
+`greatestCorroboratedLength` — and no command could run any of them, so the procedure the
+specification describes was not something this tool could do. `prove` and `light-verify` are the two
+sides of it, and they are part of what `docs/ROADMAP.md` Phase 2 asks for by name — "snapshot and
+checkpoint format so a light client can verify without replaying all history".
+
+**The proof document carries no `treeRoot`, and one that does is refused rather than ignored.**
+`Proof`'s own comment already says a proof carrying its own leaf "would let a peer prove inclusion
+of something the light client never asked about". A proof carrying the root it is checked against is
+that same defect one level up: the peer supplying the evidence would also be supplying the standard
+it is judged by, and the check would establish only that the peer is self-consistent. `prove` prints
+its root on stderr, beside the sentence saying to get it from peers instead; `--claims` takes the
+`{logLength, treeRoot}` list checkpoint gossip hands over.
+
+Two refusals, each for a different way a light client can be lied to. A length claimed by fewer than
+`--quorum` peers (default 2) is not corroborated and is refused rather than believed —
+`greatestCorroboratedLength` fails toward staleness rather than toward trusting a stranger, which is
+the safer direction because a stale answer is wrong about *when* and a forged one is wrong about
+*what*. Peers claiming one length with different roots are a fork: surfaced, and neither taken.
+REPLICATION.md 7.3 says surface and do not resolve, and taking the first or the majority root would
+be resolving — with nothing on this side that is evidence about which history is real.
+
+A third refusal is about legibility rather than trust: a proof built at one length checked against
+another length's root fails, because the peaks in a proof are the peaks at the length it was built
+for. It now says that, rather than failing as an inclusion mismatch.
+
+Every answer states the length, the observation time, and that **freshness is unproven** — no
+inclusion proof shows the length handed over is current, so a peer withholding recent entries can
+present a stale but internally consistent view. It also says it ran steps 1 and 2 only: step 3, the
+record's own chain, is `verify`, and a command implying it had checked the chain would be claiming
+the more valuable half of the procedure on the strength of the cheaper one.
+
+Three exemptions in the dead-code gate's table went stale at once, and the table said so. All three
+were justified with the same sentence — "a light client is a client; this package is a node" — which
+was the wrong reading of what was missing. It was not a separate product: it was two commands, one
+that has the log and produces a proof, one that holds nothing and checks it. The exemption count
+falls from 38 to 35.
+
+`registry/README.md` said a light client "cannot verify anything without replaying the whole log".
+That was true of the storage and is no longer true of the tool: the replay cost falls on the side
+that holds the log, and the verifying side is O(log n) and holds nothing.
+
+Eight mutations first, six killed and **two survivors**, and the two are different in kind. Removing
+the
+refusal of a self-rooted document survived because every test checked only that `prove` does not
+*emit* a root — the easy half. The refusal is the half that matters, because `prove` is friendly and
+the document a light client actually receives comes from a peer who is not; the new test hands the
+verifier a document carrying the *correct* root and requires a refusal anyway, since a verifier that
+accepts a correct self-supplied root accepts a forged one by the same path.
+
+The second survivor is a **no-op mutation, not a test gap**, and is recorded as one rather than
+worked around. Swapping the corroborated length for the proof's own at the `verifyNameInclusion`
+call changes nothing, because the guard above it has already refused every case where the two
+differ. The mutation worth running there is deleting that guard — which was untested. The re-run
+makes the claim checkable rather than asserted: nine mutations, eight killed, the guard deletion
+among them, and the same no-op still standing.
+
 ### Fixed — the interface that offers unpublishing said nothing about what unpublishing does
 
 Constitution Article 19.8 is a MUST and it is specific about *where*: an implementation "MUST state

@@ -31,13 +31,14 @@ for byte, is what this package is mostly made of.
 | Conformance vectors ([`../conformance/vectors.json`](../conformance/vectors.json)) | Registry rules only |
 | Hypercore log and Hyperbee index | Not started |
 | Peer replication (`src/replicate.ts`, `src/swarm.ts`, `vw sync`) | Implemented, tested over TCP; the Hyperswarm binding is injected and unexercised |
-| Checkpoints and light clients (`src/checkpoint.ts`) | Served, compared and forks surfaced; the light-client half has no client |
+| Checkpoints and light clients (`src/checkpoint.ts`) | Served, compared, forks surfaced; `prove` / `light-verify` run steps 1-2 of the light-client procedure |
 
 `src/store.ts` is a single-writer, file-backed log with an index rebuilt by replay. It is enough
 to finish and test Phase 1 without pulling in the peer-to-peer stack, and the difference from
-Hypercore is not cosmetic: there is no merkle tree, so entries are not self-authenticating and a
-light client cannot verify anything without replaying the whole log. Phase 2 replaces the
-storage beneath these interfaces. The verification rules above them do not change, which is why
+Hypercore is not cosmetic: no merkle tree is *maintained*, so `prove` derives one by rebuilding it
+over every entry each time it is asked. That cost falls on the side holding the log — the verifying
+side is O(log n) and holds nothing — but it is the reason proving is a command rather than something
+the resolver does per request. Phase 2 replaces the storage beneath these interfaces. The verification rules above them do not change, which is why
 they are already separated.
 
 ## Using it
@@ -63,6 +64,9 @@ vw sync     --log ./log --listen 4747          # or --connect host:port
 vw equivocations --log ./log                   # what this peer knows about, and from whom
 
 vw serve    --log ./log --site ./public --pointer k51qzi5uqu5d…   # test the ipns-first path
+
+vw prove        --log ./log --name atlasobservatory.vayu > proof.json
+vw light-verify --proof proof.json --claims peers.json --name atlasobservatory.vayu
 ```
 
 Exit codes: `0` accepted, `1` rejected or error, `2` deferred for clock skew, `3` name not live.
@@ -71,6 +75,32 @@ Exit codes: `0` accepted, `1` rejected or error, `2` deferred for clock skew, `3
 Deferral is a real third outcome, not a soft rejection. A record whose term starts beyond the
 clock-skew tolerance is held rather than refused, because this machine's clock may be the wrong
 one.
+
+### A light client, and the two things it refuses to conclude
+
+REGISTRY.md's light-client procedure — obtain a length and root from peers, check an inclusion proof
+against that root, verify the record chain — had every part implemented and no way to run it.
+`proveInclusion`, `verifyNameInclusion` and `greatestCorroboratedLength` were reached only by their
+own tests.
+
+**The proof document carries no `treeRoot`, and one that does is refused.** `Proof`'s own comment
+says a proof carrying its own leaf "would let a peer prove inclusion of something the light client
+never asked about"; a proof carrying the root it is checked against is that defect one level up,
+with the peer supplying both the evidence and the standard. `prove` prints its root on stderr
+instead, beside the sentence saying to get it from peers. `--claims` is a list of
+`{logLength, treeRoot}` — what checkpoint gossip hands over.
+
+Two refusals rather than answers. A length claimed by fewer than `--quorum` peers (default 2) is not
+corroborated, so it is refused rather than believed: `greatestCorroboratedLength` fails toward
+staleness rather than toward trusting a stranger, and `--quorum 1` is available and says in the
+answer what it gave up. Peers claiming one length with different roots are a fork, surfaced and
+never resolved — REPLICATION.md 7.3 says do not pick one, and taking the first or the majority would
+be picking.
+
+Every answer states the length, the observation time and that **freshness is unproven**: no
+inclusion proof shows the length handed over is current, so a peer withholding recent entries can
+present a stale but internally consistent view. It also says it ran steps 1 and 2 only; step 3, the
+record's own chain, is `vw verify`.
 
 ### Unpublishing says what it did and what it cannot do
 

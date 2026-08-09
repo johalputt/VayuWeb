@@ -84,13 +84,10 @@ MINIMUM = 150
 # different: it asks whether anything a *user* can reach ever gets there. An entry here is a
 # promise that the answer is "not yet, and here is why", and the check fails when one goes stale.
 REACHED_ONLY_BY_TESTS = {
-    # The light-client half. A light client is a client; this package is a node.
-    "checkpoint.ts:verifyNameInclusion":
-        "REPLICATION.md 7.2's answer shape. Needs a client that holds no log -- Phase 5/7.",
-    "checkpoint.ts:greatestCorroboratedLength":
-        "Chooses a length to trust from several peers' claims. Same missing client.",
-    "merkle.ts:proveInclusion":
-        "The proof a light client checks. Nothing here produces one because nothing here asks.",
+    # The light-client half was exempt here on the grounds that "a light client is a client; this
+    # package is a node", and that was the wrong reading. Two commands were missing, not a separate
+    # product: `prove` has the log and produces the proof, `light-verify` holds nothing and checks
+    # it. All three entries went stale at once when those landed, and this table said so.
     # Block exchange: the wire format only, by design. VWIP-0005 is a Draft and ROADMAP.md says
     # code written before a specification settles is code that will be thrown away.
     "blockx.ts:decodeBlockMessage": "VWIP-0005 is Draft; the session and transport wait for it.",
