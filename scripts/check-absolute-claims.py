@@ -140,7 +140,14 @@ def documents():
         dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "target", "dist", ".venv"}]
         for name in files:
             if name.endswith(SCANNED):
-                yield os.path.relpath(os.path.join(base, name), ROOT)
+                # Separators are normalised to "/", matching EXEMPT's keys and every other
+                # path this corpus writes down. os.path.relpath emits "\" on Windows, so an
+                # unnormalised yield matched nothing there: five exempt documents were scanned
+                # as violations of their own exemptions and a local run reported fifteen false
+                # claims while CI stayed green on Linux -- two tools disagreeing about the same
+                # corpus, which is the divergence this checker exists to prevent.
+                rel = os.path.relpath(os.path.join(base, name), ROOT)
+                yield rel.replace(os.sep, "/") if os.sep != "/" else rel
 
 
 def flatten(text):
