@@ -380,29 +380,52 @@ pub fn serve_until(
         let Ok((mut stream, _)) = listener.accept() else {
             break;
         };
-        // Read up to the blank line, refusing oversized heads.
+        // Read up to the blank line, refusing oversized heads. An oversized head is DRAINED
+        // (up to a bound) rather than abandoned: a server that stops reading and closes while
+        // the client is still writing earns a TCP reset that destroys the refusal itself.
         let mut head = Vec::new();
         let mut buffer = [0u8; 1024];
+        let mut oversized = false;
+        let mut discarded = 0usize;
+        let mut saw_end = false;
         loop {
             match stream.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(n) => {
-                    head.extend_from_slice(&buffer[..n]);
-                    if head.windows(4).any(|window| window == b"\r\n\r\n") {
-                        break;
-                    }
-                    if head.len() > HEAD_BYTES_LIMIT {
-                        break;
+                    if !oversized {
+                        head.extend_from_slice(&buffer[..n]);
+                        if head.windows(4).any(|window| window == b"\r\n\r\n") {
+                            saw_end = true;
+                            break;
+                        }
+                        if head.len() > HEAD_BYTES_LIMIT {
+                            oversized = true;
+                        }
+                    } else {
+                        // Discard until the peer finishes saying what we already refused.
+                        discarded += n;
+                        if buffer.windows(4).any(|window| window == b"\r\n\r\n")
+                            || discarded > 64 * 1024
+                        {
+                            break;
+                        }
                     }
                 }
                 Err(_) => break,
             }
         }
-        let end = head
-            .windows(4)
-            .position(|window| window == b"\r\n\r\n")
-            .map(|at| at + 4)
-            .unwrap_or(head.len());
+        if oversized {
+            refuse(&mut stream, &RequestError::TooLarge);
+            continue;
+        }
+        let end = if saw_end {
+            head.windows(4)
+                .position(|window| window == b"\r\n\r\n")
+                .map(|at| at + 4)
+                .unwrap_or(head.len())
+        } else {
+            head.len()
+        };
         match parse_request(&head[..end]) {
             Ok(request) => match route(&store, &root, &request, &limits) {
                 Ok(response) => write_response(&mut stream, &response, !request.is_head),

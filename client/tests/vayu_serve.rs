@@ -210,14 +210,15 @@ fn refusals_traversal_verbs_and_oversized_heads() {
     let (status, ..) = request(&fixture, "/", "POST");
     assert_eq!(status, 405);
 
-    // An oversized head is refused without being buffered forever.
+    // An oversized head is refused without being buffered forever. The write is allowed to
+    // fail with a reset under hostile timing, but the drain-before-refuse discipline means a
+    // well-behaved client sees its 431.
     let mut stream = TcpStream::connect(fixture.server.addr).expect("connects");
     let long_header = "x".repeat(serve::HEAD_BYTES_LIMIT + 1024);
-    write!(
+    let _ = write!(
         stream,
         "GET / HTTP/1.1\r\nhost: x\r\n{long_header}: y\r\n\r\n"
-    )
-    .expect("writes");
+    );
     let mut raw = String::new();
     let _ = stream.read_to_string(&mut raw);
     assert!(
