@@ -20,12 +20,16 @@
 //! Exit codes: 0 success; 1 the doctor found errors or the publish was refused; 2 usage error.
 
 use std::io::Write as _;
+use std::sync::Arc;
 
+use vayuweb_client::cid::Cid;
+use vayuweb_client::dagnode::WalkLimits;
 use vayuweb_client::doctor;
 use vayuweb_client::identity::Identity;
 use vayuweb_client::publish::SiteFile;
 use vayuweb_client::publish_flow::{publish_site, PublishRequest};
 use vayuweb_client::record::Predecessor;
+use vayuweb_client::serve;
 use vayuweb_client::store::BlockStore;
 
 const USAGE: &str = "\
@@ -50,6 +54,14 @@ USAGE:
         --pow-limit <n>         nonce-search ceiling (default 10000000)
         --now <unix-seconds>    override the clock (for reproducible runs)
 
+    vayu serve <store-dir> --root <cid> [options]
+        Serve one pinned tree over loopback HTTP for local preview. Prints the URL,
+        then Ctrl-C to stop. This is a preview of ONE tree, not the browsing proxy.
+
+    Options for serve:
+        --root <cid-text>       the tree to serve (required)
+        --port <n>              port to bind (default: 0, an ephemeral free port)
+
     vayu help
         Show this text.
 
@@ -65,6 +77,7 @@ fn run() -> i32 {
     match argv.first().map(String::as_str) {
         Some("doctor") => cmd_doctor(&argv[1..]),
         Some("publish") => cmd_publish(&argv[1..]),
+        Some("serve") => cmd_serve(&argv[1..]),
         Some("help") | Some("--help") | Some("-h") => {
             print!("{USAGE}");
             0
@@ -73,6 +86,83 @@ fn run() -> i32 {
             eprint!("{USAGE}");
             2
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// vayu serve — loopback preview of one pinned tree.
+// ---------------------------------------------------------------------------
+
+fn cmd_serve(argv: &[String]) -> i32 {
+    let Some(store_dir) = argv.first().filter(|a| !a.starts_with("--")) else {
+        eprintln!("vayu serve needs a store directory");
+        return 2;
+    };
+    let flags = match Flags::parse(&argv[1..], &["root", "port"]) {
+        Ok(flags) => flags,
+        Err(detail) => {
+            eprintln!("vayu serve: {detail}");
+            return 2;
+        }
+    };
+    let Some(root_text) = flags.get("root") else {
+        eprintln!("vayu serve: --root <cid> naming the tree to serve is required");
+        return 2;
+    };
+    let Ok(root) = Cid::from_text(root_text) else {
+        eprintln!("vayu serve: {root_text:?} is not a CID this protocol admits");
+        return 2;
+    };
+    let port = match flags.number("port") {
+        Ok(Some(port)) if port <= u16::MAX as u64 => port as u16,
+        Ok(_) => {
+            eprintln!("vayu serve: --port is out of range");
+            return 2;
+        }
+        Err(detail) => {
+            eprintln!("vayu serve: {detail}");
+            return 2;
+        }
+    };
+    let store = match BlockStore::open(std::path::Path::new(store_dir)) {
+        Ok(store) => Arc::new(store),
+        Err(e) => {
+            eprintln!("vayu serve: cannot open block store {store_dir}: {e}");
+            return 2;
+        }
+    };
+    // The root must exist before the URL is announced: a server that prints an address and
+    // then 404s every path because the tree was never pinned has wasted everyone's time.
+    match vayuweb_client::dagnode::read_dir_at(&store, &root, &[], &WalkLimits::default()) {
+        Ok(_) => {}
+        Err(e) => {
+            // A single-file root is legal too; try it as a file before refusing.
+            match vayuweb_client::dagnode::read_path(&store, &root, &[], &WalkLimits::default()) {
+                Ok(_) => {}
+                _ => {
+                    eprintln!("vayu serve: that root is not readable from this store: {e}");
+                    return 2;
+                }
+            }
+        }
+    }
+    let root_text_owned = root.to_text();
+    let handle = match serve::spawn(store, root, port, WalkLimits::default()) {
+        Ok(handle) => handle,
+        Err(e) => {
+            eprintln!("vayu serve: cannot bind: {e}");
+            return 2;
+        }
+    };
+    println!(
+        "serving   http://{}/\nroot      {}\nstop with Ctrl-C",
+        handle.addr, root_text_owned
+    );
+    let _ = std::io::stdout().flush();
+    // The default SIGINT/console-ctrl behaviour ends the process, which closes the socket:
+    // exactly what a preview server should do. No signal machinery beyond that.
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(3600));
     }
 }
 

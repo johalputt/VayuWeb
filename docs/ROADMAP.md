@@ -458,15 +458,17 @@ is trusted on its own say-so: every derivation is pinned against
 crate that the registry implementation's own verifier accepts byte for byte — CI regenerates the
 fixtures and fails on drift, so the two languages cannot quietly diverge.
 
-**The publish flow is now wired together on this side too — and a headless CLI runs it**:
+**The publish flow is now wired together on this side too — and its output is readable**:
 `src/doctor.rs` runs the section-3 authoring checks first, `src/publish.rs` builds and addresses
 a site's UnixFS tree against reference-IPFS blocks, `src/store.rs` pins those blocks locally
 with verification on both write and read, `src/publish_flow.rs` chains them so that checking and
-pinning structurally happen before signing, and the `vayu` binary exposes `vayu doctor <dir>`
-and `vayu publish <dir> --name label.tld` as real commands. What does not exist is anything that
-serves what it publishes: no resolver reads these trees, read-time enforcement has not consumed
-the doctor's rule table, block exchange needs a transport that does not exist, and the GUI — the
-part Phase 5 actually asks for — remains unbuilt.
+pinning structurally happen before signing, the `vayu` binary exposes `vayu doctor <dir>`,
+`vayu publish <dir> --name label.tld` and `vayu serve <store> --root <cid>` as real commands,
+and `src/dagnode.rs` + `src/serve.rs` read a pinned tree back over loopback HTTP with the
+deep-link rule and the security headers intact. What does not exist is anything that makes a
+STRANGER a reader: no resolver resolves names across machines, read-time enforcement has not
+consumed the doctor's rule table, block exchange needs a transport that does not exist, and the
+GUI — the part Phase 5 actually asks for — remains unbuilt.
 
 What it is not: a Tauri application, or Phase 5. The build path constructs a `REGISTER`; the
 application that offers one to somebody who has never opened a terminal does not exist yet, and

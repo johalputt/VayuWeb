@@ -12,6 +12,7 @@
 pub mod cbor;
 pub mod cid;
 pub mod control;
+pub mod dagnode;
 pub mod doctor;
 pub mod doctor_fix;
 pub mod domain;
@@ -23,4 +24,5 @@ pub mod publish;
 pub mod publish_flow;
 pub mod record;
 pub mod secrets;
+pub mod serve;
 pub mod store;

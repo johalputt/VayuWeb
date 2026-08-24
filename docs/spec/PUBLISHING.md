@@ -8,17 +8,19 @@ as described in RFC 2119.
 
 **Status:** Draft — not yet deployed. Section 2.3's deep-link rule is implemented in
 `registry/src/proxy.ts` and `registry/src/resolve.ts`, which read the manifest and serve `notFound`
-with 404 or `fallback` with 200. The whole normative sequence of section 1 now exists AND RUNS
-locally: the desktop crate ships a headless command surface, `vayu doctor <dir>` and
-`vayu publish <dir> --name label.tld`, wired to the authoring checks of section 3 in
-`client/src/doctor.rs` (whose `RULES` table is the one shared definition 3.1.6 asks for), the
-tree builder, the local pin store, and the record signer — checking and pinning structurally
-before signing, with `--fix` (3.1.3) planning verbatim extraction behind per-document diffs.
-What still keeps this a Draft: nothing SERVES what it publishes — no resolver reads these trees,
-read-time enforcement does not consume the rule table yet so 3.1.6's two halves are not yet
-generated from one source, block exchange needs a transport that does not exist, the key story is
-a headless seed file rather than an OS keystore, and the GUI does not exist. A Draft stays a
-Draft until a stranger can read what someone else published.
+with 404 or `fallback` with 200. The whole normative sequence of section 1 now exists, RUNS
+locally, and its output is READABLE: `vayu publish` checks, builds, addresses, pins and signs;
+`vayu serve` reads one pinned tree back over loopback HTTP through a verified traversal
+(`client/src/dagnode.rs`, `client/src/serve.rs`) with this document's routing rule and
+CONTENT-SECURITY.md's header set byte for byte. The authoring checks live in
+`client/src/doctor.rs` (whose `RULES` table is the one shared definition 3.1.6 asks for) and
+`--fix` (3.1.3) plans verbatim extraction behind per-document diffs.
+What still keeps this a Draft: reading requires the publisher's own store and root CID — no
+resolver resolves names for anyone else, read-time enforcement does not consume the rule table
+yet so 3.1.6's two halves are not generated from one source, block exchange needs a transport
+that does not exist, the key story is a headless seed file rather than an OS keystore, and the
+GUI does not exist. A Draft stays a Draft until a stranger can find and read what a stranger
+published.
 
 ## 0. The design rule
 

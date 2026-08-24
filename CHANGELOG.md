@@ -12,6 +12,37 @@ it.
 
 ## [Unreleased]
 
+### Added — the loop closes: `vayu serve` makes a published site readable
+
+Until now a published tree was bytes in a store that only its author's own code could interpret.
+Two pieces change that. `client/src/dagnode.rs` is the verified traversal: a dag-pb and UnixFS
+reader that walks directories by name, recognises files, assembles chunked content in link
+order, refuses trees past FETCH_LIMITS-shaped bounds, and surfaces corruption under a path as a
+store-integrity refusal rather than a missing file. `client/src/serve.rs` is the loopback
+preview surface built on it: one pinned tree over HTTP on 127.0.0.1, ephemeral port by default.
+
+The surface carries over what it must from the implementation of record's `serve.ts`: the strict
+request-head parser's rules (bounded head and header count, obsolete line folding refused,
+token names enforced, GET and HEAD only) and the security-header set of CONTENT-SECURITY.md
+sections 2–3 byte for byte — including `require-trusted-types-for 'script'` and
+`trusted-types 'none'`, because no relaxation exists anywhere yet and this surface implements
+none. Routing follows PUBLISHING.md section 2.3 exactly: directory paths resolve to the
+manifest's index (default `index.html`); a deep-link miss serves `notFound` with status 404 when
+declared, else `fallback` with 200 when declared, else a bare 404. No identifying headers, no
+CORS, nothing that brands a response as VayuWeb.
+
+This is deliberately NOT the browsing proxy of LOCAL-SURFACE.md section 2: there is no name
+routing (no records are contacted), no port 7654, no passthrough, no CONNECT — one fixed tree,
+locally, for the person who published it. Ten new tests pin index resolution, manifest routing
+in all three shapes, header presence on successes AND refusals, traversal refusal, oversized-head
+refusal, verb restriction, and HEAD-without-body.
+
+What this changes about PUBLISHING.md's Draft status: someone can now publish a site and read it
+back with a browser. What still keeps the Draft: reading requires the publisher's own store and
+root CID — no resolver resolves names for anyone else, block exchange still has no transport,
+read-time enforcement still does not consume the doctor's rule table, and the GUI does not exist.
+A Draft stays a Draft until a stranger can find and read what a stranger published.
+
 ### Added — `vayu`, a headless command surface: the publish sequence now RUNS
 
 The gap that kept PUBLISHING.md's status line honest — "nothing invokes any of it" — is closed
