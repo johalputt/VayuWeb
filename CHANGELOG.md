@@ -10,6 +10,28 @@ it.
 
 ## [Unreleased]
 
+### Added — the publisher pins locally: a content-addressed block store in the client
+
+PUBLISHING.md section 1, step 4 now exists on the client side. `client/src/store.rs` keeps
+blocks as files named by their CID text under one directory, with one rule giving the module its
+shape: nothing is written before its bytes hash to the CID it is filed under, and nothing is
+read back without hashing again. The first check means a hostile caller cannot file rubbish
+under an address that will later be trusted; the second means disk corruption is detected at
+read time rather than served silently to whoever resolves the name next. Absence is `Ok(None)`;
+corruption is an ERROR — "not here" and "here but wrong" demand different responses.
+
+Writes are atomic within the store directory (temporary sibling, then rename), stale temporaries
+from an interrupted put are swept on open, puts are idempotent so republishing is safe to retry,
+and writes over the 1 MiB block limit are refused whole rather than truncated. On Unix the
+directory is created 0700; Windows has no mode bits and inherits access control from the profile's
+application directories, which the module states rather than pretends away.
+
+The read-back verification was mutation-tested before being trusted: deleting the hash check in
+`get` fails `a_block_corrupted_on_disk_is_refused_at_read_time_not_served`, which is the test's
+whole reason to exist. Still honestly unbuilt: serving those blocks to peers (block-exchange
+transport), eviction policy, and the end-to-end publish wiring that would call this between
+building the tree and signing the pointer.
+
 ### Added — the desktop client builds the content DAG, and three computations must agree
 
 The publish path's protocol half now exists in the client: `client/src/cid.rs` (CIDv1 raw and

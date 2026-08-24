@@ -20,3 +20,4 @@ pub mod pow;
 pub mod publish;
 pub mod record;
 pub mod secrets;
+pub mod store;
