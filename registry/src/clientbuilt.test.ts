@@ -8,7 +8,7 @@ import { verify, predecessorFrom, type RegistryView, type Verdict } from './veri
 import { parseRecordBytes } from './record.ts';
 import { recordHashFromBytes } from './domain.ts';
 import { requiredBits, verifyPow } from './pow.ts';
-import { decodeCid, cidBytes, cidFromBytes, encodeCid } from './content.ts';
+import { cidBytes, cidFromBytes, encodeCid } from './content.ts';
 import { importSite } from './unixfs.ts';
 
 /**
