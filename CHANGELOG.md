@@ -10,6 +10,34 @@ it.
 
 ## [Unreleased]
 
+## [Unreleased]
+
+### Added — `vayu`, a headless command surface: the publish sequence now RUNS
+
+The gap that kept PUBLISHING.md's status line honest — "nothing invokes any of it" — is closed
+on the local side. The desktop crate ships `vayu`, a headless binary with two verbs:
+`vayu doctor <dir>` renders every finding with its rule, remedy and exit code, and
+`vayu publish <dir> --name label.tld` runs the whole normative sequence — check, build, address,
+pin locally, sign — printing the root CID, newly pinned block count, and the signed record as hex
+(`--out` also writes it). Republishing under `--prev` produces an UPDATE; both versions stay
+pinned. A failing check stops everything before pin or signature: "nothing was built, pinned or
+signed" is printed, not implied.
+
+The CLI refuses a store directory placed inside the site tree — the store would pin the tree
+containing the store, and republishing would try to pin itself again. Key handling is stated as
+a tool choice rather than smuggled: `--key-file` reads a hex seed for headless use, while the
+module header says plainly that OS-keystore placement is Phase 5 work this binary neither
+satisfies nor pretends to. Exit codes are contract: 0 success, 1 checks failed or publish
+refused, 2 usage error. Five process-level integration tests drive the actual binary — clean and
+dirty doctor runs, register, refused publish proving nothing was pinned or signed, update under
+`--prev` keeping both trees held — plus usage-error exits.
+
+What still keeps PUBLISHING.md a Draft: nothing serves what this publishes. No resolver reads
+these trees yet, read-time enforcement has not consumed the rule table (3.1.6's two halves are
+not generated from one source yet), block exchange needs a transport that does not exist, and
+the GUI does not exist. A Draft stays a Draft until a stranger can read what someone else
+published.
+
 ### Added — `vayu doctor --fix`: mechanical extraction with diffs shown before anything is written
 
 PUBLISHING.md 3.1.3's command shape now exists as a library seam: `client/src/doctor_fix.rs`

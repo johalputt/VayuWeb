@@ -8,17 +8,17 @@ as described in RFC 2119.
 
 **Status:** Draft — not yet deployed. Section 2.3's deep-link rule is implemented in
 `registry/src/proxy.ts` and `registry/src/resolve.ts`, which read the manifest and serve `notFound`
-with 404 or `fallback` with 200. The whole normative sequence of section 1 now exists in code on
-the desktop-client side: the authoring checks of section 3 in `client/src/doctor.rs` (whose
-`RULES` table is the one shared definition 3.1.6 asks for, ready for read-time enforcement to
-consume), steps 2 through 5 chained by `client/src/publish_flow.rs` with pinning structurally
-before signing, and `--fix` (3.1.3) as the same seam: `client/src/doctor_fix.rs` plans verbatim
-extraction of inline blocks into sibling files, shows per-document diffs announcing every new
-file, and writes nothing until applied — everything a human must decide stays with the human.
-What still keeps this a Draft: nothing invokes any of it (no CLI verb or GUI surface exists),
-3.1.6's resolver half does not enforce these rules anywhere yet so the two sides cannot yet be
-generated from one source, and serving pinned blocks to peers needs a transport that does not
-exist. A Draft stays a Draft until someone can run it.
+with 404 or `fallback` with 200. The whole normative sequence of section 1 now exists AND RUNS
+locally: the desktop crate ships a headless command surface, `vayu doctor <dir>` and
+`vayu publish <dir> --name label.tld`, wired to the authoring checks of section 3 in
+`client/src/doctor.rs` (whose `RULES` table is the one shared definition 3.1.6 asks for), the
+tree builder, the local pin store, and the record signer — checking and pinning structurally
+before signing, with `--fix` (3.1.3) planning verbatim extraction behind per-document diffs.
+What still keeps this a Draft: nothing SERVES what it publishes — no resolver reads these trees,
+read-time enforcement does not consume the rule table yet so 3.1.6's two halves are not yet
+generated from one source, block exchange needs a transport that does not exist, the key story is
+a headless seed file rather than an OS keystore, and the GUI does not exist. A Draft stays a
+Draft until a stranger can read what someone else published.
 
 ## 0. The design rule
 
