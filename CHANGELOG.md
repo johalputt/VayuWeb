@@ -10,6 +10,30 @@ it.
 
 ## [Unreleased]
 
+### Added — `vayu doctor`, the publish-time checker, as a library seam
+
+PUBLISHING.md section 1's step 1 now exists: `client/src/doctor.rs` runs the authoring checks of
+section 3 over a candidate tree before anything is built, pinned or signed. It detects the whole
+3.1.4 minimum list — inline `<style>` and `<script>` (and `style=` attributes), non-same-origin
+subresources, `data:` images, `<base>`, `<iframe>`, forms posting to another server, the six
+speculative-loading `<link rel>` values, `<meta name="referrer">` and `<meta http-equiv="refresh">`,
+WebAssembly without a manifest declaration, service-worker registration — plus the tree-level
+checks: a missing index document (which a manifest's `index` field moves but does not remove), an
+unparseable manifest, and HOSTING.md's size ladder walked exactly as written: warn above 256 MiB,
+explicit confirmation demanded above 512 MiB, refusal above 2 GiB, single files refused past 256
+MiB outright.
+
+Every finding carries file, line, what will not work, why, and a concrete fix (3.1.1), in plain
+language (3.1.2), rendered like the specification's own example output. The rules live in one
+table, `RULES`, with a test that walks it against the 3.1.4 minimum so a new rule cannot arrive
+without its prose; that table is the artifact read-time enforcement must consume or generate from
+when it exists (3.1.6) — which is stated honestly as not yet: no resolver enforces these rules
+anywhere, so there is nothing to drift from yet. The wasm declaration gate was mutation-tested:
+making any valid manifest widen the profile fails the nested-impostor test, which is that test's
+reason to exist. The manifest reader is a strict RFC 8259 JSON parser hand-rolled for exactly this
+file, keeping serde_json out of the production dependency tree. Not implemented: `--fix` (3.1.3),
+and nothing invokes the checker yet — no CLI verb or GUI surface exists.
+
 ### Added — the publish flow, wired together with the step ordering made structural
 
 PUBLISHING.md section 1's steps 2 through 5 are now one function: `client/src/publish_flow.rs`

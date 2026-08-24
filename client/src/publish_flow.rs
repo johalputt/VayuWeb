@@ -1,24 +1,25 @@
-//! The publish flow, wired together: PUBLISHING.md section 1, steps 2 through 5.
+//! The publish flow, wired together: PUBLISHING.md section 1, steps 1 through 5.
 //!
-//! Each step existed already — [`import_site`] builds and addresses the tree, [`BlockStore`]
-//! pins it, the record builders sign the pointer. What this module adds is the ORDER, because
-//! the order is what the specification legislates: *"Pin locally. The publisher's own node holds
-//! the content before anything points at it. Announcing a name that resolves to nothing is the
-//! most common self-inflicted failure in content-addressed systems, and step ordering prevents
-//! it."* A signed record is an ownership fact peers replicate; if the bytes it points at are not
-//! already held when it is produced, the failure is announced rather than prevented.
+//! Each step existed already — [`doctor::check`] runs the authoring checks, [`import_site`]
+//! builds and addresses the tree, [`BlockStore`] pins it, the record builders sign the pointer.
+//! What this module adds is the ORDER, because the order is what the specification legislates:
+//! step 1 stops the publish on any error finding before anything else runs; and *"Pin locally.
+//! The publisher's own node holds the content before anything points at it. Announcing a name
+//! that resolves to nothing is the most common self-inflicted failure in content-addressed
+//! systems, and step ordering prevents it."* A signed record is an ownership fact peers
+//! replicate; if the bytes it points at are not already held when it is produced, the failure is
+//! announced rather than prevented.
 //!
-//! So the flow pins FIRST and signs SECOND, structurally: there is no code path that reaches the
-//! signer with a record whose content has not already been accepted by the store. That is a
-//! stronger property than "the caller should pin first", which is how step ordering usually gets
-//! implemented and later dropped.
+//! So the flow checks FIRST, pins SECOND, and signs THIRD — structurally: there is no code path
+//! that reaches the signer past a failing check or with content the store has not accepted.
+//! That is a stronger property than "the caller should do it in this order", which is how step
+//! ordering usually gets implemented and later dropped.
 //!
-//! What is deliberately NOT here: the authoring checks of PUBLISHING.md section 3 (`vayu
-//! doctor`, publish step 1) do not exist yet in any implementation, so this flow cannot run them
-//! — stated so their absence is visible at the seam where they will eventually be invoked. No
-//! command-line or GUI surface calls this either; it is the library seam such a surface will use.
+//! No command-line or GUI surface calls this yet; it is the library seam such a surface will
+//! use.
 
 use crate::cid::Cid;
+use crate::doctor::{self, Finding};
 use crate::identity::Identity;
 use crate::publish::{import_site, PublishError, SiteFile};
 use crate::record::{build_register, build_update, BuildError, Entry, EntryValue, Predecessor};
@@ -33,6 +34,9 @@ pub enum FlowError {
     /// Two files claim one path. The lower-level importer would silently keep the last; a
     /// publishing tool must not choose between the user's own files on their behalf.
     DuplicatePath(String),
+    /// The authoring checks found at least one ERROR. Warnings and confirmation-gated findings
+    /// do not stop the flow; errors do (PUBLISHING.md 3.1: "Any error stops the publish").
+    Doctor(Vec<Finding>),
     /// The tree could not be built or addressed.
     Import(PublishError),
     /// Pinning failed. Nothing has been signed, and whatever blocks landed are simply held —
@@ -51,6 +55,15 @@ impl core::fmt::Display for FlowError {
                 "{path:?} appears twice in the file list; a publishing tool must not pick which \
                  one you meant"
             ),
+            Self::Doctor(findings) => {
+                write!(f, "the authoring checks stopped this publish:")?;
+                for item in findings {
+                    if item.severity == doctor::Severity::Error {
+                        write!(f, "\n{}", item.render())?;
+                    }
+                }
+                Ok(())
+            }
             Self::Import(error) => write!(f, "{error}"),
             Self::Pin(error) => write!(f, "{error}"),
             Self::Build(error) => write!(f, "{error}"),
@@ -115,6 +128,16 @@ pub fn publish_site(
         if !seen.insert(file.path.clone()) {
             return Err(FlowError::DuplicatePath(file.path.clone()));
         }
+    }
+
+    // Step 1: check. Any ERROR finding stops the publish before hashing, pinning or signing;
+    // warnings ride along without stopping anything.
+    let findings = doctor::check(files);
+    if findings
+        .iter()
+        .any(|item| item.severity == doctor::Severity::Error)
+    {
+        return Err(FlowError::Doctor(findings));
     }
 
     // Steps 2 and 3: build the tree and address it.
@@ -411,10 +434,67 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_site_is_a_real_root_pointing_at_an_empty_directory() {
+    fn the_doctor_runs_first_so_a_failing_site_is_never_pinned_or_signed() {
+        let (store, path) = temp_store("doctor-first");
+        let who = identity(0xc8);
+        let files = vec![SiteFile {
+            path: "index.html".into(),
+            content: b"<style>p{}</style>".to_vec(),
+        }];
+        let outcome = publish_site(
+            &store,
+            PublishRequest {
+                identity: &who,
+                label: "doctor-site-01",
+                tld: "vayu",
+                files: &files,
+                now: 1_900_000_000,
+                predecessor: None,
+                window_count: 0,
+                pow_limit: 10_000,
+            },
+        );
+        // Step 1 stops everything: no hashing, no pinning, and the signer is never reached.
+        assert!(matches!(outcome, Err(FlowError::Doctor(_))));
+        assert!(store.is_empty().expect("counts"));
+        std::fs::remove_dir_all(path).expect("cleanup");
+    }
+
+    #[test]
+    fn a_warning_does_not_stop_the_publish_but_an_error_does() {
+        let (store, path) = temp_store("warn-ok");
+        let who = identity(0xc9);
+        let warning_only = vec![SiteFile {
+            path: "index.html".into(),
+            content: b"<a href=\"https://example.com\">leaves VayuWeb, warned, allowed</a>"
+                .to_vec(),
+        }];
+        let published = publish_site(
+            &store,
+            PublishRequest {
+                identity: &who,
+                label: "warn-site-001",
+                tld: "vayu",
+                files: &warning_only,
+                now: 1_900_000_000,
+                predecessor: None,
+                window_count: 0,
+                pow_limit: 10_000,
+            },
+        )
+        .expect("a warning is not an error");
+        assert!(store.has(&published.root));
+        std::fs::remove_dir_all(path).expect("cleanup");
+    }
+
+    #[test]
+    fn an_empty_site_is_refused_by_step_1_for_having_no_index() {
         let (store, path) = temp_store("empty");
         let who = identity(0xc7);
-        let published = publish_site(
+        // An empty tree used to reach the builder and yield the empty-directory root; since the
+        // doctor became step 1 it is refused before any hashing — a site nobody can land on has
+        // no business getting a signed pointer.
+        let outcome = publish_site(
             &store,
             PublishRequest {
                 identity: &who,
@@ -426,14 +506,16 @@ mod tests {
                 window_count: 0,
                 pow_limit: 10_000,
             },
-        )
-        .expect("publishes");
-        assert_eq!(
-            published.root.to_text(),
-            "bafybeiczsscdsbs7ffqz55asqdf3smv6klcw3gofszvwlyarci47bgf354",
-            "the empty directory, byte-for-byte the reference importer's"
         );
-        assert!(store.has(&published.root));
+        match outcome {
+            Err(FlowError::Doctor(findings)) => assert!(
+                findings.iter().any(|f| f.rule == "missing-index"),
+                "the finding names the rule: {:?}",
+                findings.iter().map(|f| f.rule).collect::<Vec<_>>()
+            ),
+            other => panic!("expected a doctor refusal, got {:?}", other.map(|p| p.root)),
+        }
+        assert!(store.is_empty().expect("counts"));
         std::fs::remove_dir_all(path).expect("cleanup");
     }
 }

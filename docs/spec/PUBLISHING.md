@@ -8,13 +8,14 @@ as described in RFC 2119.
 
 **Status:** Draft — not yet deployed. Section 2.3's deep-link rule is implemented in
 `registry/src/proxy.ts` and `registry/src/resolve.ts`, which read the manifest and serve `notFound`
-with 404 or `fallback` with 200. Of the publish flow in section 1, steps 2, 3, 4 and 5 now exist
-in code — build, address, pin, sign — and `client/src/publish_flow.rs` chains them in the order
-this section legislates, structurally: the store must accept every block before the signer is
-reached. The authoring checks of section 3 and the content-security profile's publish-time
-enforcement do not exist in any implementation, nothing invokes the flow (no CLI verb or GUI
-surface), serving pinned blocks to peers needs a transport that does not exist yet, and the
-desktop crate cannot even compile its GUI shell here; a Draft stays a Draft until someone can
+with 404 or `fallback` with 200. The whole normative sequence of section 1 now exists in code on
+the desktop-client side: the authoring checks of section 3 in `client/src/doctor.rs` (whose
+`RULES` table is the one shared definition 3.1.6 asks for, ready for read-time enforcement to
+consume), steps 2 through 5 chained by `client/src/publish_flow.rs` with pinning structurally
+before signing. What still keeps this a Draft: nothing invokes any of it (no CLI verb or GUI
+surface exists), 3.1.6's resolver half does not enforce these rules anywhere yet so the two sides
+cannot yet be generated from one source, serving pinned blocks to peers needs a transport that
+does not exist, and `--fix` (3.1.3) is not implemented. A Draft stays a Draft until someone can
 run it.
 
 ## 0. The design rule

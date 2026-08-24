@@ -458,12 +458,13 @@ is trusted on its own say-so: every derivation is pinned against
 crate that the registry implementation's own verifier accepts byte for byte — CI regenerates the
 fixtures and fails on drift, so the two languages cannot quietly diverge.
 
-**The publish flow is now wired together on this side too**: `src/publish.rs` builds and
-addresses a site's UnixFS tree against reference-IPFS blocks, `src/store.rs` pins those blocks
-locally with verification on both write and read, and `src/publish_flow.rs` chains them so that
-pinning structurally happens before signing — the step ordering PUBLISHING.md section 1 makes
-load-bearing. What does not exist is any surface that runs it: no CLI verb, no GUI button,
-no doctor checks ahead of it, and no transport to serve the pinned blocks onward.
+**The publish flow is now wired together on this side too**: `src/doctor.rs` runs the section-3
+authoring checks first, `src/publish.rs` builds and addresses a site's UnixFS tree against
+reference-IPFS blocks, `src/store.rs` pins those blocks locally with verification on both write
+and read, and `src/publish_flow.rs` chains them so that checking and pinning structurally happen
+before signing — the step ordering PUBLISHING.md section 1 makes load-bearing. What does not
+exist is any surface that runs it: no CLI verb, no GUI button, no `--fix`, and no transport to
+serve the pinned blocks onward.
 
 What it is not: a Tauri application, or Phase 5. The build path constructs a `REGISTER`; the
 application that offers one to somebody who has never opened a terminal does not exist yet, and

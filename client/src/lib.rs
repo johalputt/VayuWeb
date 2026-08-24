@@ -12,6 +12,7 @@
 pub mod cbor;
 pub mod cid;
 pub mod control;
+pub mod doctor;
 pub mod domain;
 pub mod identity;
 pub mod names;
