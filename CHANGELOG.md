@@ -10,6 +10,25 @@ it.
 
 ## [Unreleased]
 
+### Added — the publish flow, wired together with the step ordering made structural
+
+PUBLISHING.md section 1's steps 2 through 5 are now one function: `client/src/publish_flow.rs`
+builds the tree, addresses it, pins every block to the local store, and only then signs the
+pointer — a REGISTER for a first publish (proof of work runs there) or an UPDATE under a live
+predecessor. The order is the specification's own point ("announcing a name that resolves to
+nothing is the most common self-inflicted failure in content-addressed systems, and step
+ordering prevents it"), so the flow enforces it structurally rather than by convention: there is
+no code path that reaches the signer whose content has not already been accepted by the store.
+A test proves the ordering from outside — an invalid name makes signing refuse AFTER pinning has
+happened, leaving content held but inert and nothing announced.
+
+The flow refuses duplicate paths before hashing anything, where the lower-level importer
+tolerates them map-style with last-one-wins: a publishing tool must not choose between the
+user's own files on their behalf. Republishing is an UPDATE that leaves both versions held;
+unpublishing stays a separate explicit act. Honest limits, unchanged in substance: no `vayu
+doctor` checks run ahead of this (they exist nowhere yet), no CLI verb or GUI surface invokes
+it, and serving the pinned blocks onward needs a transport that does not exist.
+
 ### Added — the publisher pins locally: a content-addressed block store in the client
 
 PUBLISHING.md section 1, step 4 now exists on the client side. `client/src/store.rs` keeps

@@ -18,6 +18,7 @@ pub mod names;
 pub mod namespace_generated;
 pub mod pow;
 pub mod publish;
+pub mod publish_flow;
 pub mod record;
 pub mod secrets;
 pub mod store;

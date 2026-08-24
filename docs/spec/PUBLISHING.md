@@ -8,14 +8,14 @@ as described in RFC 2119.
 
 **Status:** Draft — not yet deployed. Section 2.3's deep-link rule is implemented in
 `registry/src/proxy.ts` and `registry/src/resolve.ts`, which read the manifest and serve `notFound`
-with 404 or `fallback` with 200. Of the publish flow in section 1, steps 2, 3, 4 and 5 — build the
-tree, address it, pin locally, sign the pointer — now exist in code: the desktop client builds
-the UnixFS DAG and root CID in `client/src/publish.rs` and holds the blocks in a verified
-content-addressed store in `client/src/store.rs`, pinned against this implementation's importer
-through `conformance/client-built.json`. The authoring checks of section 3 and the
-content-security profile's publish-time enforcement do not exist in any implementation, the flow
-is wired together end to end nowhere, and serving pinned blocks to peers needs a transport that
-does not exist yet; a Draft stays a Draft until someone can run it.
+with 404 or `fallback` with 200. Of the publish flow in section 1, steps 2, 3, 4 and 5 now exist
+in code — build, address, pin, sign — and `client/src/publish_flow.rs` chains them in the order
+this section legislates, structurally: the store must accept every block before the signer is
+reached. The authoring checks of section 3 and the content-security profile's publish-time
+enforcement do not exist in any implementation, nothing invokes the flow (no CLI verb or GUI
+surface), serving pinned blocks to peers needs a transport that does not exist yet, and the
+desktop crate cannot even compile its GUI shell here; a Draft stays a Draft until someone can
+run it.
 
 ## 0. The design rule
 
