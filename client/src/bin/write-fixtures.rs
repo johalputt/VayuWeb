@@ -14,6 +14,7 @@
 
 use vayuweb_client::domain::record_hash_from_bytes;
 use vayuweb_client::identity::Identity;
+use vayuweb_client::publish::{import_site, SiteFile};
 use vayuweb_client::record::{self, BuildError, Entry, EntryValue, Predecessor};
 
 /// Fixed epoch for every fixture timestamp. Chosen once, written down here; nothing about the
@@ -50,6 +51,23 @@ struct Case {
     /// The key that signed the PREDECESSOR of this record, when authority tracking needs it.
     transferor_key: Option<[u8; 32]>,
     description: &'static str,
+    /// For publish cases: the exact site the record's cid entry points at, so the consumer
+    /// can rebuild the tree with its own importer and compare roots.
+    site: Option<SiteFixture>,
+}
+
+/// A deterministic site plus the root CID the client computed for it.
+#[derive(Clone)]
+struct SiteFixture {
+    files: Vec<SiteFileInput>,
+    root_cid: String,
+    blocks: Vec<(String, Vec<u8>)>,
+}
+
+#[derive(Clone)]
+struct SiteFileInput {
+    path: String,
+    content: Vec<u8>,
 }
 
 fn describe(error: &BuildError) -> String {
@@ -90,6 +108,7 @@ fn main() {
         transferor_key: None,
         bytes: registered.clone(),
         description: "REGISTER by the launch suite: 16-character label at the 4-bit floor",
+        site: None,
     });
 
     let updated = record::build_update(
@@ -122,6 +141,7 @@ fn main() {
         transferor_key: None,
         bytes: updated.clone(),
         description: "UPDATE replaces content and adds a cid entry; no proof of work",
+        site: None,
     });
 
     let transferred = record::build_transfer(
@@ -145,6 +165,7 @@ fn main() {
         transferor_key: Some(*alice.public_key()),
         bytes: transferred.clone(),
         description: "TRANSFER signed by the outgoing owner, countersigned by the recipient key",
+        site: None,
     });
 
     // The new owner acts only once the transfer has SETTLED: until fourteen days have passed
@@ -177,6 +198,7 @@ fn main() {
         bytes: adopted.clone(),
         description:
             "UPDATE by the incoming owner after settlement proves the countersignature took effect",
+        site: None,
     });
 
     // ------------------------------------------------------------------ chain B: release
@@ -203,6 +225,7 @@ fn main() {
         transferor_key: None,
         bytes: released_name.clone(),
         description: "REGISTER with no entries, destined for RELINQUISH",
+        site: None,
     });
 
     let released = record::build_relinquish(
@@ -224,6 +247,7 @@ fn main() {
         transferor_key: None,
         bytes: released,
         description: "RELINQUISH collapses both timestamps to now and empties the record",
+        site: None,
     });
 
     // ------------------------------------------------------------------ chain C: revoke
@@ -250,6 +274,7 @@ fn main() {
         transferor_key: None,
         bytes: revoked_name.clone(),
         description: "REGISTER destined for REVOKE",
+        site: None,
     });
 
     let revoked = record::build_revoke(
@@ -271,6 +296,7 @@ fn main() {
         transferor_key: None,
         bytes: revoked,
         description: "REVOKE keeps the term frozen and stops resolution at once",
+        site: None,
     });
 
     // ------------------------------------------------------------------ chain D: renewal
@@ -302,6 +328,7 @@ fn main() {
         transferor_key: None,
         bytes: renewed_name.clone(),
         description: "REGISTER destined for RENEW",
+        site: None,
     });
 
     let renewed = record::build_renew(
@@ -330,6 +357,7 @@ fn main() {
         transferor_key: None,
         bytes: renewed,
         description: "RENEW inside the window extends from the old expiry at base+1 rate bits",
+        site: None,
     });
 
     // ------------------------------------------------------------------ chain E: a pointer
@@ -363,6 +391,68 @@ fn main() {
         transferor_key: None,
         bytes: aliased,
         description: "REGISTER carrying exactly one alias entry: a pure pointer name",
+        site: None,
+    });
+
+    // ------------------------------------------------------------------ chain F: a published
+    // site. The publish path builds a UnixFS DAG from the files, addresses it with the root
+    // CID, and the record's cid entry carries that root in binary form — PUBLISHING.md section
+    // 1, steps 2, 3 and 5, with steps 1 (authoring checks) and 4 (local pinning) honestly still
+    // unbuilt in this crate. The consumer rebuilds the tree with its own importer and compares.
+    let site_files = vec![
+        SiteFile {
+            path: "index.html".into(),
+            content: b"<!doctype html><title>fixture</title>vayuweb publish fixture\n".to_vec(),
+        },
+        SiteFile {
+            path: "docs/a.txt".into(),
+            content: b"alpha\n".to_vec(),
+        },
+    ];
+    let (site_blocks, site_root) = import_site(&site_files).expect("imports");
+    // A cid entry value is the BINARY CID — REGISTRY.md: "Binary CIDv1, 1-64 bytes; rendered
+    // base32 in JSON" — so the record stores 36 bytes, not the text form.
+    let site_entry = Entry {
+        value: EntryValue::Cid(site_root.to_bytes()),
+        ttl: None,
+    };
+    let site_registered = record::build_register(
+        &alice,
+        "fixture-site-0001",
+        "vayu",
+        T0 + 6600,
+        &[site_entry],
+        0,
+        None,
+        10_000,
+    )
+    .unwrap_or_else(|error| panic!("site register failed: {}", describe(&error)));
+    let site_pred = Predecessor::from_bytes(&site_registered).expect("parses");
+    cases.push(Case {
+        op: "REGISTER",
+        label: "fixture-site-0001",
+        tld: "vayu",
+        seq: 0,
+        not_before: site_pred.not_before,
+        not_after: site_pred.not_after,
+        claimed_bits: Some(4),
+        transferor_key: None,
+        bytes: site_registered,
+        description: "REGISTER whose cid entry points at a built UnixFS site tree",
+        site: Some(SiteFixture {
+            files: site_files
+                .iter()
+                .map(|file| SiteFileInput {
+                    path: file.path.clone(),
+                    content: file.content.clone(),
+                })
+                .collect(),
+            root_cid: site_root.to_text(),
+            blocks: site_blocks
+                .iter()
+                .map(|block| (block.cid.to_text(), block.bytes.clone()))
+                .collect(),
+        }),
     });
 
     write_json(&cases);
@@ -407,11 +497,51 @@ fn write_json(cases: &[Case]) {
             Some(key) => json.push_str(&format!("      \"transferorKey\": \"{}\",\n", hex(&key))),
             None => json.push_str("      \"transferorKey\": null,\n"),
         }
+        // The hash field is last unless a site follows, so its comma depends on that.
         json.push_str(&format!("      \"bytes\": \"{}\",\n", hex(&case.bytes)));
-        json.push_str(&format!(
-            "      \"hash\": \"{}\"\n",
-            hex(&record_hash_from_bytes(&case.bytes))
-        ));
+        match &case.site {
+            Some(site) => {
+                json.push_str(&format!(
+                    "      \"hash\": \"{}\",\n",
+                    hex(&record_hash_from_bytes(&case.bytes))
+                ));
+                json.push_str("      \"site\": {\n");
+                json.push_str("        \"files\": [\n");
+                for (file_index, file) in site.files.iter().enumerate() {
+                    let file_comma = if file_index + 1 == site.files.len() {
+                        ""
+                    } else {
+                        ","
+                    };
+                    json.push_str(&format!(
+                        "          {{\"path\": \"{}\", \"content\": \"{}\"}}{file_comma}\n",
+                        file.path,
+                        hex(&file.content)
+                    ));
+                }
+                json.push_str("        ],\n");
+                json.push_str(&format!("        \"rootCid\": \"{}\",\n", site.root_cid));
+                json.push_str("        \"blocks\": [\n");
+                for (block_index, (cid, bytes)) in site.blocks.iter().enumerate() {
+                    let block_comma = if block_index + 1 == site.blocks.len() {
+                        ""
+                    } else {
+                        ","
+                    };
+                    json.push_str(&format!(
+                        "          {{\"cid\": \"{cid}\", \"bytes\": \"{}\"}}{block_comma}\n",
+                        hex(bytes)
+                    ));
+                }
+                json.push_str("        ]\n      }\n");
+            }
+            None => {
+                json.push_str(&format!(
+                    "      \"hash\": \"{}\"\n",
+                    hex(&record_hash_from_bytes(&case.bytes))
+                ));
+            }
+        }
         json.push_str(&format!("    }}{comma}\n"));
     }
     json.push_str("  ]\n}\n");

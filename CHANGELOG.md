@@ -10,6 +10,29 @@ it.
 
 ## [Unreleased]
 
+### Added — the desktop client builds the content DAG, and three computations must agree
+
+The publish path's protocol half now exists in the client: `client/src/cid.rs` (CIDv1 raw and
+dag-pb, base32 multibase, the 256 KiB fixed chunker) and `client/src/publish.rs` (dag-pb nodes
+with Links-before-Data, UnixFS file and directory messages, byte-order directory sorting,
+bottom-up tree building). Every layout is pinned against the same IPFS reference blocks as the
+implementation of record — empty directory, one-file root, two-file ordering, a two-chunk file
+down to its UnixFS Data tail bytes, nested directories — because a wrong encoder here is
+self-consistent: it round-trips, hashes correctly, and publishes sites visible to no node but
+its own.
+
+The golden fixtures gained a publish case: the client builds a deterministic site, points a
+REGISTER's `cid` entry at the binary root, and `registry/src/clientbuilt.test.ts` rebuilds the
+tree with this implementation's importer, requiring the same root CID, the same block set byte
+for byte, and an entry that decodes to what it claims. Three independent computations — the
+reference importer, the registry, and the client — must now agree before a fixture diff stays
+quiet.
+
+Honest limits: PUBLISHING.md section 1's steps 2, 3 and 5 exist; step 1 (the authoring checks of
+section 3), step 4 (local pinning needs a client block store) and the end-to-end wiring do not,
+and the specification's own status line says so. MAX_LINKS is stated by HOSTING.md and enforced
+by neither importer, faithfully to the implementation of record rather than silently.
+
 ### Added — the desktop client builds records, and the registry verifies them byte for byte
 
 The Rust crate's protocol half now exists: deterministic CBOR (`client/src/cbor.rs`), the two

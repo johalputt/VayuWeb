@@ -8,6 +8,8 @@ import { verify, predecessorFrom, type RegistryView, type Verdict } from './veri
 import { parseRecordBytes } from './record.ts';
 import { recordHashFromBytes } from './domain.ts';
 import { requiredBits, verifyPow } from './pow.ts';
+import { decodeCid, cidBytes, cidFromBytes, encodeCid } from './content.ts';
+import { importSite } from './unixfs.ts';
 
 /**
  * The golden fixtures BUILT BY THE RUST CLIENT, verified here by the reference implementation.
@@ -26,6 +28,12 @@ import { requiredBits, verifyPow } from './pow.ts';
 
 const ARTIFACT = fileURLToPath(new URL('../../conformance/client-built.json', import.meta.url));
 
+interface ClientBuiltSite {
+  files: { path: string; content: string }[];
+  rootCid: string;
+  blocks: { cid: string; bytes: string }[];
+}
+
 interface ClientBuiltCase {
   description: string;
   op: string;
@@ -38,6 +46,7 @@ interface ClientBuiltCase {
   transferorKey: string | null;
   bytes: string;
   hash: string;
+  site?: ClientBuiltSite;
 }
 
 const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')) as {
@@ -113,6 +122,51 @@ test('every client-built fixture verifies under the reference implementation', (
     current.set(key, predecessorFrom(parsed, bytes, transferor));
     if (transferor !== undefined) transferors.set(key, transferor);
     if (parsed.op === 'REVOKE') revokedNames.add(key);
+
+    // Publish cases: rebuild the site with THIS implementation's importer and require the same
+    // root, the same block set, and a cid entry whose bytes decode to that root. This is the
+    // cross-language check for the DAG: a client that addressed content differently would
+    // publish sites visible to itself alone, with every signature still verifying.
+    if (fixture.site !== undefined) {
+      const rebuilt = importSite(
+        fixture.site.files.map((file) => ({ path: file.path, content: fromHex(file.content) })),
+      );
+      if (rebuilt.root !== fixture.site.rootCid) {
+        failures.push(`${label} [site]: root CID mismatch`);
+      }
+
+      const entry = parsed.entries.find((candidate) => candidate.known && candidate.type === 'cid');
+      if (entry === undefined) {
+        failures.push(`${label} [site]: the record carries no cid entry`);
+      } else {
+        const carried = cidFromBytes(entry.value as Uint8Array);
+        if (toHex(cidBytes(carried)) !== toHex(entry.value as Uint8Array)) {
+          failures.push(`${label} [site]: cid entry does not round-trip through its binary form`);
+        }
+        if (encodeCid(carried) !== fixture.site.rootCid) {
+          failures.push(
+            `${label} [site]: the carried CID renders to a different root than claimed`,
+          );
+        }
+      }
+
+      const clientBlocks = new Map(fixture.site.blocks.map((b) => [b.cid, fromHex(b.bytes)]));
+      if (clientBlocks.size !== rebuilt.blocks.length) {
+        failures.push(
+          `${label} [site]: block count mismatch (${clientBlocks.size} vs ${rebuilt.blocks.length})`,
+        );
+      }
+      for (const block of rebuilt.blocks) {
+        const theirs = clientBlocks.get(block.cid);
+        if (theirs === undefined) {
+          failures.push(`${label} [site]: client has no block ${block.cid}`);
+          continue;
+        }
+        if (toHex(theirs) !== toHex(block.bytes)) {
+          failures.push(`${label} [site]: block bytes differ for ${block.cid}`);
+        }
+      }
+    }
   }
   assert.deepEqual(failures, []);
 });

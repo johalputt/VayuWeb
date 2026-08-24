@@ -202,6 +202,19 @@ pointer or a destination) and scheduled a successor inside a transfer's settleme
 Both are refusals the verifier would have issued after the expensive work ran; both are now
 builder-side refusals pinned by tests on each side.
 
+### The publish path, in the same artifact
+
+One case carries a `site` object: the exact files, the root CID the client computed, and every
+block. The consumer rebuilds the tree with **this** implementation's importer (`importSite`) and
+requires the same root, the same block set byte for byte, and a `cid` record entry whose binary
+bytes decode to that root. That is the cross-language check for the DAG: a client that addressed
+content differently — a field order reversed here, a sort key chosen differently there — would
+publish sites visible to itself alone, with every individual signature still verifying. The
+client-side port is pinned against the same IPFS reference blocks as the implementation of
+record (empty directory, one-file, two-file ordering, multi-chunk, nested trees), so three
+independent computations must agree before a fixture diff stays quiet: the reference importer,
+the registry, and the client.
+
 ## `key-literal-allowlist.txt`
 
 Source files permitted to contain key-shaped literals, checked by the secret-scanning job in
