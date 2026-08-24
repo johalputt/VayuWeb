@@ -10,6 +10,26 @@ it.
 
 ## [Unreleased]
 
+### Added — `vayu doctor --fix`: mechanical extraction with diffs shown before anything is written
+
+PUBLISHING.md 3.1.3's command shape now exists as a library seam: `client/src/doctor_fix.rs`
+plans the mechanically fixable repairs — inline `<style>` and `<script>` blocks extracted
+VERBATIM into sibling `.extracted.css`/`.extracted.js` files, referenced exactly where each
+block stood, so semantics and execution order are preserved; attributes that matter (media,
+defer, type) travel with the extraction; an EMPTY block is removed outright rather than becoming
+an empty file; a pre-existing name collision picks a deterministic `.extracted-1` alternative.
+The plan holds every rewritten document beside its original plus each created file, renders a
+trimmed unified diff per document with new files announced — and writes NOTHING until applied;
+applying twice is a no-op because the fixed tree has nothing left to extract.
+
+Everything else the doctor reports is deliberately left to the author: remote subresources,
+data images, missing index documents and size findings require a human decision about where
+content should live, and a fixer that guessed would be choosing for the user. The span scanner
+mirrors the checker's quote- and comment-aware walk — commented-out violations are neither fixed
+nor need to be — and a test applies a plan and requires the doctor to report no inline findings,
+pinning fixer and checker against each other. Attribute preservation was mutation-tested:
+dropping every original attribute fails the media-and-defer test.
+
 ### Added — `vayu doctor`, the publish-time checker, as a library seam
 
 PUBLISHING.md section 1's step 1 now exists: `client/src/doctor.rs` runs the authoring checks of

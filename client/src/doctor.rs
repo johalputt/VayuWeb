@@ -545,7 +545,7 @@ fn is_data(url: &str) -> bool {
 }
 
 /// Split an attribute region into (name, value) pairs, honouring quotes.
-fn attributes(region: &str) -> Vec<(String, String)> {
+pub(crate) fn attributes(region: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let bytes = region.as_bytes();
     let mut i = 0usize;
