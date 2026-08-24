@@ -9,6 +9,12 @@
 //! Phase 6 asks for one written by parties with no common employer or funder; a second language
 //! written by the same hands does not satisfy it and must not be reported as though it did.
 
+pub mod cbor;
 pub mod control;
+pub mod domain;
 pub mod identity;
+pub mod names;
+pub mod namespace_generated;
+pub mod pow;
+pub mod record;
 pub mod secrets;

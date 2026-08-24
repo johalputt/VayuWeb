@@ -255,12 +255,31 @@ jobs:
         # of the desktop client that touch a secret, and those must build and be testable
         # without a display -- a security rule that can only be checked by launching a window
         # is a security rule nobody checks in CI.
-        run: cargo test --locked
+        #
+        # Release profile because the proof-of-work tests evaluate real Argon2id at the
+        # protocol's 64 MiB cost, and a debug build turns seconds of memory-hard work into
+        # minutes. The tests are not skipped or weakened to fit a budget.
+        run: cargo test --release --locked
 
       - name: Formatting and lints
         run: |
           cargo fmt --check
           cargo clippy --all-targets -- -D warnings
+
+      - name: Regenerate the client-built fixtures and require no diff
+        # The fixtures are records BUILT by this crate and verified by the registry job's
+        # implementation; regeneration must be byte-identical or the builder is no longer a
+        # pure function of its fixed inputs, which is how cross-language drift would announce
+        # itself before it ever reached the network.
+        run: |
+          set -euo pipefail
+          cargo run --release --locked --bin write-fixtures
+          if ! git diff --quiet -- ../conformance/client-built.json; then
+            echo "::error::conformance/client-built.json is stale — run 'cargo run --bin write-fixtures' and commit"
+            git diff --stat -- ../conformance/client-built.json
+            exit 1
+          fi
+          echo "OK — the committed fixtures match a fresh build."
 
   ci-pass:
     name: ci-pass

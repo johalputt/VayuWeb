@@ -10,6 +10,77 @@ it.
 
 ## [Unreleased]
 
+### Added — the desktop client builds records, and the registry verifies them byte for byte
+
+The Rust crate's protocol half now exists: deterministic CBOR (`client/src/cbor.rs`), the two
+domain-separated inputs and the `record_hash` (`domain.rs`), the label grammar with a
+compiled-in ratified-TLD table generated from the Namespace Annex alongside the registry's own
+copy (`names.rs`, `namespace_generated.rs`), proof-of-work salt derivation, Argon2id at the
+fixed cost and a deterministic nonce search (`pow.rs`), and builders for all six operations that
+refuse before expensive work runs what a peer would refuse anyway (`record.rs`).
+
+None of it is trusted on its own say-so. Every derivation runs against
+`conformance/vectors.json` in the crate's own tests — 40 `pow` vectors including the salt
+preimage, decoded by the same CBOR the builder uses. And a new artifact,
+`conformance/client-built.json`, holds eleven records **built by the client** — register,
+update, transfer with countersignature, the new owner's first act after settlement, renew inside
+the window at base+1 difficulty, relinquish, revoke, an alias-only pointer name — that
+`registry/src/clientbuilt.test.ts` feeds through this implementation's own verifier, checking
+verdict, hash and metadata together. CI regenerates the artifact on every push and fails on any
+diff: the builder must stay a pure function of its fixed inputs, and the two languages cannot
+quietly diverge about what a record is.
+
+The round trip found two real defects before they could reach a peer. The first build offered an
+alias entry beside other entries — REGISTRY.md: *"a name is either a pointer or a destination"*
+— and scheduled a successor inside a transfer's fourteen-day settlement horizon, where only the
+passage of time succeeds. Both are verifier refusals; both are now builder-side refusals pinned
+by tests on each side, which is the difference between an error message from the network and a
+form that validates.
+
+Honest limits, stated rather than implied: the vectors pin Argon2id's *surroundings* and not
+Argon2id itself (that is a standard with published vectors of its own); the fixture seeds are
+fixed byte patterns documented as test-only, and production identities still come only from the
+OS CSPRNG; and none of this is the Tauri application Phase 5 names, whose acceptance test needs
+a person this environment cannot supply.
+
+### Changed — `generate-namespace.py` now emits the client's copy too
+
+The generator wrote only `registry/src/namespace.generated.ts`; the Rust table was added by hand
+when the client needed one, which is exactly how two copies of a generated constant drift —
+nothing failed when they disagreed, because nothing compared them. The generator now writes
+`client/src/namespace_generated.rs` from the same Annex run and `--check` verifies both files
+byte-exact with a per-entry drift diff, so the namespace cannot fork between languages without a
+failing gate naming the entry that moved.
+
+### Fixed — the absolute-claims checker exempted nothing on Windows
+
+`documents()` yielded `os.path.relpath(...)` verbatim, which emits `\` separators on Windows,
+while the keys of `EXEMPT` — like every other path written down in this corpus — use `/`. The
+exemption lookup therefore matched no document at all: five exempt files were scanned as
+violations of their own exemptions, and a local run reported **fifteen forbidden claims**, every
+one of them quoted material inside an exempt document, while CI stayed green on Linux. One
+checker, two opposite verdicts about one corpus, decided purely by the operator's operating
+system — which is the divergence this repository's gates exist to prevent, appearing inside a
+gate.
+
+Separators are now normalised to `/` at the yield, which is byte-for-byte a no-op on POSIX and
+so cannot change what CI sees. Mutation-tested in the direction that can fail here: reverting
+the normalisation on Windows returns exit 1 with the same fifteen false claims, restoring it
+returns exit 0 with the nine self-tests still passing.
+
+Found by running the §3 gate list on a machine other than the one that wrote it, before writing
+any new code against an unverified baseline.
+
+### Changed — proxy/README.md no longer reads as though the proxy does not exist
+
+The directory README opened "**Not yet implemented**" over responsibilities — the loopback
+browsing proxy, the token-authenticated control API, the TTL cache, the CSP profile, the error
+catalogue — that ship today in `registry/src/proxy.ts`, `control.ts` and `serve.ts`, with a
+passing browser acceptance test. Nothing implemented the *standalone packaged form*, which is
+what the directory is reserved for; the wording did not say so, and a newcomer reading it was
+told the opposite of the situation. The README now states where the implementation of record
+lives, keeps the reservation honest, and carries the same MUST-NOT list forward.
+
 ### Added — a conformance suite for when a name returns to the pool, and a guard that was green on the count
 
 `state.fullyReleased` is an **input** to every vector in the record suite. The file hands the

@@ -447,10 +447,21 @@ academic: the identity point is a valid public-key encoding, and `(R = identity,
 the permissive equation for *every* message, so a permissive verifier attributes a signature nobody
 made to a key nobody holds.
 
-What it is not: a Tauri application, a record builder, or Phase 5. Signing bytes is not constructing
-a `REGISTER` — deterministic CBOR over a domain-separated input with a proof of work is none of it —
-and the phase's acceptance test still needs a person who has never used a command line and a GUI
-this environment cannot compile or launch.
+**The record build path now exists**, which is the phase's protocol half: `client/src/cbor.rs`
+(deterministic CBOR), `src/domain.rs` (the two domain-separated inputs and the `record_hash`),
+`src/names.rs` with the generated ratified-TLD table, `src/pow.rs` (salt derivation, Argon2id at
+the fixed cost, deterministic nonce search) and `src/record.rs`, which assembles all six
+operations and refuses before the expensive work runs what a peer would refuse anyway. None of it
+is trusted on its own say-so: every derivation is pinned against
+[`conformance/vectors.json`](../conformance/vectors.json), and
+[`conformance/client-built.json`](../conformance/client-built.json) holds records built by this
+crate that the registry implementation's own verifier accepts byte for byte — CI regenerates the
+fixtures and fails on drift, so the two languages cannot quietly diverge.
+
+What it is not: a Tauri application, or Phase 5. The build path constructs a `REGISTER`; the
+application that offers one to somebody who has never opened a terminal does not exist yet, and
+the phase's acceptance test still needs that person plus a GUI this environment cannot compile or
+launch.
 
 **What Rust buys here that a garbage-collected language cannot** is two of the four requirements
 outright: `Drop` runs at a known point, so zeroisation is not a hope, and requirement 3's "never

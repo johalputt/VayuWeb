@@ -175,6 +175,33 @@ opposite of a specification.
 Absence from this file is still not evidence that an area is settled. What it does cover, it now
 covers as a contract between implementations rather than as a test of this one.
 
+## `client-built.json`
+
+Records **built by the Rust client** (`client/src/bin/write-fixtures.rs`) and verified by this
+implementation's own verifier in `registry/src/clientbuilt.test.ts`. Where `vectors.json` pins
+what a verifier must say about given bytes, this artifact runs the other direction: the client
+produces bytes from a described intent — register, update, transfer with countersignature,
+renew inside the window, relinquish, revoke, an alias-only pointer name — and the reference
+verifier must accept every one of them.
+
+Each case carries its plain-text metadata (`op`, `name`, `tld`, `seq`, term bounds, claimed
+difficulty, transferor key where authority tracking needs one), the record's exact hex bytes,
+and the `record_hash` the client computed. The consumer checks all three against what it parses,
+so a regeneration bug cannot hide behind a verdict that accepts whatever arrived.
+
+The generator is deterministic on purpose: fixed test-only seed byte patterns (documented as
+such; they protect nothing and production identities come from the OS CSPRNG), Ed25519's
+deterministic signing, and a nonce walk that starts at zero and increments big-endian. CI
+regenerates the file and fails on any diff, so the builder cannot silently stop being a pure
+function of its inputs — which is also how cross-language drift would announce itself before it
+reached the network.
+
+Two real defects were found by exactly this round trip, which is the argument for the artifact's
+existence: the first build offered an alias entry beside other entries (a name is either a
+pointer or a destination) and scheduled a successor inside a transfer's settlement horizon.
+Both are refusals the verifier would have issued after the expensive work ran; both are now
+builder-side refusals pinned by tests on each side.
+
 ## `key-literal-allowlist.txt`
 
 Source files permitted to contain key-shaped literals, checked by the secret-scanning job in
