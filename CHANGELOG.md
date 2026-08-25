@@ -10,6 +10,36 @@ it.
 
 ## [Unreleased]
 
+### Added — the local registry view: `vayu accept`, `vayu names`, and `verify --view`
+
+Single-record verification answered everything except the two questions that need HISTORY: is
+this name taken, and which predecessor would this record follow. The client now holds a local
+registry view — a directory of accepted records, each stored under its own record_hash, with
+every name's current state DERIVED by replay instead of kept in an index that could rot. The
+implementation of record deliberately defines its RegistryView with no permissive default; this
+is the desktop client's answer, built for one machine's honesty rather than a network's.
+
+`vayu accept <record.cbor> --view <dir>` judges a received record against the view and appends
+it only on ACCEPT — a refused or deferred record is never written, so replay never has to skip
+a refusal. Replay walks each name's chain from seq 0 through prevHash links and stops at the
+first break: a gap truncates (what is not held is not history), an orphan without genesis is no
+history at all, and a torn final write from a crash is skipped, not fatal. NAME_TAKEN is
+answered before any cryptography — registering a plainly-taken name costs a lookup, not 64 MiB
+of Argon2id, exactly as the registry orders it. Quarantine follows the spec's asymmetry:
+RELINQUISH skips grace but never quarantine; REVOKE freezes to expiry then quarantines.
+
+The replayed chain also answers what single-record mode could not: who SIGNED a transfer. A
+TRANSFER's authority while settling is its transferor's key — the ownerKey of the record BEFORE
+it — so `verify --view` resolves controlling keys by walking history and the hand-carried
+`--transferor-key` flag stops being a way to lie to yourself. `vayu names` lists every held
+name with its lifecycle state: LIVE, GRACE, QUARANTINE, FREE, or the revoked freeze.
+
+Six unit tests cover the walk, gap-truncation, torn-write survival, the lifecycle boundary
+(second-by-second: taken, still taken, free), and append idempotence; three CLI tests walk a
+registration through acceptance, squatting defense, view-chained updates, a transfer whose
+a transfer whose successor verifies with no transferor flag, DEFER-before-its-moment, and
+quarantine returning a name to the open pool. Suite now 144 lib + 11 CLI + 7 serve.
+
 ### Added — `vayu verify`: the peer's half of record validation, and `vayu pins`
 
 The client could BUILD records; it could not yet JUDGE one received from somewhere else — which

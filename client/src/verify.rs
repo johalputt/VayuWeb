@@ -331,6 +331,90 @@ fn parse_record(value: &Value) -> Result<ParsedRecord, Verdict> {
 // The verifier proper.
 // ---------------------------------------------------------------------------
 
+/// The fields a registry VIEW must read before any cryptography runs: enough to answer
+/// "is this name taken" and "which predecessor would this follow" cheaply, exactly as the
+/// implementation of record's verifier deliberately orders NAME_TAKEN before signature and
+/// proof of work.
+#[derive(Debug, Clone)]
+pub struct Peeked {
+    pub op: String,
+    pub label: String,
+    pub tld: String,
+    pub seq: u64,
+    pub not_before: u64,
+}
+
+/// Cheap structural read: op, name, tld, seq, notBefore. Refuses nothing else — a full
+/// verdict still belongs to [`verify`].
+pub fn peek(bytes: &[u8]) -> Result<Peeked, String> {
+    let value = decode_record(bytes).map_err(|e| format!("does not decode: {e}"))?;
+    let Value::Map(members) = value else {
+        return Err("a record is a CBOR map".to_string());
+    };
+    let text = |name: &str| -> Result<String, String> {
+        match field(&members, name) {
+            Some(Value::Text(text)) => Ok(text.clone()),
+            _ => Err(format!("no readable {name}")),
+        }
+    };
+    Ok(Peeked {
+        op: text("op")?,
+        label: text("name")?,
+        tld: text("tld")?,
+        seq: uint(field(&members, "seq").ok_or("no seq")?)?,
+        not_before: uint(field(&members, "notBefore").ok_or("no notBefore")?)?,
+    })
+}
+
+/// Lifecycle question for a name's current record: has its grace AND quarantine both run out,
+/// so the name is back in the open pool? Mirrors `fullyReleased`.
+pub fn fully_released(tip: &PrevView, now: u64) -> bool {
+    quarantine_end(tip) <= now
+}
+
+/// When the name returns to the open pool, given its current record.
+fn quarantine_end(tip: &PrevView) -> u64 {
+    // RELINQUISH skips grace — the owner has said they are done — but never quarantine,
+    // whose purpose is front-running protection, not owner protection. REVOKE freezes until
+    // expiry and then quarantines. Everything else serves grace before quarantine.
+    match tip.op_text.as_str() {
+        "RELINQUISH" | "REVOKE" => tip.not_after + QUARANTINE_SECONDS,
+        _ => tip.not_after + GRACE + QUARANTINE_SECONDS,
+    }
+}
+
+/// A human-usable lifecycle state for `vayu names`, mirroring lifecycle.ts's four states plus
+/// the revoked freeze.
+pub fn lifecycle_state(tip: &PrevView, now: u64) -> &'static str {
+    if tip.op_text == "REVOKE" {
+        if now < tip.not_after {
+            return "REVOKED (frozen until expiry)";
+        }
+        return if now < tip.not_after + QUARANTINE_SECONDS {
+            "QUARANTINE (revoked)"
+        } else {
+            "FREE"
+        };
+    }
+    if tip.op_text == "RELINQUISH" && tip.not_after <= now {
+        return if now < tip.not_after + QUARANTINE_SECONDS {
+            "QUARANTINE (relinquished)"
+        } else {
+            "FREE"
+        };
+    }
+    if now < tip.not_after {
+        return "LIVE";
+    }
+    if now < tip.not_after + GRACE {
+        return "GRACE";
+    }
+    if now < tip.not_after + GRACE + QUARANTINE_SECONDS {
+        return "QUARANTINE";
+    }
+    "FREE"
+}
+
 /// Verify one record's exact bytes against an optional predecessor and the clock.
 ///
 /// `window_count` is the trailing-window registration count for the name's TLD — index state

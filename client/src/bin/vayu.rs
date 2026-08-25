@@ -64,17 +64,31 @@ USAGE:
 
     vayu verify <record.cbor> [options]
         Verify a record RECEIVED from somewhere else, in its exact bytes: framing,
-        canonicality, structure, chain discipline against --prev, per-operation
-        term rules, signature under the controlling key, transfer countersig-
-        nature, proof of work, clock discipline. Prints ACCEPT / REJECT(code) /
-        DEFER. Standalone mode cannot know whether a REGISTER's name is taken;
-        that check belongs to whoever holds the registry view.
+        canonicality, structure, chain discipline, per-operation term rules,
+        signature under the controlling key, transfer countersignature, proof
+        of work, clock discipline. Prints ACCEPT / REJECT(code) / DEFER.
+        Without --view or --prev the record is judged STANDALONE: no incumbent
+        set and no history, so NAME_TAKEN and chain checks cannot run.
 
     Options for verify:
+        --view <dir>            a local record log; predecessor found by replay,
+                                NAME_TAKEN answered from the incumbent's lifecycle
         --prev <file>           the predecessor's exact accepted bytes
         --transferor-key <hex>  64 hex chars: a TRANSFER predecessor's transferor key
+                                (unneeded with --view: replay resolves it)
         --now <unix-seconds>    override the verifier clock
         --window-count <n>      TLD registration count over the trailing window
+
+    vayu accept <record.cbor> --view <dir> [options]
+        Verify against the view (see verify --view) and, on ACCEPT, append the
+        record to it. The log is append-only files addressed by their own
+        record_hash; state is derived by replay, never indexed.
+
+    Options for accept: --now, --window-count (as for verify).
+
+    vayu names --view <dir>
+        List every name this view holds history for, with its lifecycle state:
+        LIVE, GRACE, QUARANTINE, FREE, or the revoked freeze.
 
     vayu pins <store-dir>
         List every block the store holds, classified, with totals.
@@ -96,6 +110,8 @@ fn run() -> i32 {
         Some("publish") => cmd_publish(&argv[1..]),
         Some("serve") => cmd_serve(&argv[1..]),
         Some("verify") => cmd_verify(&argv[1..]),
+        Some("accept") => cmd_accept(&argv[1..]),
+        Some("names") => cmd_names(&argv[1..]),
         Some("pins") => cmd_pins(&argv[1..]),
         Some("help") | Some("--help") | Some("-h") => {
             print!("{USAGE}");
@@ -119,7 +135,7 @@ fn cmd_verify(argv: &[String]) -> i32 {
     };
     let flags = match Flags::parse(
         &argv[1..],
-        &["prev", "transferor-key", "now", "window-count"],
+        &["view", "prev", "transferor-key", "now", "window-count"],
     ) {
         Ok(flags) => flags,
         Err(detail) => {
@@ -127,6 +143,10 @@ fn cmd_verify(argv: &[String]) -> i32 {
             return 2;
         }
     };
+    if flags.has("view") && (flags.has("prev") || flags.has("transferor-key")) {
+        eprintln!("vayu verify: --view resolves the predecessor itself; do not combine it with --prev or --transferor-key");
+        return 2;
+    }
     let bytes = match std::fs::read(record_path) {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -154,42 +174,195 @@ fn cmd_verify(argv: &[String]) -> i32 {
         }
     };
 
-    let previous = match flags.get("prev") {
-        Some(path) => {
-            let prev_bytes = match std::fs::read(path) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    eprintln!("vayu verify: cannot read predecessor {path:?}: {e}");
-                    return 2;
-                }
-            };
-            let transferor = match flags.get("transferor-key") {
-                Some(text) => match hex_decode(text) {
-                    Ok(seed) if seed.len() == 32 => {
-                        let mut key = [0u8; 32];
-                        key.copy_from_slice(&seed);
-                        Some(key)
-                    }
-                    _ => {
-                        eprintln!("vayu verify: --transferor-key wants exactly 64 hex chars");
-                        return 2;
-                    }
-                },
-                None => None,
-            };
-            match vayuweb_client::verify::prev_view(&prev_bytes, transferor.as_ref()) {
-                Ok(view) => Some(view),
-                Err(detail) => {
-                    eprintln!("vayu verify: unusable predecessor: {detail}");
-                    return 2;
-                }
+    // View mode: predecessor found by replay, NAME_TAKEN answerable. Precedence over
+    // single-record mode because the view is strictly more honest about history.
+    let verdict = if let Some(view_dir) = flags.get("view") {
+        let view = match vayuweb_client::view::View::open(std::path::Path::new(view_dir)) {
+            Ok(view) => view,
+            Err(detail) => {
+                eprintln!("vayu verify: {detail}");
+                return 2;
+            }
+        };
+        match view.accept_verdict(&bytes, now, window_count) {
+            Ok(verdict) => verdict,
+            Err(detail) => {
+                eprintln!("vayu verify: {detail}");
+                return 2;
             }
         }
-        None => None,
+    } else {
+        let previous = match flags.get("prev") {
+            Some(path) => {
+                let prev_bytes = match std::fs::read(path) {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        eprintln!("vayu verify: cannot read predecessor {path:?}: {e}");
+                        return 2;
+                    }
+                };
+                let transferor = match flags.get("transferor-key") {
+                    Some(text) => match hex_decode(text) {
+                        Ok(seed) if seed.len() == 32 => {
+                            let mut key = [0u8; 32];
+                            key.copy_from_slice(&seed);
+                            Some(key)
+                        }
+                        _ => {
+                            eprintln!("vayu verify: --transferor-key wants exactly 64 hex chars");
+                            return 2;
+                        }
+                    },
+                    None => None,
+                };
+                match vayuweb_client::verify::prev_view(&prev_bytes, transferor.as_ref()) {
+                    Ok(view) => Some(view),
+                    Err(detail) => {
+                        eprintln!("vayu verify: unusable predecessor: {detail}");
+                        return 2;
+                    }
+                }
+            }
+            None => None,
+        };
+        vayuweb_client::verify::verify(&bytes, previous.as_ref(), now, window_count)
     };
 
-    let verdict = vayuweb_client::verify::verify(&bytes, previous.as_ref(), now, window_count);
-    match &verdict {
+    print_verdict(&verdict)
+}
+
+// ---------------------------------------------------------------------------
+// vayu accept / vayu names — the local registry view.
+// ---------------------------------------------------------------------------
+
+fn cmd_accept(argv: &[String]) -> i32 {
+    let Some(record_path) = argv.first().filter(|a| !a.starts_with("--")) else {
+        eprintln!("vayu accept needs a record file");
+        return 2;
+    };
+    let flags = match Flags::parse(&argv[1..], &["view", "now", "window-count"]) {
+        Ok(flags) => flags,
+        Err(detail) => {
+            eprintln!("vayu accept: {detail}");
+            return 2;
+        }
+    };
+    let Some(view_dir) = flags.get("view") else {
+        eprintln!(
+            "vayu accept needs --view <dir>: acceptance is meaningless without a log to append to"
+        );
+        return 2;
+    };
+    let bytes = match std::fs::read(record_path) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("vayu accept: cannot read {record_path:?}: {e}");
+            return 2;
+        }
+    };
+    let view = match vayuweb_client::view::View::open(std::path::Path::new(view_dir)) {
+        Ok(view) => view,
+        Err(detail) => {
+            eprintln!("vayu accept: {detail}");
+            return 2;
+        }
+    };
+    let now = match flags.number("now") {
+        Ok(Some(now)) => now,
+        Ok(None) => std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default(),
+        Err(detail) => {
+            eprintln!("vayu accept: {detail}");
+            return 2;
+        }
+    };
+    let window_count = match flags.number("window-count") {
+        Ok(value) => value.unwrap_or(0),
+        Err(detail) => {
+            eprintln!("vayu accept: {detail}");
+            return 2;
+        }
+    };
+
+    let before = view.entries().map(|e| e.len()).unwrap_or(0);
+    let verdict = match view.accept_verdict(&bytes, now, window_count) {
+        Ok(verdict) => verdict,
+        Err(detail) => {
+            eprintln!("vayu accept: {detail}");
+            return 2;
+        }
+    };
+    let code = print_verdict(&verdict);
+    if code != 0 {
+        // A rejected or deferred record is NOT appended: the log holds only what the view
+        // actually accepted, so replay never has to skip a refusal.
+        return code;
+    }
+
+    if let Err(detail) = view.put(&bytes) {
+        eprintln!("vayu accept: verification succeeded but the log refused the write: {detail}");
+        return 1;
+    }
+    let after = view.entries().map(|e| e.len()).unwrap_or(0);
+    if after == before {
+        println!("already held: identical bytes are already in this view.");
+    } else {
+        println!("appended to view {view_dir} ({after} record(s) held).");
+    }
+    0
+}
+
+fn cmd_names(argv: &[String]) -> i32 {
+    let flags = match Flags::parse(argv, &["view"]) {
+        Ok(flags) => flags,
+        Err(detail) => {
+            eprintln!("vayu names: {detail}");
+            return 2;
+        }
+    };
+    let Some(view_dir) = flags.get("view") else {
+        eprintln!("vayu names needs --view <dir>");
+        return 2;
+    };
+    let view = match vayuweb_client::view::View::open(std::path::Path::new(view_dir)) {
+        Ok(view) => view,
+        Err(detail) => {
+            eprintln!("vayu names: {detail}");
+            return 2;
+        }
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    let names = match view.all_names() {
+        Ok(names) => names,
+        Err(detail) => {
+            eprintln!("vayu names: {detail}");
+            return 2;
+        }
+    };
+    if names.is_empty() {
+        println!("this view holds no accepted records yet.");
+        return 0;
+    }
+    for (label, tld, tip) in &names {
+        let state = vayuweb_client::verify::lifecycle_state(&tip.prev, now);
+        let expiry = tip.prev.not_after;
+        println!(
+            "{label}.{tld}\n  seq {} · {} · expires {expiry} · {state}",
+            tip.prev.seq, tip.entry.hash_hex
+        );
+    }
+    println!("\n{} name(s) in {view_dir}", names.len());
+    0
+}
+
+/// One place for the ACCEPT/REJECT/DEFER text and its exit code.
+fn print_verdict(verdict: &vayuweb_client::verify::Verdict) -> i32 {
+    match verdict {
         vayuweb_client::verify::Verdict::Accept => {
             println!("ACCEPT");
             0
@@ -200,7 +373,9 @@ fn cmd_verify(argv: &[String]) -> i32 {
         }
         vayuweb_client::verify::Verdict::Defer { detail } => {
             println!("DEFER: {detail}");
-            println!("the record is neither good nor bad yet: hold it and retry when the clock catches up.");
+            println!(
+                "the record is neither good nor bad yet: hold it and retry when the clock catches up."
+            );
             1
         }
     }

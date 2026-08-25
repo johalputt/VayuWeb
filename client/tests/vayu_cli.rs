@@ -495,3 +495,375 @@ fn pins_classifies_every_block_in_a_store() {
         .expect("runs");
     assert_eq!(none.status.code(), Some(2));
 }
+
+// ---------------------------------------------------------------------------
+// The local registry view: accept, replay, and the lifecycle a stranger's
+// record walks through.
+// ---------------------------------------------------------------------------
+
+/// A seed file of `byte` repeated 32 times, hex-encoded.
+fn seed_hex(byte: u8) -> String {
+    format!("{:02x}", byte).repeat(32)
+}
+
+#[test]
+fn a_view_accepts_a_registration_then_defends_the_name() {
+    let work = TempDir::new("view");
+    let view_dir = work.path().join("view");
+    let now = 1_800_000_000u64;
+
+    let alice = work.path().join("alice.hex");
+    std::fs::write(&alice, seed_hex(0x11)).expect("writes");
+    let id = vayuweb_client::identity::Identity::from_seed(&mut vec![0x11; 32]).expect("identity");
+
+    let reg = vayuweb_client::record::build_register(
+        &id,
+        "orchard",
+        "vayu",
+        now,
+        &[],
+        0,
+        None,
+        10_000_000,
+    )
+    .expect("registers");
+    let reg_path = work.path().join("reg.cbor");
+    std::fs::write(&reg_path, &reg).expect("writes");
+
+    // Accept into an empty view.
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "accept",
+            reg_path.to_str().expect("utf8"),
+            "--view",
+            view_dir.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("appended"));
+
+    // `names` shows it LIVE.
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args(["names", "--view", view_dir.to_str().expect("utf8")])
+        .output()
+        .expect("runs");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("orchard.vayu") && stdout.contains("LIVE"),
+        "{stdout}"
+    );
+
+    // A second registration of the same name is NAME_TAKEN — answered cheaply, before any
+    // cryptography, exactly as the registry orders it.
+    let mallory_id =
+        vayuweb_client::identity::Identity::from_seed(&mut vec![0x22; 32]).expect("identity");
+    let squat = vayuweb_client::record::build_register(
+        &mallory_id,
+        "orchard",
+        "vayu",
+        now + 1_000,
+        &[],
+        0,
+        None,
+        10_000_000,
+    )
+    .expect("registers");
+    let squat_path = work.path().join("squat.cbor");
+    std::fs::write(&squat_path, &squat).expect("writes");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "accept",
+            squat_path.to_str().expect("utf8"),
+            "--view",
+            view_dir.to_str().expect("utf8"),
+            "--now",
+            &(now + 1_000).to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stdout).starts_with("REJECT NAME_TAKEN"),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    // And the refusal was NOT appended: the log holds only what the view accepted.
+    let count = std::fs::read_dir(&view_dir)
+        .expect("lists")
+        .filter_map(|e| e.ok())
+        .count();
+    assert_eq!(count, 1, "one accepted record, one file: found {count}");
+
+    // An UPDATE chains off the view itself — no --prev, no --transferor-key. Judged BEFORE
+    // it is accepted: once appended, the record IS history, and a view never lets history
+    // follow itself.
+    let predecessor = vayuweb_client::record::Predecessor::from_bytes(&reg).expect("predecessor");
+    let update =
+        vayuweb_client::record::build_update(&id, &predecessor, "orchard", "vayu", now + 600, &[])
+            .expect("builds");
+    let update_path = work.path().join("update.cbor");
+    std::fs::write(&update_path, &update).expect("writes");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "verify",
+            update_path.to_str().expect("utf8"),
+            "--view",
+            view_dir.to_str().expect("utf8"),
+            "--now",
+            &(now + 600).to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("ACCEPT"));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "accept",
+            update_path.to_str().expect("utf8"),
+            "--view",
+            view_dir.to_str().expect("utf8"),
+            "--now",
+            &(now + 600).to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    // And once it is history, re-judging the same bytes fails chain discipline: a record
+    // cannot follow itself.
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "verify",
+            update_path.to_str().expect("utf8"),
+            "--view",
+            view_dir.to_str().expect("utf8"),
+            "--now",
+            &(now + 700).to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("REJECT BAD_SEQ"));
+}
+
+#[test]
+fn a_transfer_through_the_view_needs_no_transferor_flag() {
+    const SETTLEMENT_SECONDS: u64 = 1_209_600;
+    let work = TempDir::new("view-transfer");
+    let view_dir = work.path().join("view");
+    let now = 1_800_000_000u64;
+
+    let alice_id = vayuweb_client::identity::Identity::from_seed(&mut vec![0x33; 32]).expect("id");
+    let bob_id = vayuweb_client::identity::Identity::from_seed(&mut vec![0x44; 32]).expect("id");
+
+    let accept = |bytes: &[u8], name: &str, at: u64| {
+        let path = work.path().join(name);
+        std::fs::write(&path, bytes).expect("writes");
+        Command::new(env!("CARGO_BIN_EXE_vayu"))
+            .args([
+                "accept",
+                path.to_str().expect("utf8"),
+                "--view",
+                view_dir.to_str().expect("utf8"),
+                "--now",
+                &at.to_string(),
+            ])
+            .output()
+            .expect("runs")
+    };
+
+    let reg = vayuweb_client::record::build_register(
+        &alice_id,
+        "handover",
+        "vayu",
+        now,
+        &[],
+        0,
+        None,
+        10_000_000,
+    )
+    .expect("registers");
+    assert_eq!(accept(&reg, "reg.cbor", now).status.code(), Some(0));
+
+    let predecessor = vayuweb_client::record::Predecessor::from_bytes(&reg).expect("predecessor");
+    let transfer = vayuweb_client::record::build_transfer(
+        &alice_id,
+        &bob_id,
+        &predecessor,
+        "handover",
+        "vayu",
+        now + 600,
+    )
+    .expect("builds");
+    assert_eq!(
+        accept(&transfer, "transfer.cbor", now + 600).status.code(),
+        Some(0)
+    );
+
+    // Bob's first act as recipient: an update whose notBefore sits exactly at the end of
+    // hop 1's settlement horizon. Judged BEFORE its moment it is neither good nor bad:
+    // DEFER — held for the clock, not rejected (and the clock check runs only AFTER the
+    // signature earned it). Judged AT its moment it passes. Authority resolves by replay
+    // ALONE — the view knows who controlled the name before and through the transfer, so no
+    // transferor key is ever handed to the tool.
+    let hop1_pred =
+        vayuweb_client::record::Predecessor::from_bytes(&transfer).expect("predecessor");
+    let settled = now + 600 + SETTLEMENT_SECONDS;
+    let bob_update =
+        vayuweb_client::record::build_update(&bob_id, &hop1_pred, "handover", "vayu", settled, &[])
+            .expect("builds");
+    let update_path = work.path().join("bob-update.cbor");
+    std::fs::write(&update_path, &bob_update).expect("writes");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "verify",
+            update_path.to_str().expect("utf8"),
+            "--view",
+            view_dir.to_str().expect("utf8"),
+            "--now",
+            &(now + 605).to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stdout).starts_with("DEFER"),
+        "before its moment the record is held, not judged: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "verify",
+            update_path.to_str().expect("utf8"),
+            "--view",
+            view_dir.to_str().expect("utf8"),
+            "--now",
+            &settled.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
+fn quarantine_returns_a_name_to_the_open_pool() {
+    let work = TempDir::new("view-quarantine");
+    let view_dir = work.path().join("view");
+    let now = 1_800_000_000u64;
+    let quarantine_seconds: u64 = 2_592_000;
+
+    let alice_id = vayuweb_client::identity::Identity::from_seed(&mut vec![0x55; 32]).expect("id");
+    let squatter_id =
+        vayuweb_client::identity::Identity::from_seed(&mut vec![0x66; 32]).expect("id");
+
+    let accept = |bytes: &[u8], name: &str, at: u64| {
+        let path = work.path().join(name);
+        std::fs::write(&path, bytes).expect("writes");
+        Command::new(env!("CARGO_BIN_EXE_vayu"))
+            .args([
+                "accept",
+                path.to_str().expect("utf8"),
+                "--view",
+                view_dir.to_str().expect("utf8"),
+                "--now",
+                &at.to_string(),
+            ])
+            .output()
+            .expect("runs")
+    };
+
+    let reg = vayuweb_client::record::build_register(
+        &alice_id,
+        "seasonal",
+        "vayu",
+        now,
+        &[],
+        0,
+        None,
+        10_000_000,
+    )
+    .expect("registers");
+    assert_eq!(accept(&reg, "reg.cbor", now).status.code(), Some(0));
+
+    let pred = vayuweb_client::record::Predecessor::from_bytes(&reg).expect("predecessor");
+    let rel =
+        vayuweb_client::record::build_relinquish(&alice_id, &pred, "seasonal", "vayu", now + 600)
+            .expect("builds");
+    assert_eq!(accept(&rel, "rel.cbor", now + 600).status.code(), Some(0));
+
+    // Mid-quarantine the name is still held against everyone, including a stranger.
+    let mid_quarantine = now + 600 + quarantine_seconds / 2;
+    let squat = vayuweb_client::record::build_register(
+        &squatter_id,
+        "seasonal",
+        "vayu",
+        mid_quarantine,
+        &[],
+        0,
+        None,
+        10_000_000,
+    )
+    .expect("registers");
+    let output = accept(&squat, "squat.cbor", mid_quarantine);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stdout).starts_with("REJECT NAME_TAKEN"),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    // After quarantine it is FREE, and the same stranger may take it.
+    let after_quarantine = now + 600 + quarantine_seconds + 1;
+    let fresh = vayuweb_client::record::build_register(
+        &squatter_id,
+        "seasonal",
+        "vayu",
+        after_quarantine,
+        &[],
+        0,
+        None,
+        10_000_000,
+    )
+    .expect("registers");
+    let output = accept(&fresh, "fresh.cbor", after_quarantine);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args(["names", "--view", view_dir.to_str().expect("utf8")])
+        .output()
+        .expect("runs");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("LIVE"));
+}
