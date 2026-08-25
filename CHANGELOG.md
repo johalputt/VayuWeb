@@ -10,6 +10,34 @@ it.
 
 ## [Unreleased]
 
+### Added — `vayu verify`: the peer's half of record validation, and `vayu pins`
+
+The client could BUILD records; it could not yet JUDGE one received from somewhere else — which
+is the prerequisite for ever accepting a record from anyone, and so the first piece of Phase 4
+that can be built without a transport. `vayu verify <record.cbor>` takes a record's EXACT bytes
+(never a re-encoding: record_hash is taken over bytes) plus an optional predecessor, and answers
+ACCEPT / REJECT with the same codes as the registry implementation / DEFER for a clock that has
+not caught up. The order of checks is the spec: framing before structure, structure before
+cryptography, a cheap rejection (BAD_SEQ, BAD_CHAIN) before the expensive Argon2id evaluation,
+and deferral LAST among its operation's checks — because a deferral costs memory and must be
+earned by everything before it. Chain discipline names each failure distinctly (BAD_SEQ,
+BAD_CHAIN, TOO_SOON, EXPIRED, REVOKED, UNSETTLED, SUITE_DOWNGRADE); transfers are checked under
+the CONTROLLING key — the transferor while settling, which is why `--transferor-key` exists and
+why refusing to guess is a feature; countersignatures are judged under the incoming ownerKey;
+proof of work is judged against the difficulty the CALLER says the TLD currently demands, so the
+same bytes can be provable yesterday and unprovable today. Stated plainly in the help text:
+standalone mode cannot know whether a REGISTER's name is taken — that check belongs to whoever
+holds the registry view.
+
+`vayu pins <store-dir>` lists every block the store holds, classified from its own bytes — raw
+leaf, file, or directory-with-fan-out — with byte totals. Small, but it makes the local pin
+store legible to its owner, which Phase 5's pin-management UI will need anyway.
+
+Eleven new unit tests cover every acceptance path the builders can reach plus a tamper matrix
+where each forgery class gets its OWN code — signature, countersignature, sequence, chain hash,
+lifecycle, settlement, suite downgrade, difficulty drift, backdating, deferral — and two CLI
+tests exercise both verbs as processes.
+
 ### Added — 3.1.6's second half: reading now enforces what publishing checks
 
 "The checker's rule set and the resolver's enforcement MUST be generated from one shared

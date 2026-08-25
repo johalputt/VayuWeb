@@ -360,3 +360,138 @@ fn serve_refuses_a_tree_the_checker_would_stop() {
         "the finding names its rule"
     );
 }
+
+// ---------------------------------------------------------------------------
+// vayu verify — the peer's verdict, through the binary.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn verify_accepts_what_the_builder_made_and_names_a_forgery() {
+    let work = TempDir::new("verify");
+    let mut seed = vec![9u8; 32];
+    let id = vayuweb_client::identity::Identity::from_seed(&mut seed).expect("identity");
+    let record = vayuweb_client::record::build_register(
+        &id,
+        "cli-verify",
+        "vayu",
+        1_800_000_000,
+        &[],
+        0,
+        None,
+        10_000_000,
+    )
+    .expect("registers");
+    let record_path = work.path().join("record.cbor");
+    std::fs::write(&record_path, &record).expect("writes");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "verify",
+            record_path.to_str().expect("utf8"),
+            "--now",
+            "1800000000",
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(0));
+    assert!(
+        String::from_utf8_lossy(&output.stdout).starts_with("ACCEPT"),
+        "an honest registration verifies as received"
+    );
+
+    // The same file with a forged signature: refused, with the code named.
+    let vayuweb_client::cbor::Value::Map(mut members) =
+        vayuweb_client::cbor::decode(&record).expect("decodes")
+    else {
+        panic!("a record is a map");
+    };
+    for (key, value) in members.iter_mut() {
+        if matches!(key, vayuweb_client::cbor::Key::Text(name) if name == "sig") {
+            *value = vayuweb_client::cbor::Value::Bytes(vec![0u8; 64]);
+        }
+    }
+    let forged = vayuweb_client::cbor::encode(&vayuweb_client::cbor::Value::Map(members))
+        .expect("re-encodes");
+    let forged_path = work.path().join("forged.cbor");
+    std::fs::write(&forged_path, &forged).expect("writes");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "verify",
+            forged_path.to_str().expect("utf8"),
+            "--now",
+            "1800000000",
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.starts_with("REJECT BAD_SIG"), "{stdout}");
+}
+
+// ---------------------------------------------------------------------------
+// vayu pins — what does this store hold?
+// ---------------------------------------------------------------------------
+
+#[test]
+fn pins_classifies_every_block_in_a_store() {
+    let work = TempDir::new("pins");
+    let site = work.path().join("site");
+    work.file("site/index.html", "<!doctype html><title>pins</title><p>hi");
+    work.file("site/logo.png", "PNGDATA");
+    let store_dir = work.path().join("store");
+
+    let seed_path = work.path().join("seed.hex");
+    std::fs::write(
+        &seed_path,
+        "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a",
+    )
+    .expect("writes");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "publish",
+            site.to_str().expect("utf8"),
+            "--name",
+            "pins.vayu",
+            "--store",
+            store_dir.to_str().expect("utf8"),
+            "--key-file",
+            seed_path.to_str().expect("utf8"),
+            "--out",
+            work.path().join("rec.cbor").to_str().expect("utf8"),
+        ])
+        .output()
+        .expect("runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .arg("pins")
+        .arg(store_dir.to_str().expect("utf8"))
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("dir(2)"),
+        "the root directory shows its fan-out: {stdout}"
+    );
+    assert!(
+        stdout.contains("leaf"),
+        "raw leaves are classified: {stdout}"
+    );
+    assert!(
+        stdout.contains("block(s)"),
+        "totals close the listing: {stdout}"
+    );
+
+    // Usage mistakes stay usage errors.
+    let none = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .arg("pins")
+        .output()
+        .expect("runs");
+    assert_eq!(none.status.code(), Some(2));
+}

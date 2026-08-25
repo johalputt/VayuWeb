@@ -62,6 +62,23 @@ USAGE:
         --root <cid-text>       the tree to serve (required)
         --port <n>              port to bind (default: 0, an ephemeral free port)
 
+    vayu verify <record.cbor> [options]
+        Verify a record RECEIVED from somewhere else, in its exact bytes: framing,
+        canonicality, structure, chain discipline against --prev, per-operation
+        term rules, signature under the controlling key, transfer countersig-
+        nature, proof of work, clock discipline. Prints ACCEPT / REJECT(code) /
+        DEFER. Standalone mode cannot know whether a REGISTER's name is taken;
+        that check belongs to whoever holds the registry view.
+
+    Options for verify:
+        --prev <file>           the predecessor's exact accepted bytes
+        --transferor-key <hex>  64 hex chars: a TRANSFER predecessor's transferor key
+        --now <unix-seconds>    override the verifier clock
+        --window-count <n>      TLD registration count over the trailing window
+
+    vayu pins <store-dir>
+        List every block the store holds, classified, with totals.
+
     vayu help
         Show this text.
 
@@ -78,6 +95,8 @@ fn run() -> i32 {
         Some("doctor") => cmd_doctor(&argv[1..]),
         Some("publish") => cmd_publish(&argv[1..]),
         Some("serve") => cmd_serve(&argv[1..]),
+        Some("verify") => cmd_verify(&argv[1..]),
+        Some("pins") => cmd_pins(&argv[1..]),
         Some("help") | Some("--help") | Some("-h") => {
             print!("{USAGE}");
             0
@@ -87,6 +106,166 @@ fn run() -> i32 {
             2
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// vayu verify — the peer's half of record validation.
+// ---------------------------------------------------------------------------
+
+fn cmd_verify(argv: &[String]) -> i32 {
+    let Some(record_path) = argv.first().filter(|a| !a.starts_with("--")) else {
+        eprintln!("vayu verify needs a record file");
+        return 2;
+    };
+    let flags = match Flags::parse(
+        &argv[1..],
+        &["prev", "transferor-key", "now", "window-count"],
+    ) {
+        Ok(flags) => flags,
+        Err(detail) => {
+            eprintln!("vayu verify: {detail}");
+            return 2;
+        }
+    };
+    let bytes = match std::fs::read(record_path) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("vayu verify: cannot read {record_path:?}: {e}");
+            return 2;
+        }
+    };
+
+    let now = match flags.number("now") {
+        Ok(Some(now)) => now,
+        Ok(None) => std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default(),
+        Err(detail) => {
+            eprintln!("vayu verify: {detail}");
+            return 2;
+        }
+    };
+    let window_count = match flags.number("window-count") {
+        Ok(value) => value.unwrap_or(0),
+        Err(detail) => {
+            eprintln!("vayu verify: {detail}");
+            return 2;
+        }
+    };
+
+    let previous = match flags.get("prev") {
+        Some(path) => {
+            let prev_bytes = match std::fs::read(path) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    eprintln!("vayu verify: cannot read predecessor {path:?}: {e}");
+                    return 2;
+                }
+            };
+            let transferor = match flags.get("transferor-key") {
+                Some(text) => match hex_decode(text) {
+                    Ok(seed) if seed.len() == 32 => {
+                        let mut key = [0u8; 32];
+                        key.copy_from_slice(&seed);
+                        Some(key)
+                    }
+                    _ => {
+                        eprintln!("vayu verify: --transferor-key wants exactly 64 hex chars");
+                        return 2;
+                    }
+                },
+                None => None,
+            };
+            match vayuweb_client::verify::prev_view(&prev_bytes, transferor.as_ref()) {
+                Ok(view) => Some(view),
+                Err(detail) => {
+                    eprintln!("vayu verify: unusable predecessor: {detail}");
+                    return 2;
+                }
+            }
+        }
+        None => None,
+    };
+
+    let verdict = vayuweb_client::verify::verify(&bytes, previous.as_ref(), now, window_count);
+    match &verdict {
+        vayuweb_client::verify::Verdict::Accept => {
+            println!("ACCEPT");
+            0
+        }
+        vayuweb_client::verify::Verdict::Reject { code, detail } => {
+            println!("REJECT {code}: {detail}");
+            1
+        }
+        vayuweb_client::verify::Verdict::Defer { detail } => {
+            println!("DEFER: {detail}");
+            println!("the record is neither good nor bad yet: hold it and retry when the clock catches up.");
+            1
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// vayu pins — what does this store actually hold?
+// ---------------------------------------------------------------------------
+
+fn cmd_pins(argv: &[String]) -> i32 {
+    let Some(store_dir) = argv.first().filter(|a| !a.starts_with("--")) else {
+        eprintln!("vayu pins needs a store directory");
+        return 2;
+    };
+    if argv.len() > 1 {
+        eprintln!("unexpected argument after <store-dir>: {:?}", argv[1]);
+        return 2;
+    }
+    let store = match BlockStore::open(std::path::Path::new(store_dir)) {
+        Ok(store) => store,
+        Err(e) => {
+            eprintln!("vayu pins: cannot open block store {store_dir}: {e}");
+            return 2;
+        }
+    };
+    let entries = match std::fs::read_dir(store_dir) {
+        Ok(entries) => entries,
+        Err(e) => {
+            eprintln!("vayu pins: cannot list {store_dir}: {e}");
+            return 2;
+        }
+    };
+
+    let limits = WalkLimits::default();
+    let mut rows: Vec<(String, u64, String)> = Vec::new();
+    let mut total_bytes = 0u64;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Ok(size) = entry.metadata().map(|m| m.len()) else {
+            continue;
+        };
+        let Ok(cid) = Cid::from_text(&name) else {
+            // Not a CID-shaped filename: not one of ours (temp files are swept at open).
+            continue;
+        };
+        let kind = match vayuweb_client::dagnode::read_node(&store, &cid, &limits) {
+            Ok(vayuweb_client::dagnode::Node::Raw(_)) => "leaf".to_string(),
+            Ok(vayuweb_client::dagnode::Node::Directory(links)) => format!("dir({})", links.len()),
+            Ok(vayuweb_client::dagnode::Node::File { children, .. }) => {
+                format!("file(+{})", children.len())
+            }
+            Err(e) => format!("unreadable ({e})"),
+        };
+        total_bytes += size;
+        rows.push((name, size, kind));
+    }
+    rows.sort();
+    for (name, size, kind) in &rows {
+        println!("{name}  {size:>9} B  {kind}");
+    }
+    println!(
+        "\n{} block(s), {total_bytes} B held in {store_dir}",
+        rows.len()
+    );
+    0
 }
 
 // ---------------------------------------------------------------------------

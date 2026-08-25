@@ -26,3 +26,4 @@ pub mod record;
 pub mod secrets;
 pub mod serve;
 pub mod store;
+pub mod verify;
