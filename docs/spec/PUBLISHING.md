@@ -16,6 +16,8 @@ your key is an UPDATE from that chain, a fresh REGISTER once the name lapses bac
 pool, and a refusal while someone else holds it — and appends the signed record to a local
 registry view; `vayu renew` extends the term a year at a time from inside the renewal window,
 and resolution scans backward through pointerless RENEWs to whatever was last published;
+`vayu alias` points one ratified name at another, and name-based reading follows aliases at
+most three hops with every hop re-judged and live, refusing cycles with ALIAS_LOOP;
 `vayu transfer`, `vayu relinquish` and `vayu revoke` are the owner's exits,
 each judged against the same view it extends; `vayu verify` judges a record
 received from somewhere else in its exact bytes — chain discipline, controlling-key signatures,

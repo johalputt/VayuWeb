@@ -147,6 +147,12 @@ USAGE:
         another key holds the name, and append their signed record to the view when
         it verifies there.
 
+    vayu alias <label>.<tld> --to <other>.<tld> --key-file <f> [options]
+        Point a name at another ratified name: the record's single entry is an
+        alias. Resolution follows aliases at most THREE hops (REGISTRY.md) and
+        refuses a cycle with ALIAS_LOOP — and every hop's target must itself be
+        live and verifying, or nothing resolves.
+
     vayu help
         Show this text.
 
@@ -172,6 +178,7 @@ fn run() -> i32 {
         Some("relinquish") => cmd_owner_exit(&argv[1..], OwnerOp::Relinquish),
         Some("revoke") => cmd_owner_exit(&argv[1..], OwnerOp::Revoke),
         Some("renew") => cmd_owner_exit(&argv[1..], OwnerOp::Renew),
+        Some("alias") => cmd_alias(&argv[1..]),
         Some("pins") => cmd_pins(&argv[1..]),
         Some("help") | Some("--help") | Some("-h") => {
             print!("{USAGE}");
@@ -662,6 +669,221 @@ fn cmd_import(argv: &[String]) -> i32 {
 // only then append. (renew EXTENDS the term by a year, proof of work
 // included; publish's automatic UPDATE only re-points within the term.)
 // ---------------------------------------------------------------------------
+
+/// The incumbent rule every signing verb shares: a chain under YOUR key is the
+/// predecessor (an UPDATE); a lapsed name registers anew; another key's name refuses.
+/// An explicit `--prev` overrides. Lookup-only when the view does not exist yet, so a
+/// first-ever operation materializes nothing before it earns it.
+fn predecessor_from_view(
+    flags: &Flags,
+    store_path: &std::path::Path,
+    label: &str,
+    tld: &str,
+    identity: &Identity,
+    now: u64,
+    verb: &str,
+) -> Result<Option<Predecessor>, i32> {
+    let view_dir = flags
+        .get("view")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| store_path.join("view"));
+    let existing = match std::fs::read_dir(&view_dir) {
+        Ok(_) => match vayuweb_client::view::View::open(&view_dir) {
+            Ok(view) => Some(view),
+            Err(detail) => {
+                eprintln!("vayu {verb}: {detail}");
+                return Err(2);
+            }
+        },
+        Err(_) => None,
+    };
+    match existing.map(|view| view.chain_tip(label, tld)) {
+        Some(Ok(Some(tip))) => {
+            if tip.prev.owner_key != *identity.public_key() {
+                eprintln!(
+                    "vayu {verb}: {label}.{tld} is already held in this view by another key; \
+                     a name is not taken over by publishing at it"
+                );
+                return Err(1);
+            }
+            match vayuweb_client::verify::lifecycle_state(&tip.prev, now) {
+                "FREE" => {
+                    println!(
+                        "note      {label}.{tld} lapsed back to the open pool; registering anew"
+                    );
+                    Ok(None)
+                }
+                _ => match Predecessor::from_bytes(&tip.entry.bytes) {
+                    Ok(previous) => {
+                        println!("renewal   seq {} -> {}", tip.prev.seq, tip.prev.seq + 1);
+                        Ok(Some(previous))
+                    }
+                    Err(e) => {
+                        eprintln!("vayu {verb}: unusable incumbent: {e}");
+                        Err(1)
+                    }
+                },
+            }
+        }
+        Some(Ok(None)) | None => Ok(None),
+        Some(Err(detail)) => {
+            eprintln!("vayu {verb}: {detail}");
+            Err(2)
+        }
+    }
+}
+
+/// `vayu alias <label>.<tld> --to <other>.<tld>` — point a name at another name. The
+/// record carries an alias ENTRY; resolution follows it within REGISTRY.md's budget.
+fn cmd_alias(argv: &[String]) -> i32 {
+    let mut positional = Vec::new();
+    for arg in argv {
+        if !arg.starts_with("--") {
+            positional.push(arg.clone());
+        }
+    }
+    let Some(name_value) = positional.first() else {
+        eprintln!("vayu alias: needs <label>.<tld>");
+        return 2;
+    };
+    let flag_args: &[String] = if argv.first().is_some_and(|a| !a.starts_with("--")) {
+        &argv[1..]
+    } else {
+        argv
+    };
+    let flags = match Flags::parse(
+        flag_args,
+        &[
+            "to",
+            "store",
+            "key-file",
+            "now",
+            "view",
+            "window-count",
+            "pow-limit",
+        ],
+    ) {
+        Ok(flags) => flags,
+        Err(detail) => {
+            eprintln!("vayu alias: {detail}");
+            return 2;
+        }
+    };
+    let (label, tld) = match parse_name(name_value) {
+        Ok(parts) => parts,
+        Err(_) => {
+            eprintln!("vayu alias: wants <label>.<tld>, got {name_value:?}");
+            return 2;
+        }
+    };
+    let Some(to_value) = flags.get("to") else {
+        eprintln!("vayu alias: --to <label>.<tld> names the target");
+        return 2;
+    };
+    let target = match parse_name(to_value)
+        .and_then(|(l, t)| vayuweb_client::record::alias(&l, &t).map_err(|e| e.to_string()))
+    {
+        Ok(target) => target,
+        Err(detail) => {
+            eprintln!("vayu alias: --to {to_value:?} is not a name that can be aliased: {detail}");
+            return 2;
+        }
+    };
+
+    let store_path = std::path::PathBuf::from(flags.get("store").unwrap_or("vayu-store"));
+    let Some(key_file) = flags.get("key-file") else {
+        eprintln!("vayu alias needs --key-file <file>");
+        return 2;
+    };
+    let identity = match read_seed_file(key_file) {
+        Ok(identity) => identity,
+        Err(code) => return code,
+    };
+    let now = match resolve_now(&flags, "alias") {
+        Ok(now) => now,
+        Err(code) => return code,
+    };
+    let window_count = match flags.number("window-count") {
+        Ok(value) => value.unwrap_or(0),
+        Err(detail) => {
+            eprintln!("vayu alias: {detail}");
+            return 2;
+        }
+    };
+    let pow_limit = match flags.number("pow-limit") {
+        Ok(value) => value.unwrap_or(10_000_000),
+        Err(detail) => {
+            eprintln!("vayu alias: {detail}");
+            return 2;
+        }
+    };
+
+    let predecessor =
+        match predecessor_from_view(&flags, &store_path, &label, &tld, &identity, now, "alias") {
+            Ok(predecessor) => predecessor,
+            Err(code) => return code,
+        };
+
+    // The whole point of this verb: an entries list whose single entry redirects.
+    let entry = vayuweb_client::record::Entry {
+        value: vayuweb_client::record::EntryValue::Alias(target.clone()),
+        ttl: None,
+    };
+    let built = match predecessor.as_ref() {
+        None => vayuweb_client::record::build_register(
+            &identity,
+            &label,
+            &tld,
+            now,
+            &[entry],
+            window_count,
+            None,
+            pow_limit,
+        ),
+        Some(previous) => {
+            vayuweb_client::record::build_update(&identity, previous, &label, &tld, now, &[entry])
+        }
+    };
+    let record = match built {
+        Ok(record) => record,
+        Err(e) => {
+            eprintln!("vayu alias: refused: {e}");
+            return 1;
+        }
+    };
+
+    let view_dir = flags
+        .get("view")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| store_path.join("view"));
+    let view = match vayuweb_client::view::View::open(&view_dir) {
+        Ok(view) => view,
+        Err(detail) => {
+            eprintln!("vayu alias: {detail}");
+            return 2;
+        }
+    };
+    match view.accept_verdict(&record, now, window_count) {
+        Ok(vayuweb_client::verify::Verdict::Accept) => {}
+        Ok(other) => {
+            eprintln!("vayu alias: the view refuses this record: {other:?}");
+            return 1;
+        }
+        Err(detail) => {
+            eprintln!("vayu alias: {detail}");
+            return 2;
+        }
+    }
+    if let Err(e) = view.put(&record) {
+        eprintln!("vayu alias: {e}");
+        return 1;
+    }
+    println!(
+        "alias     {}.{} -> {}.{} appended",
+        label, tld, target.label, target.tld
+    );
+    0
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum OwnerOp {
@@ -1202,10 +1424,12 @@ fn resolve_now(flags: &Flags, verb: &str) -> Result<u64, i32> {
 
 /// Name-based reading, RESOLUTION.md's steps 1-7 against a LOCAL view:
 /// name -> current accepted record (replay) -> re-judged as received ->
-/// live at this instant -> its cid entry -> the tree to serve.
+/// live at this instant -> its entry -> and if that entry ALIASES another
+/// name, restart at the target with a budget of three hops (REGISTRY.md),
+/// refusing a cycle with ALIAS_LOOP.
 ///
 /// Every gate refuses CLOSED: a pointer that does not verify, a lapsed term,
-/// or a missing history never yields a root.
+/// a missing history, or a loop never yields a root.
 fn resolve_name_root(
     view_dir: &std::path::Path,
     label: &str,
@@ -1214,32 +1438,56 @@ fn resolve_name_root(
     window_count: u64,
 ) -> Result<Cid, String> {
     let view = vayuweb_client::view::View::open(view_dir)?;
-    let tip = view
-        .chain_tip(label, tld)?
-        .ok_or_else(|| format!("no accepted record for {label}.{tld} in {:?}", view_dir))?;
+    let mut current = (label.to_string(), tld.to_string());
+    let mut visited: Vec<(String, String)> = Vec::new();
+    let mut hops = 0u32;
+    loop {
+        let (cur_label, cur_tld) = (&current.0, &current.1);
+        let tip = view
+            .chain_tip(cur_label, cur_tld)?
+            .ok_or_else(|| format!("no accepted record for {cur_label}.{cur_tld}"))?;
 
-    // Re-judge the incumbent's exact bytes before trusting where they point: successor
-    // checks against the chain BELOW it, signature and discipline against nothing but the
-    // bytes themselves — a tampered held file refuses here, a legitimate tip of any
-    // sequence number does not have to follow itself.
-    match view.judge_held_tip(label, tld, now, window_count)? {
-        vayuweb_client::verify::Verdict::Accept => {}
-        other => {
+        // Re-judge the incumbent's exact bytes before trusting where they point: successor
+        // checks against the chain BELOW it, signature and discipline against nothing but
+        // the bytes themselves — a tampered held file refuses here.
+        match view.judge_held_tip(cur_label, cur_tld, now, window_count)? {
+            vayuweb_client::verify::Verdict::Accept => {}
+            other => {
+                return Err(format!(
+                    "the record attesting {cur_label}.{cur_tld} does not verify against this \
+                     view: {other:?}"
+                ))
+            }
+        }
+        let state = vayuweb_client::verify::lifecycle_state(&tip.prev, now);
+        if state != "LIVE" {
             return Err(format!(
-                "the record attesting {label}.{tld} does not verify against this view: {other:?}"
-            ))
+                "{cur_label}.{cur_tld} is not LIVE ({state}); only a live name resolves"
+            ));
+        }
+
+        match view.resolved_pointer(cur_label, cur_tld)? {
+            vayuweb_client::view::Pointer::Cid(cid) => return Ok(cid),
+            vayuweb_client::view::Pointer::Alias(target) => {
+                hops += 1;
+                if hops > 3 {
+                    // RESOLUTION.md: at most three hops per original request; deeper is a
+                    // refusal, not a longer walk.
+                    return Err(format!(
+                        "ALIAS_LOOP: {label}.{tld}'s alias chain runs deeper than three hops"
+                    ));
+                }
+                let next = (target.label.clone(), target.tld.clone());
+                if next == (label.to_string(), tld.to_string()) || visited.contains(&next) {
+                    return Err(format!(
+                        "ALIAS_LOOP: {cur_label}.{cur_tld} points back along its own chain"
+                    ));
+                }
+                visited.push(current);
+                current = next;
+            }
         }
     }
-    let state = vayuweb_client::verify::lifecycle_state(&tip.prev, now);
-    if state != "LIVE" {
-        return Err(format!(
-            "{label}.{tld} is not LIVE ({state}); only a live name resolves"
-        ));
-    }
-
-    // The pointer itself: scan back from the tip to the most recent record carrying a cid
-    // entry — a RENEW extends time without re-pointing, and the chain still resolves.
-    view.resolved_root(label, tld)
 }
 
 /// Walk a directory recursively, returning site files with '/'-separated relative paths in
@@ -1604,61 +1852,11 @@ fn cmd_publish(argv: &[String]) -> i32 {
     };
 
     // Renewal, automatic: the view this publish appends to is also the history it renews
-    // FROM. When it already holds a chain for this name, the incumbent decides what kind of
-    // record this publish signs — an UPDATE under your own chain while the name is held, a
-    // fresh REGISTER once it has lapsed back to the open pool, and a refusal while someone
-    // else holds it. An explicit --prev overrides all of this for hand-carried chains.
+    // FROM (see predecessor_from_view for the incumbent's rule). An explicit --prev wins.
     let predecessor = if predecessor.is_none() {
-        let view_dir = flags
-            .get("view")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| store_path.join("view"));
-        // Lookup only: a first-ever publish must not materialize anything in its store
-        // before the site has even passed the checker.
-        let existing = match std::fs::read_dir(&view_dir) {
-            Ok(_) => match vayuweb_client::view::View::open(&view_dir) {
-                Ok(view) => Some(view),
-                Err(detail) => {
-                    eprintln!("vayu publish: {detail}");
-                    return 2;
-                }
-            },
-            Err(_) => None,
-        };
-        match existing.map(|view| view.chain_tip(&label, &tld)) {
-            Some(Ok(Some(tip))) => {
-                if tip.prev.owner_key != *identity.public_key() {
-                    eprintln!(
-                        "vayu publish: {label}.{tld} is already held in this view by another \
-                         key; a name is not taken over by publishing at it"
-                    );
-                    return 1;
-                }
-                match vayuweb_client::verify::lifecycle_state(&tip.prev, now) {
-                    "FREE" => {
-                        println!(
-                            "note      {label}.{tld} lapsed back to the open pool; \
-                             registering anew"
-                        );
-                        None
-                    }
-                    _ => match Predecessor::from_bytes(&tip.entry.bytes) {
-                        Ok(previous) => {
-                            println!("renewal   seq {} -> {}", tip.prev.seq, tip.prev.seq + 1);
-                            Some(previous)
-                        }
-                        Err(e) => {
-                            eprintln!("vayu publish: unusable incumbent: {e}");
-                            return 1;
-                        }
-                    },
-                }
-            }
-            Some(Ok(None)) | None => None,
-            Some(Err(detail)) => {
-                eprintln!("vayu publish: {detail}");
-                return 2;
-            }
+        match predecessor_from_view(&flags, &store_path, &label, &tld, &identity, now, "publish") {
+            Ok(predecessor) => predecessor,
+            Err(code) => return code,
         }
     } else {
         predecessor

@@ -940,7 +940,9 @@ fn http_get(addr: &str, target: &str) -> (u16, String, Vec<u8>) {
     // (descriptor pressure, a backlog race). The request is idempotent: retry the
     // WHOLE exchange a bounded number of times before giving up.
     let mut last_error = None;
-    for _ in 0..5 {
+    // A loaded runner schedules dozens of servers at once; give a slow child a real
+    // chance (~4.5s) before concluding anything.
+    for _ in 0..30 {
         let stream = match std::net::TcpStream::connect(addr) {
             Ok(stream) => stream,
             Err(e) => {
@@ -1976,4 +1978,150 @@ fn renewing_extends_the_term_inside_the_window_and_refuses_outside_it() {
     let server = spawn_serve_by_name(&store, "longterm.vayu", &in_window.to_string(), None);
     let (status, _head, _body) = http_get(&server.addr, "/");
     assert_eq!(status, 200);
+}
+
+// ---------------------------------------------------------------------------
+// ALIAS entries: one name redirecting to another. Resolution follows at most
+// three hops, refuses a cycle with ALIAS_LOOP, and demands every hop be live.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn an_alias_follows_within_budget_and_a_loop_refuses() {
+    let work = TempDir::new("alias");
+    let now = 1_800_000_000u64;
+
+    // The real site lives under target.vayu.
+    let store = publish_once(&work, "a0", "target.vayu", 0x21, now);
+    let seed = work.path().join("a0.hex");
+
+    // A fresh name aliases it: an alias-only REGISTER carries proof of work too.
+    for (name, byte) in [
+        ("nick.vayu", 0x22),
+        ("deep.vayu", 0x23),
+        ("deeper.vayu", 0x24),
+    ] {
+        let s = work.path().join(format!("{byte:02x}.hex"));
+        std::fs::write(&s, seed_hex(byte)).expect("writes");
+        let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+            .args([
+                "alias",
+                name,
+                "--to",
+                if name == "nick.vayu" {
+                    "target.vayu"
+                } else if name == "deep.vayu" {
+                    "nick.vayu"
+                } else {
+                    "deep.vayu"
+                },
+                "--store",
+                store.to_str().expect("utf8"),
+                "--key-file",
+                s.to_str().expect("utf8"),
+                "--now",
+                &now.to_string(),
+            ])
+            .output()
+            .expect("runs");
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{name}: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    // One hop resolves; two hops resolve; three hops resolve — the budget is three.
+    for name in ["nick.vayu", "deep.vayu", "deeper.vayu"] {
+        let server = spawn_serve_by_name(&store, name, &now.to_string(), None);
+        let (status, _head, body) = http_get(&server.addr, "/");
+        assert_eq!(status, 200, "{name}");
+        assert!(
+            body.starts_with(b"<!doctype html><title>a0</title>"),
+            "{name}: {}",
+            String::from_utf8_lossy(&body)
+        );
+        drop(server);
+    }
+
+    // The fourth hop is over budget: ALIAS_LOOP names the refusal even though no
+    // actual cycle exists — depth alone ends resolution.
+    let s4 = work.path().join("25.hex");
+    std::fs::write(&s4, seed_hex(0x25)).expect("writes");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "alias",
+            "toolong.vayu",
+            "--to",
+            "deeper.vayu",
+            "--store",
+            store.to_str().expect("utf8"),
+            "--key-file",
+            s4.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(0));
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "serve",
+            store.to_str().expect("utf8"),
+            "--name",
+            "toolong.vayu",
+            "--port",
+            "0",
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("ALIAS_LOOP"));
+
+    // An ACTUAL cycle: point target back at nick. Both verify; only the walk is
+    // impossible — and the loop is refused by name, before any content is served.
+    // The clock moves past the successor gap first (an UPDATE too close to its
+    // predecessor is TOO_SOON), and resolution is judged at that later instant so
+    // every hop stays live.
+    let cycle_at = now + 600;
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "alias",
+            "target.vayu",
+            "--to",
+            "nick.vayu",
+            "--store",
+            store.to_str().expect("utf8"),
+            "--key-file",
+            seed.to_str().expect("utf8"),
+            "--now",
+            &cycle_at.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "serve",
+            store.to_str().expect("utf8"),
+            "--name",
+            "nick.vayu",
+            "--port",
+            "0",
+            "--now",
+            &cycle_at.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("ALIAS_LOOP"), "{stderr}");
 }

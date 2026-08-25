@@ -24,7 +24,14 @@ use std::path::{Path, PathBuf};
 
 use crate::cid::Cid;
 use crate::domain::record_hash_from_bytes;
+use crate::record::AliasTarget;
 use crate::verify::{fully_released, peek, verify, Peeked, PrevView, Verdict};
+
+/// What a chain currently points at: content, or another ratified name.
+pub enum Pointer {
+    Cid(Cid),
+    Alias(AliasTarget),
+}
 
 /// One accepted record as the log holds it: exact bytes plus the identity they hash to.
 #[derive(Debug, Clone)]
@@ -333,13 +340,14 @@ impl View {
         Ok(verify(tip_bytes, Some(&parent), now, window_count))
     }
 
-    /// The cid entry the chain currently points at: from the tip, scan BACKWARDS to the
-    /// most recent record that carries one. A RENEW extends time and carries no pointer;
-    /// the name still resolves to whatever the last pointer-bearing record said.
-    pub fn resolved_root(&self, label: &str, tld: &str) -> Result<Cid, String> {
+    /// What the chain currently points at: from the tip, scan BACKWARDS to the most recent
+    /// record that carries an entry. A RENEW extends time and carries none, so a renewed
+    /// name still resolves to whatever was last published; an ALIAS entry names another
+    /// ratified name and the RESOLVER follows it within budget.
+    pub fn resolved_pointer(&self, label: &str, tld: &str) -> Result<Pointer, String> {
         let all = self.entries()?;
-        let mut mine: Vec<(u64, [u8; 32], [u8; 32], Entry)> = Vec::new();
-        for entry in all {
+        let mut mine: Vec<(u64, [u8; 32], [u8; 32], &Entry)> = Vec::new();
+        for entry in &all {
             let Ok(peeked) = peek(&entry.bytes) else {
                 continue;
             };
@@ -372,13 +380,22 @@ impl View {
             tip_index = index;
         }
         for index in (0..=tip_index).rev() {
-            if let Some(root) = first_cid_of(&mine[index].3.bytes) {
-                return Ok(root);
+            if let Some(pointer) = pointer_of(&mine[index].3.bytes) {
+                return Ok(pointer);
             }
         }
         Err(format!(
-            "no record in {label}.{tld}'s chain carries a cid entry"
+            "no record in {label}.{tld}'s chain carries an entry"
         ))
+    }
+
+    /// The cid entry the chain currently points at, when that is content rather than
+    /// another name.
+    pub fn resolved_root(&self, label: &str, tld: &str) -> Result<Cid, String> {
+        match self.resolved_pointer(label, tld)? {
+            Pointer::Cid(cid) => Ok(cid),
+            Pointer::Alias(_) => Err(format!("{label}.{tld} points at another name, not content")),
+        }
     }
 
     /// Every named chain in the log with its current tip, for `vayu names`.
@@ -440,9 +457,10 @@ fn owner_of(bytes: &[u8]) -> Result<[u8; 32], String> {
     Ok(key)
 }
 
-/// The cid entry a record points at, if it carries one — RENEW and the terminal ops
-/// carry none, and `None` is the honest answer for them.
-fn first_cid_of(bytes: &[u8]) -> Option<Cid> {
+/// The pointer a record's first entry carries, if any — RENEW and the terminal ops carry
+/// none, and `None` is the honest answer for them. Entry types follow REGISTRY.md: `cid`
+/// carries binary content, `alias` names another ratified name.
+fn pointer_of(bytes: &[u8]) -> Option<Pointer> {
     let value = crate::record::decode_record(bytes).ok()?;
     let crate::cbor::Value::Map(members) = value else {
         return None;
@@ -458,14 +476,35 @@ fn first_cid_of(bytes: &[u8]) -> Option<Cid> {
     let crate::cbor::Value::Map(fields) = first else {
         return None;
     };
-    let cid_bytes = fields.iter().find_map(|(k, v)| match k {
-        crate::cbor::Key::Text(name) if name == "value" => match v {
-            crate::cbor::Value::Bytes(bytes) => Some(bytes.clone()),
+    let entry_type = fields.iter().find_map(|(k, v)| match k {
+        crate::cbor::Key::Text(name) if name == "type" => match v {
+            crate::cbor::Value::Text(text) => Some(text.clone()),
             _ => None,
         },
         _ => None,
     })?;
-    Cid::from_bytes(&cid_bytes).ok()
+    let entry_value = fields.iter().find_map(|(k, v)| match k {
+        crate::cbor::Key::Text(name) if name == "value" => Some(v.clone()),
+        _ => None,
+    })?;
+    match entry_type.as_str() {
+        "cid" => match entry_value {
+            crate::cbor::Value::Bytes(bytes) => Cid::from_bytes(&bytes).ok().map(Pointer::Cid),
+            _ => None,
+        },
+        "alias" => match entry_value {
+            crate::cbor::Value::Text(text) => {
+                let (label, tld) = text.rsplit_once('.')?;
+                Some(Pointer::Alias(crate::record::AliasTarget {
+                    label: label.to_string(),
+                    tld: tld.to_string(),
+                }))
+            }
+            _ => None,
+        },
+        // ipns/txt entries are real entry types but name no local content to serve.
+        _ => None,
+    }
 }
 
 fn not_after_of(bytes: &[u8]) -> Result<u64, String> {

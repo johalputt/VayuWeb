@@ -10,6 +10,23 @@ it.
 
 ## [Unreleased]
 
+### Added — alias entries: one name pointing at another, followed within budget
+
+REGISTRY.md's third entry type is now real end to end. `vayu alias <name> --to <other>`
+signs a record whose single entry redirects (fresh names REGISTER with proof of work,
+held names UPDATE — the same incumbent rule every signing verb shares). Name-based
+reading follows: each hop's target is itself re-judged and must be LIVE, the walk is
+capped at REGISTRY.md's three hops per original request, a cycle refuses ALIAS_LOOP by
+name before any content is served, and depth beyond the budget refuses even without a
+cycle. The test walks a three-hop chain resolving to the target's bytes, a fourth hop
+refusing on budget alone, and a genuine two-name loop refusing by name.
+
+Under the hood resolution gained a typed pointer (`View::resolved_pointer`): the backward
+scan from the tip now returns content OR another name, and publish's predecessor rule was
+extracted into one helper that `alias` shares verbatim.
+
+Suite now 144 lib + 20 CLI + 7 serve.
+
 ### Added — `vayu renew`: the only op that extends time
 
 Publish's automatic UPDATE re-points content but never extends the term — until now, a name
