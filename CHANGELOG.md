@@ -10,6 +10,29 @@ it.
 
 ## [Unreleased]
 
+### Added — 3.1.6's second half: reading now enforces what publishing checks
+
+"The checker's rule set and the resolver's enforcement MUST be generated from one shared
+definition." Last round built the shared definition; this round makes reading CONSUME it. Every
+rule in the table now carries an `enforcement` classification — `csp` (the emitted headers block
+it in the browser; the rule cites the exact header substrings that do the blocking),
+`scan` (no header can express it: speculative DNS fires before any policy applies, meta refresh
+bypasses CSP entirely, nothing in CSP stops a service worker — so a serving surface must refuse
+the document itself), `advice` (external links are disclosed, not blocked), and `publish-check`
+(size ladders, index presence, manifest validity). The classification serializes into
+`conformance/rules.json`, and `rules.test.ts` holds its claims against the proxy's REAL header
+constants: a CSP that drifts fails CI even though the Rust source still matches itself — the
+`wasm-undeclared` rule asserts `'wasm-unsafe-eval'` must never appear globally.
+
+Enforcement itself landed on the serving surface, by construction drift-free because both sides
+call the same checker over the same bytes: every HTML document passes through `doctor::check`
+before it leaves, and one violating a scan-enforced rule is refused with a 403 carrying the
+rendered findings and their fixes — while non-HTML assets pass unscanned and clean documents are
+unaffected. At startup, `vayu serve` checks the WHOLE tree and refuses to serve one with
+publish-stopping findings ("you would be looking at something readers can never see"), printing
+everything it found. The bypass scenario is pinned by test: a tree hand-pinned past the checker
+— precisely the adversary 3.1.6 exists for — cannot be served, and the refusal names the rule.
+
 ### Fixed — `missing-index` findings rendered blank advice
 
 The rule existed as a const and fired correctly, but was never added to the doctor's `RULES`

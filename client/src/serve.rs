@@ -25,7 +25,8 @@ use std::sync::Arc;
 
 use crate::cid::Cid;
 use crate::dagnode::{read_path, WalkError, WalkLimits};
-use crate::doctor::{parse_manifest, Manifest};
+use crate::doctor::{self, parse_manifest, Enforcement, Manifest};
+use crate::publish::SiteFile;
 use crate::store::BlockStore;
 
 /// The default CSP, byte-identical to CONTENT-SECURITY.md section 2 via the implementation of
@@ -222,6 +223,15 @@ fn mime_of(path: &str) -> &'static str {
 
 /// Route one request against one pinned tree. The manifest — part of the published tree, read
 /// through the same verified traversal — supplies index/notFound/fallback.
+///
+/// 3.1.6's second half lives here: every HTML document is checked with the PUBLISHER'S OWN
+/// checker code before it leaves, and a document violating any [`Enforcement::Scan`] rule is
+/// REFUSED rather than served. These are exactly the rules no header can express — speculative
+/// DNS fires before any policy applies, meta refresh bypasses CSP entirely, nothing in CSP
+/// stops a service worker — so a serving surface that does not scan simply serves them. A
+/// checker-passes-resolver-refuses mismatch cannot happen by construction: both sides call the
+/// same `doctor::check` over the same bytes. (The header-expressible rules are enforced by the
+/// emitted CSP itself; see `Enforcement`.)
 pub fn route(
     store: &BlockStore,
     root: &Cid,
@@ -259,12 +269,8 @@ pub fn route(
 
     let body = try_file(&request.segments);
     if let Some(body) = body {
-        return Ok(Response {
-            status: 200,
-            reason: "OK",
-            content_type: mime_of(&requested),
-            body,
-        });
+        let content_type = mime_of(&requested);
+        return scan_and_answer(&requested, content_type, body);
     }
 
     // Not an exact file. If it is a directory, its index document answers instead.
@@ -279,12 +285,7 @@ pub fn route(
     };
     if let Some(body) = try_file(&directory_index) {
         let index_mime = mime_of(index_name.as_str());
-        return Ok(Response {
-            status: 200,
-            reason: "OK",
-            content_type: index_mime,
-            body,
-        });
+        return scan_and_answer(&directory_index.join("/"), index_mime, body);
     }
 
     // Deep-link miss: notFound with 404, else fallback with 200, else bare 404.
@@ -315,6 +316,61 @@ pub fn route(
         reason: "Not Found",
         content_type: "text/plain; charset=utf-8",
         body: b"not found in this tree\n".to_vec(),
+    })
+}
+
+/// The last step before anything is served: run the publisher's own checker over the document
+/// and refuse it if it violates a rule no header can enforce. Non-HTML passes untouched — the
+/// CSP governs how the BROWSER treats those, and scanning binary blobs for HTML rules is
+/// nonsense. A refusal carries the rendered findings, because this surface serves the person
+/// who published the tree; a mystery refusal is what 3.1.6 exists to prevent.
+fn scan_and_answer(
+    path: &str,
+    content_type: &'static str,
+    body: Vec<u8>,
+) -> Result<Response, WalkError> {
+    if !content_type.starts_with("text/html") {
+        return Ok(Response {
+            status: 200,
+            reason: "OK",
+            content_type,
+            body,
+        });
+    }
+    let files = [SiteFile {
+        path: path.to_string(),
+        content: body.clone(),
+    }];
+    let findings = doctor::check(&files);
+    let refused: Vec<_> = findings
+        .into_iter()
+        .filter(|finding| {
+            doctor::RULES
+                .iter()
+                .any(|rule| rule.id == finding.rule && rule.enforcement == Enforcement::Scan)
+        })
+        .collect();
+    if refused.is_empty() {
+        return Ok(Response {
+            status: 200,
+            reason: "OK",
+            content_type,
+            body,
+        });
+    }
+    let mut detail = String::from(
+        "this document violates rules that headers alone cannot enforce \
+         (the browser would render it half-blocked, which is worse than a clear refusal):\n\n",
+    );
+    for finding in &refused {
+        detail.push_str(&finding.render());
+        detail.push('\n');
+    }
+    Ok(Response {
+        status: 403,
+        reason: "Forbidden",
+        content_type: "text/plain; charset=utf-8",
+        body: detail.into_bytes(),
     })
 }
 

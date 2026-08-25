@@ -241,3 +241,79 @@ fn head_answers_like_get_without_a_body() {
     let head_end = raw.windows(4).position(|w| w == b"\r\n\r\n").expect("end") + 4;
     assert_eq!(raw.len(), head_end, "HEAD carries no body bytes");
 }
+
+// ---------------------------------------------------------------------------
+// 3.1.6's second half: documents violating SCAN-enforced rules are refused,
+// because no header can enforce those rules for the browser.
+// ---------------------------------------------------------------------------
+
+fn sneaky_files() -> Vec<SiteFile> {
+    vec![
+        SiteFile {
+            path: "index.html".into(),
+            content: b"<!doctype html><title>home</title>".to_vec(),
+        },
+        SiteFile {
+            // Speculative loading leaks the reader before any CSP can apply -- a serving
+            // surface must refuse the DOCUMENT.
+            path: "leaky.html".into(),
+            content: b"<!doctype html><head><link rel=\"dns-prefetch\" href=\"https://evil.example\"></head><body>hi</body>".to_vec(),
+        },
+        SiteFile {
+            path: "clean.html".into(),
+            content: b"<!doctype html><p>perfectly fine</p>".to_vec(),
+        },
+        SiteFile {
+            path: ".vayu/manifest.json".into(),
+            content: br#"{"version":1}"#.to_vec(),
+        },
+    ]
+}
+
+#[test]
+fn a_document_violating_a_scan_rule_is_refused_while_clean_ones_still_serve() {
+    let fixture = serve_tree("scan", &sneaky_files());
+
+    let (status, head, body) = request(&fixture, "/leaky.html", "GET");
+    assert_eq!(status, 403, "{head}");
+    let detail = String::from_utf8_lossy(&body);
+    assert!(detail.contains("[speculative-link]"), "{detail}");
+    assert!(detail.contains("Fix:"), "{detail}");
+
+    // The refusal is per-document, not per-tree: everything else serves normally.
+    let (status, ..) = request(&fixture, "/clean.html", "GET");
+    assert_eq!(status, 200);
+    let (status, ..) = request(&fixture, "/", "GET");
+    assert_eq!(status, 200);
+
+    // The security headers ride along on refusals too.
+    assert!(
+        head.to_ascii_lowercase().contains("x-content-type-options"),
+        "{head}"
+    );
+}
+
+#[test]
+fn meta_refresh_is_scan_enforced_and_binary_assets_pass_unscanned() {
+    let refresh: Vec<SiteFile> = vec![
+        SiteFile {
+            path: "redirect.html".into(),
+            content: b"<!doctype html><head><meta http-equiv=\"refresh\" content=\"0;url=https://away.example\"></head>".to_vec(),
+        },
+        SiteFile {
+            // A binary file whose bytes happen to contain HTML-looking text must NOT be
+            // scanned as if it were a document.
+            path: "innocent.bin".into(),
+            content: b"<link rel=\"dns-prefetch\" href=\"https://x\">".to_vec(),
+        },
+        SiteFile {
+            path: ".vayu/manifest.json".into(),
+            content: br#"{"version":1}"#.to_vec(),
+        },
+    ];
+    let fixture = serve_tree("refresh", &refresh);
+    let (status, ..) = request(&fixture, "/redirect.html", "GET");
+    assert_eq!(status, 403);
+    let (status, ..) = request(&fixture, "/innocent.bin", "GET");
+    assert_eq!(status, 200, "non-HTML is not scanned as HTML");
+}

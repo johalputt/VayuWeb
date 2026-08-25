@@ -131,20 +131,36 @@ fn cmd_serve(argv: &[String]) -> i32 {
             return 2;
         }
     };
-    // The root must exist before the URL is announced: a server that prints an address and
-    // then 404s every path because the tree was never pinned has wasted everyone's time.
-    match vayuweb_client::dagnode::read_dir_at(&store, &root, &[], &WalkLimits::default()) {
-        Ok(_) => {}
+    // 3.1.6, enforced at the door: a preview that serves what `vayu publish` would REFUSE is
+    // the exact checker-passes-resolver-refuses mismatch the specification calls worse than no
+    // checker -- you would be looking at something readers can never see. So the tree is
+    // checked with the publisher's own checker before the URL is announced. Warnings print but
+    // do not stop; errors stop everything.
+    let files = match vayuweb_client::dagnode::collect_files(&store, &root, &WalkLimits::default())
+    {
+        Ok(files) => files,
         Err(e) => {
-            // A single-file root is legal too; try it as a file before refusing.
-            match vayuweb_client::dagnode::read_path(&store, &root, &[], &WalkLimits::default()) {
-                Ok(_) => {}
-                _ => {
-                    eprintln!("vayu serve: that root is not readable from this store: {e}");
-                    return 2;
-                }
-            }
+            eprintln!("vayu serve: that root is not readable from this store: {e}");
+            return 2;
         }
+    };
+    let findings = vayuweb_client::doctor::check(&files);
+    let error_count = findings
+        .iter()
+        .filter(|f| f.severity == vayuweb_client::doctor::Severity::Error)
+        .count();
+    if error_count > 0 {
+        eprintln!(
+            "vayu serve: refusing to serve this tree -- {error_count} finding(s) stop a \
+             publish, so serving it would show you a site no reader can get:"
+        );
+        for finding in &findings {
+            eprintln!("{}", finding.render());
+        }
+        return 1;
+    }
+    for finding in &findings {
+        eprintln!("warning: {}", finding.render().trim_start());
     }
     let root_text_owned = root.to_text();
     let handle = match serve::spawn(store, root, port, WalkLimits::default()) {

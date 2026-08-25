@@ -13,6 +13,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+import { SECURITY_HEADERS } from './proxy.ts';
+
 const here = fileURLToPath(new URL('.', import.meta.url));
 const artifact = JSON.parse(readFileSync(`${here}/../../conformance/rules.json`, 'utf8'));
 
@@ -65,4 +67,60 @@ test('ids are stable kebab-case tokens fit to compile against', () => {
   for (const rule of artifact.rules) {
     assert.match(rule.id, /^[a-z][a-z0-9-]*$/, `${rule.id}: kebab-case`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// 3.1.6's second half: the enforcement matrix. Each rule says HOW reading
+// enforces it; these tests hold that claim against the REAL header constants
+// the proxy emits -- so a header that drifts fails here even though the Rust
+// source still matches itself perfectly.
+// ---------------------------------------------------------------------------
+
+const ENFORCEMENT_KINDS = ['csp', 'scan', 'advice', 'publish-check'] as const;
+
+test('every rule declares a known enforcement mechanism', () => {
+  for (const rule of artifact.rules) {
+    assert.ok(
+      (ENFORCEMENT_KINDS as readonly string[]).includes(rule.enforcement),
+      `${rule.id}: enforcement must be one of ${ENFORCEMENT_KINDS.join(', ')}`,
+    );
+    assert.ok(Array.isArray(rule.evidence), `${rule.id}: evidence is an array`);
+    assert.ok(Array.isArray(rule.absent), `${rule.id}: absent is an array`);
+  }
+});
+
+test('csp-enforced rules cite substrings the proxy REALLY emits -- and nothing it does not', () => {
+  const headerValue = (name: string): string => {
+    const hit = SECURITY_HEADERS.find(([key]) => key === name);
+    assert.ok(hit, `SECURITY_HEADERS carries ${name}`);
+    return hit[1];
+  };
+  for (const rule of artifact.rules) {
+    if (rule.enforcement !== 'csp') continue;
+    assert.ok(rule.evidence.length > 0, `${rule.id}: a csp rule cites its evidence`);
+    for (const { header, contains } of rule.evidence) {
+      assert.ok(
+        headerValue(header).includes(contains),
+        `${rule.id}: ${header} must contain "${contains}" -- the rule's read-time enforcement depends on it`,
+      );
+    }
+    for (const { header, omit } of rule.absent) {
+      assert.ok(
+        !headerValue(header).includes(omit),
+        `${rule.id}: ${header} must NOT contain "${omit}" -- its presence would grant what this rule refuses`,
+      );
+    }
+  }
+});
+
+test('scan-enforced rules are exactly the ones no header can express', () => {
+  // Speculative DNS fires before any policy applies; meta refresh bypasses CSP entirely;
+  // nothing in CSP stops a service worker. If the artifact ever marks one of these "csp",
+  // or marks a genuinely header-blockable rule "scan", this set drifts and CI fails.
+  assert.deepEqual(
+    artifact.rules
+      .filter((r: { enforcement: string }) => r.enforcement === 'scan')
+      .map((r: { id: string }) => r.id),
+    ['speculative-link', 'meta-refresh', 'service-worker'],
+  );
 });

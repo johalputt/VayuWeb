@@ -378,6 +378,41 @@ pub fn read_dir_at(
     }
 }
 
+/// Collect every file of a tree as [`SiteFile`]s — the shape the doctor's checker consumes.
+/// This is what lets a serving surface run the SAME checks the publisher ran, against the SAME
+/// code, without either side trusting the other's say-so. Bounds apply to depth and total
+/// bytes exactly as everywhere else.
+pub fn collect_files(
+    store: &BlockStore,
+    root: &Cid,
+    limits: &WalkLimits,
+) -> Result<Vec<crate::publish::SiteFile>, WalkError> {
+    let mut files = Vec::new();
+    let mut stack: Vec<(Vec<String>, Cid)> = vec![(Vec::new(), root.clone())];
+    while let Some((prefix, cid)) = stack.pop() {
+        match read_node(store, &cid, limits)? {
+            Node::Directory(entries) => {
+                for entry in entries {
+                    let mut path = prefix.clone();
+                    path.push(entry.name);
+                    stack.push((path, entry.cid));
+                }
+            }
+            Node::Raw(_) | Node::File { .. } => {
+                let content = {
+                    let segments: Vec<&str> = prefix.iter().map(String::as_str).collect();
+                    read_path(store, &root.clone(), &segments, limits)?
+                };
+                files.push(crate::publish::SiteFile {
+                    path: prefix.join("/"),
+                    content,
+                });
+            }
+        }
+    }
+    Ok(files)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

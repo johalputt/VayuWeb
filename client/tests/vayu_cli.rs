@@ -313,3 +313,50 @@ fn usage_mistakes_exit_two_with_the_text() {
     assert!(help.status.success());
     assert!(String::from_utf8_lossy(&help.stdout).contains("USAGE"));
 }
+
+// ---------------------------------------------------------------------------
+// 3.1.6's second half, at the door: a hand-pinned tree (the checker bypassed,
+// which is precisely the adversary this clause exists for) cannot be served.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn serve_refuses_a_tree_the_checker_would_stop() {
+    let work = TempDir::new("serve-refused");
+    let store = work.path().join("store");
+    let opened = vayuweb_client::store::BlockStore::open(&store).expect("opens");
+
+    // Pin a violating document DIRECTLY -- no doctor in the loop, exactly as a
+    // checker-bypassing publisher would do it.
+    let dirty = vayuweb_client::publish::SiteFile {
+        path: "index.html".into(),
+        content: b"<!doctype html><title>t</title><script>steal()</script>".to_vec(),
+    };
+    let (blocks, root) =
+        vayuweb_client::publish::import_site(std::slice::from_ref(&dirty)).expect("imports");
+    opened
+        .put_all(blocks.into_iter().map(|b| (b.cid.clone(), b.bytes)))
+        .expect("pins");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "serve",
+            store.to_str().expect("utf8"),
+            "--root",
+            root.to_text().as_str(),
+            "--port",
+            "0",
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "a dirty tree refuses to serve"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("refusing to serve"), "{stderr}");
+    assert!(
+        stderr.contains("[inline-script]"),
+        "the finding names its rule"
+    );
+}

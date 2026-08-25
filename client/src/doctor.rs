@@ -59,7 +59,39 @@ impl Severity {
     }
 }
 
-/// One rule, stated once — what, why, and the concrete fix 3.1.1 demands.
+/// How a rule is enforced at READ time — 3.1.6's second half. The checker refuses at publish;
+/// the resolver must then refuse the same things, by whichever mechanism actually works:
+///
+/// - [`Enforcement::Csp`] — the emitted security headers block it in the browser; the rule's
+///   `evidence` names the header substrings that do the blocking, and the registry-side test
+///   checks those substrings against the REAL header constants, so the claim cannot rot.
+/// - [`Enforcement::Scan`] — no header can express this one (speculative DNS happens before
+///   any policy applies; meta refresh bypasses CSP entirely; nothing in CSP stops a service
+///   worker). A serving surface must refuse the DOCUMENT itself.
+/// - [`Enforcement::Advice`] — allowed by design (external links are disclosed, not blocked).
+/// - [`Enforcement::Publish`] — meaningful only at publish time: size ladders, index presence,
+///   manifest validity. Read-time routing handles their absence naturally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Enforcement {
+    Csp,
+    Scan,
+    Advice,
+    Publish,
+}
+
+impl Enforcement {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Csp => "csp",
+            Self::Scan => "scan",
+            Self::Advice => "advice",
+            Self::Publish => "publish-check",
+        }
+    }
+}
+
+/// One rule, stated once — what, why, the concrete fix 3.1.1 demands, AND how reading enforces
+/// it. The whole struct serializes into `conformance/rules.json`, 3.1.6's shared definition.
 pub struct Rule {
     pub id: &'static str,
     /// What will not work, in one line, in plain language.
@@ -68,15 +100,29 @@ pub struct Rule {
     pub why: &'static str,
     /// A concrete fix (a message without a remedy is a defect in the checker).
     pub fix: &'static str,
+    /// The read-time mechanism (see [`Enforcement`]).
+    pub enforcement: Enforcement,
+    /// `(header-name, required-substring)` pairs a serving surface MUST emit for this rule's
+    /// header-enforcement claim to be true. Empty unless enforcement is Csp or Advice-via-header.
+    pub evidence: &'static [(&'static str, &'static str)],
+    /// `(header-name, forbidden-substring)` pairs — constraints enforced by ABSENCE (the wasm
+    /// relaxation is granted only by adding `'wasm-unsafe-eval'`; its absence IS the block).
+    pub evidence_absent: &'static [(&'static str, &'static str)],
 }
 
 macro_rules! rule {
-    ($id:ident, ($text_id:literal, $what:literal, $why:literal, $fix:literal)) => {
+    (
+        $id:ident, ($text_id:literal, $what:literal, $why:literal, $fix:literal),
+        $kind:ident, $evidence:expr, $absent:expr
+    ) => {
         pub const $id: Rule = Rule {
             id: $text_id,
             what: $what,
             why: $why,
             fix: $fix,
+            enforcement: Enforcement::$kind,
+            evidence: $evidence,
+            evidence_absent: $absent,
         };
     };
 }
@@ -86,97 +132,110 @@ rule!(INLINE_STYLE, (
     "inline <style> or style= attribute",
     "VayuWeb blocks inline styles: an attribute selector plus a url() reads your page one character at a time, and a blocked page renders half-dressed.",
     "move the styles into a .css file in your site folder and reference it with <link rel=\"stylesheet\">."
-));
+), Csp, &[("content-security-policy", "style-src 'self'")], &[]);
 rule!(INLINE_SCRIPT, (
     "inline-script",
     "inline <script>",
     "VayuWeb blocks inline scripts: they are the main way an injected page steals keystrokes, so a blocked one means your page silently does nothing.",
     "move the code into a .js file in your site folder and load it with <script src=\"app.js\">."
-));
+), Csp, &[("content-security-policy", "script-src 'self'")], &[]);
 rule!(REMOTE_SUBRESOURCE, (
     "remote-subresource",
     "a subresource loaded from another server",
     "Remote images, scripts and styles do not load on VayuWeb. Every request to another server tells that server who is reading your page.",
     "save the file into your site folder and reference it relatively."
-));
+), Csp, &[
+    ("content-security-policy", "img-src 'self'"),
+    ("content-security-policy", "script-src 'self'"),
+    ("content-security-policy", "font-src 'self'"),
+    ("content-security-policy", "media-src 'self'"),
+    ("content-security-policy", "connect-src 'self'"),
+    ("content-security-policy", "manifest-src 'self'"),
+], &[]);
 rule!(EXTERNAL_LINK, (
     "external-link",
     "a link that leaves VayuWeb",
     "This works, but the reader is shown that the link goes outside VayuWeb before following it. That is intended.",
     "nothing needed, unless the target has a copy inside your site folder."
-));
+), Advice, &[], &[]);
 rule!(DATA_IMAGE, (
     "data-image",
     "a data: image",
     "data: images are blocked along with other inline content, because their bytes cannot be checked against an address the way real files can.",
     "save the image as a file in your site folder and reference it relatively."
-));
+), Csp, &[("content-security-policy", "img-src 'self'")], &[]);
 rule!(BASE_TAG, (
     "base-tag",
     "<base>",
     "<base> rewrites where every relative link on the page points, which is exactly what a tampered page would want. VayuWeb refuses pages that carry one.",
     "remove it and write links the way they should resolve."
-));
+), Csp, &[("content-security-policy", "base-uri 'none'")], &[]);
 rule!(IFRAME, (
     "iframe",
     "<iframe>",
     "A frame can host content from anywhere while showing your page's name, so VayuWeb does not render frames at all.",
     "link to the content directly instead of framing it."
-));
+), Csp, &[
+    ("content-security-policy", "frame-src 'none'"),
+    ("content-security-policy", "child-src 'none'"),
+    ("content-security-policy", "frame-ancestors 'none'"),
+], &[]);
 rule!(FORM_REMOTE_ACTION, (
     "form-remote-action",
     "a form posting to another server",
     "Submitting the form sends your reader's input to another server without VayuWeb being able to say so, and static sites have no server to receive it.",
     "point the action at a same-site handler, or replace the form with a mailto: link."
-));
+), Csp, &[("content-security-policy", "form-action 'self'")], &[]);
 rule!(SPECULATIVE_LINK, (
     "speculative-link",
     "a speculative-loading <link rel>",
     "dns-prefetch, preconnect, prefetch, preload, prerender and modulepreload all contact another server on the speculation that a reader will click. On VayuWeb they do nothing except leak who is reading.",
     "remove the tag; the resource loads when it is used."
-));
+), Scan, &[], &[]);
 rule!(META_REFERRER, (
     "meta-referrer",
     "<meta name=\"referrer\">",
     "The referrer policy is part of the browser-security profile VayuWeb sets for the whole reader session; a page cannot change it.",
     "remove the tag."
-));
+), Csp, &[("referrer-policy", "no-referrer")], &[]);
 rule!(META_REFRESH, (
     "meta-refresh",
     "<meta http-equiv=\"refresh\">",
     "Auto-redirecting a reader to another address is indistinguishable from open-redirect abuse, so VayuWeb does not honour it.",
     "link to the destination instead, or serve the destination's content directly."
-));
+), Scan, &[], &[]);
 rule!(WASM_UNDECLARED, (
     "wasm-undeclared",
     "WebAssembly without a manifest declaration",
     "WebAssembly runs only when your manifest declares csp.wasm: true, and the reader is told that your site uses it. Undeclared, it is blocked and your app will not start.",
     "add \"csp\": { \"wasm\": true } to .vayu/manifest.json, or ship JavaScript instead."
-));
+), Csp,
+&[("content-security-policy", "require-trusted-types-for 'script'")],
+&[("content-security-policy", "'wasm-unsafe-eval'")]);
 rule!(SERVICE_WORKER, (
     "service-worker",
     "service-worker registration",
     "A service worker keeps running after the reader leaves, which VayuWeb promises never to allow. Registration is blocked, so code depending on one misbehaves.",
     "remove the registration; cache nothing beyond the reader's visit."
-));
+), Scan, &[], &[]);
 rule!(MISSING_INDEX, (
     "missing-index",
     "no index document",
     "A visitor opening your site's root address has no page to land on.",
     "add the index document, or declare \"index\" in .vayu/manifest.json pointing at your landing page."
-));
+), Publish, &[], &[]);
 rule!(SITE_SIZE_REFUSE, (
     "site-size-refuse",
     "the whole site is over the hard size ceiling",
     "VayuWeb resolvers refuse to serve a site beyond 2 GiB outright, so publishing one means shipping something nobody can open.",
     "split the site into smaller ones, or move large downloads to links outside it."
-));
+), Publish, &[], &[]);
 rule!(SITE_SIZE_CONFIRM, (
     "site-size-confirm",
     "the whole site is over the confirm threshold",
     "Sites this large are slow to pin, slow to verify and slow for readers on modest machines; VayuWeb asks you to choose that deliberately.",
     "continue if you meant it -- publishing will ask for confirmation."
-));
+), Publish, &[], &[]);
 rule!(
     SITE_SIZE_WARN,
     (
@@ -184,20 +243,23 @@ rule!(
         "the whole site is getting large",
         "A big tree takes longer to verify on every reader's machine, every time.",
         "nothing required; consider trimming assets you no longer serve."
-    )
+    ),
+    Publish,
+    &[],
+    &[]
 );
 rule!(ENTRY_COUNT, (
     "entry-count",
     "very many files in one directory",
     "Tens of thousands of entries in one folder slow every listing and lookup for every reader.",
     "consider nesting folders instead of one flat directory."
-));
+), Publish, &[], &[]);
 rule!(FILE_SIZE_REFUSE, (
     "file-size-refuse",
     "a single file is over the hard size ceiling",
     "Files beyond 256 MiB cannot be fetched within VayuWeb's resource limits, so readers would get an error where the file should be.",
     "compress it, split it, or link to somewhere outside VayuWeb."
-));
+), Publish, &[], &[]);
 rule!(
     FILE_SIZE_WARN,
     (
@@ -205,14 +267,17 @@ rule!(
         "a single file is quite large",
         "One big file makes the whole tree slower to pin and verify.",
         "nothing required; consider compressing it."
-    )
+    ),
+    Publish,
+    &[],
+    &[]
 );
 rule!(MANIFEST_INVALID, (
     "manifest-invalid",
     ".vayu/manifest.json is not usable",
     "The manifest tells VayuWeb where your landing page is and what your site needs; one that cannot be read means the checker cannot vouch for anything else.",
     "fix the JSON in .vayu/manifest.json -- it must be a single JSON object."
-));
+), Publish, &[], &[]);
 
 /// The whole rule set, in one place — the artifact another implementation consumes or generates
 /// from, per PUBLISHING.md 3.1.6.

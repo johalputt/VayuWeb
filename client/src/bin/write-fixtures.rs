@@ -478,7 +478,10 @@ fn write_rules() {
     );
     json.push_str(
         "    \"what/why/fix are the exact strings a finding renders; id is the contract both \
-         sides compile against.\"\n  ],\n",
+         sides compile against; enforcement says how READING enforces each rule (csp = the \
+         emitted headers block it, evidence names the substrings; scan = no header can express \
+         it, serving surfaces must refuse the document; publish-check = meaningful only at \
+         publish).\"\n  ],\n",
     );
     json.push_str("  \"rules\": [\n");
     for (index, rule) in RULES.iter().enumerate() {
@@ -486,7 +489,45 @@ fn write_rules() {
         json.push_str(&format!("      \"id\": {},\n", json_string(rule.id)));
         json.push_str(&format!("      \"what\": {},\n", json_string(rule.what)));
         json.push_str(&format!("      \"why\": {},\n", json_string(rule.why)));
-        json.push_str(&format!("      \"fix\": {}\n", json_string(rule.fix)));
+        json.push_str(&format!("      \"fix\": {},\n", json_string(rule.fix)));
+        // 3.1.6's second half: HOW reading enforces the rule. `evidence` names the header
+        // substrings that do the blocking; the registry-side test checks them against the REAL
+        // header constants, so a header that drifts fails CI even though this file still
+        // matches its Rust source.
+        json.push_str(&format!(
+            "      \"enforcement\": {},\n",
+            json_string(rule.enforcement.as_str())
+        ));
+        json.push_str("      \"evidence\": [\n");
+        for (at, (header, substring)) in rule.evidence.iter().enumerate() {
+            let comma = if at + 1 == rule.evidence.len() {
+                ""
+            } else {
+                ","
+            };
+            json.push_str(&format!(
+                "        {{\"header\": {}, \"contains\": {}}}{}\n",
+                json_string(header),
+                json_string(substring),
+                comma
+            ));
+        }
+        json.push_str("      ],\n");
+        json.push_str("      \"absent\": [\n");
+        for (at, (header, substring)) in rule.evidence_absent.iter().enumerate() {
+            let comma = if at + 1 == rule.evidence_absent.len() {
+                ""
+            } else {
+                ","
+            };
+            json.push_str(&format!(
+                "        {{\"header\": {}, \"omit\": {}}}{}\n",
+                json_string(header),
+                json_string(substring),
+                comma
+            ));
+        }
+        json.push_str("      ]\n");
         if index + 1 == RULES.len() {
             json.push_str("    }\n");
         } else {

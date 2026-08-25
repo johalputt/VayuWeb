@@ -12,14 +12,15 @@ with 404 or `fallback` with 200. The whole normative sequence of section 1 now e
 locally, and its output is READABLE: `vayu publish` checks, builds, addresses, pins and signs;
 `vayu serve` reads one pinned tree back over loopback HTTP through a verified traversal
 (`client/src/dagnode.rs`, `client/src/serve.rs`) with this document's routing rule and
-CONTENT-SECURITY.md's header set byte for byte. 3.1.6's shared definition now exists as an
-artifact both implementations verify — `conformance/rules.json`, generated from the doctor's
-`RULES` table and checked from the registry side by `rules.test.ts` under CI's
-regenerate-and-diff discipline.
+CONTENT-SECURITY.md's header set byte for byte. 3.1.6 is now satisfied END TO END for this
+surface: every rule carries an enforcement classification (header-enforced, document-scan,
+advice, publish-only) in `conformance/rules.json`, the registry side verifies those claims
+against the proxy's actual header constants, and the serving surface runs the publisher's own
+checker over HTML before answering — refusing documents whose violations no header can express,
+and refusing at startup any tree that would fail a publish.
 What still keeps this a Draft: reading requires the publisher's own store and root CID — no
-resolver resolves names for anyone else, the resolver does not yet ENFORCE per-rule at read time
-(3.1.6's second half is still open), block exchange needs a transport that does not exist, the
-key story is a headless seed file rather than an OS keystore, and the GUI does not exist. A
+resolver resolves names for anyone else, block exchange needs a transport that does not exist,
+the key story is a headless seed file rather than an OS keystore, and the GUI does not exist. A
 Draft stays a Draft until a stranger can find and read what a stranger published.
 
 ## 0. The design rule
