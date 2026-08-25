@@ -10,7 +10,31 @@ it.
 
 ## [Unreleased]
 
-## [Unreleased]
+### Fixed — `missing-index` findings rendered blank advice
+
+The rule existed as a const and fired correctly, but was never added to the doctor's `RULES`
+table — so `render()`'s lookup silently fell back to empty text, and the one message every
+first-time publisher sees ("no index document") carried no what, no why, and no fix. Found while
+building 3.1.6's shared definition: generating the artifact forced an enumeration that exposed
+the gap. The lookup is now guarded unconditionally (a rule firing a finding without a table entry
+panics at the point of construction rather than rendering blank in production), a new test
+renders every rule in the table and requires complete advice, and seven size/manifest rules that
+previously existed only as string literals joined the table with written what/why/fix text of
+their own.
+
+### Added — `rules.json`: PUBLISHING.md 3.1.6's one shared definition now exists
+
+"The checker's rule set and the resolver's enforcement MUST be generated from one shared
+definition, so the two cannot drift." The artifact half of that requirement is now real:
+`conformance/rules.json` is generated from the doctor's `RULES` table by the same binary that
+builds the record fixtures, carries each rule's id plus its exact what/why/fix strings, and is
+verified from the registry side by `registry/src/rules.test.ts`, which independently states the
+expected id set — a rule added or removed without acknowledgment on both sides fails CI twice.
+The same regenerate-and-diff CI step covers it.
+
+What this deliberately is not: the resolver does not yet ENFORCE anything per-rule at read time.
+3.1.6 has two halves — one shared definition (now real) and resolver-side consumption (still
+open). The status line says so.
 
 ### Added — the loop closes: `vayu serve` makes a published site readable
 

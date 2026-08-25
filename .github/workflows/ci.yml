@@ -266,20 +266,23 @@ jobs:
           cargo fmt --check
           cargo clippy --all-targets -- -D warnings
 
-      - name: Regenerate the client-built fixtures and require no diff
+      - name: Regenerate the client-built fixtures and rule table, require no diff
         # The fixtures are records BUILT by this crate and verified by the registry job's
         # implementation; regeneration must be byte-identical or the builder is no longer a
-        # pure function of its fixed inputs, which is how cross-language drift would announce
-        # itself before it ever reached the network.
+        # pure function of its fixed inputs. rules.json is PUBLISHING.md 3.1.6's one shared
+        # definition of the checker's rules: the same regenerate-and-diff discipline keeps
+        # both languages from drifting apart about what a rule is.
         run: |
           set -euo pipefail
           cargo run --release --locked --bin write-fixtures
-          if ! git diff --quiet -- ../conformance/client-built.json; then
-            echo "::error::conformance/client-built.json is stale — run 'cargo run --bin write-fixtures' and commit"
-            git diff --stat -- ../conformance/client-built.json
-            exit 1
-          fi
-          echo "OK — the committed fixtures match a fresh build."
+          for f in ../conformance/client-built.json ../conformance/rules.json; do
+            if ! git diff --quiet -- "$f"; then
+              echo "::error::$f is stale — run 'cargo run --bin write-fixtures' and commit"
+              git diff --stat -- "$f"
+              exit 1
+            fi
+          done
+          echo "OK — the committed artifacts match a fresh build."
 
   ci-pass:
     name: ci-pass

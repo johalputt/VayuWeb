@@ -165,6 +165,54 @@ rule!(MISSING_INDEX, (
     "A visitor opening your site's root address has no page to land on.",
     "add the index document, or declare \"index\" in .vayu/manifest.json pointing at your landing page."
 ));
+rule!(SITE_SIZE_REFUSE, (
+    "site-size-refuse",
+    "the whole site is over the hard size ceiling",
+    "VayuWeb resolvers refuse to serve a site beyond 2 GiB outright, so publishing one means shipping something nobody can open.",
+    "split the site into smaller ones, or move large downloads to links outside it."
+));
+rule!(SITE_SIZE_CONFIRM, (
+    "site-size-confirm",
+    "the whole site is over the confirm threshold",
+    "Sites this large are slow to pin, slow to verify and slow for readers on modest machines; VayuWeb asks you to choose that deliberately.",
+    "continue if you meant it -- publishing will ask for confirmation."
+));
+rule!(
+    SITE_SIZE_WARN,
+    (
+        "site-size-warn",
+        "the whole site is getting large",
+        "A big tree takes longer to verify on every reader's machine, every time.",
+        "nothing required; consider trimming assets you no longer serve."
+    )
+);
+rule!(ENTRY_COUNT, (
+    "entry-count",
+    "very many files in one directory",
+    "Tens of thousands of entries in one folder slow every listing and lookup for every reader.",
+    "consider nesting folders instead of one flat directory."
+));
+rule!(FILE_SIZE_REFUSE, (
+    "file-size-refuse",
+    "a single file is over the hard size ceiling",
+    "Files beyond 256 MiB cannot be fetched within VayuWeb's resource limits, so readers would get an error where the file should be.",
+    "compress it, split it, or link to somewhere outside VayuWeb."
+));
+rule!(
+    FILE_SIZE_WARN,
+    (
+        "file-size-warn",
+        "a single file is quite large",
+        "One big file makes the whole tree slower to pin and verify.",
+        "nothing required; consider compressing it."
+    )
+);
+rule!(MANIFEST_INVALID, (
+    "manifest-invalid",
+    ".vayu/manifest.json is not usable",
+    "The manifest tells VayuWeb where your landing page is and what your site needs; one that cannot be read means the checker cannot vouch for anything else.",
+    "fix the JSON in .vayu/manifest.json -- it must be a single JSON object."
+));
 
 /// The whole rule set, in one place — the artifact another implementation consumes or generates
 /// from, per PUBLISHING.md 3.1.6.
@@ -182,6 +230,14 @@ pub const RULES: &[&Rule] = &[
     &META_REFRESH,
     &WASM_UNDECLARED,
     &SERVICE_WORKER,
+    &MISSING_INDEX,
+    &SITE_SIZE_REFUSE,
+    &SITE_SIZE_CONFIRM,
+    &SITE_SIZE_WARN,
+    &ENTRY_COUNT,
+    &FILE_SIZE_REFUSE,
+    &FILE_SIZE_WARN,
+    &MANIFEST_INVALID,
 ];
 
 /// Size and count thresholds, injectable so tests exercise the ladder without gigabytes of RAM.
@@ -660,6 +716,15 @@ pub fn for_each_tag(html: &str, mut visit: impl FnMut(&str, &str, usize)) {
 }
 
 fn finding(severity: Severity, rule: &'static str, file: &str, line: usize) -> Finding {
+    // 3.1.1 says every finding carries its what/why/fix; render() looks those up in RULES and
+    // would silently fall back to empty text for an id the table lacks. This check is
+    // unconditional rather than a debug_assert because the failure it catches is exactly the
+    // kind release builds ship with: `missing-index` sat outside RULES through five rounds of
+    // green tests, rendering blank the one message every first-time publisher sees.
+    assert!(
+        RULES.iter().any(|known| known.id == rule),
+        "rule {rule:?} fired a finding but is not in RULES -- its finding renders blank"
+    );
     Finding {
         severity,
         rule,
@@ -687,7 +752,7 @@ pub fn check_with(files: &[SiteFile], limits: &Limits) -> Vec<Finding> {
     if manifest.parse_error.is_some() {
         findings.push(finding(
             Severity::Error,
-            "manifest-invalid",
+            MANIFEST_INVALID.id,
             manifest_path,
             0,
         ));
@@ -709,24 +774,29 @@ pub fn check_with(files: &[SiteFile], limits: &Limits) -> Vec<Finding> {
 
     let total: u64 = files.iter().map(|f| f.content.len() as u64).sum();
     if total > limits.site_refuse {
-        findings.push(finding(Severity::Error, "site-size-refuse", "(tree)", 0));
+        findings.push(finding(Severity::Error, SITE_SIZE_REFUSE.id, "(tree)", 0));
     } else if total > limits.site_confirm {
-        findings.push(finding(Severity::Confirm, "site-size-confirm", "(tree)", 0));
+        findings.push(finding(
+            Severity::Confirm,
+            SITE_SIZE_CONFIRM.id,
+            "(tree)",
+            0,
+        ));
     } else if total > limits.site_warn {
-        findings.push(finding(Severity::Warning, "site-size-warn", "(tree)", 0));
+        findings.push(finding(Severity::Warning, SITE_SIZE_WARN.id, "(tree)", 0));
     }
 
     if files.len() >= limits.entry_warn {
-        findings.push(finding(Severity::Warning, "entry-count", "(tree)", 0));
+        findings.push(finding(Severity::Warning, ENTRY_COUNT.id, "(tree)", 0));
     }
 
     // ---- per-file checks -----------------------------------------------------
     for file in files {
         let size = file.content.len() as u64;
         if size > limits.file_refuse {
-            findings.push(finding(Severity::Error, "file-size-refuse", &file.path, 0));
+            findings.push(finding(Severity::Error, FILE_SIZE_REFUSE.id, &file.path, 0));
         } else if size > limits.file_warn {
-            findings.push(finding(Severity::Warning, "file-size-warn", &file.path, 0));
+            findings.push(finding(Severity::Warning, FILE_SIZE_WARN.id, &file.path, 0));
         }
 
         let lower = file.path.to_ascii_lowercase();
@@ -895,6 +965,39 @@ mod tests {
         SiteFile {
             path: path.into(),
             content: body.as_bytes().to_vec(),
+        }
+    }
+
+    #[test]
+    fn every_rule_in_the_table_renders_complete_advice() {
+        // 3.1.1: what will not work, why, and the fix -- for EVERY rule, not just the ones a
+        // given test happens to fire. This is the test that would have caught missing-index
+        // rendering blank on day one.
+        assert!(!RULES.is_empty());
+        let mut ids: Vec<&str> = RULES.iter().map(|r| r.id).collect();
+        ids.sort();
+        let unique = ids.len();
+        ids.dedup();
+        assert_eq!(ids.len(), unique, "rule ids are unique");
+        for rule in RULES {
+            let finding = Finding {
+                severity: Severity::Error,
+                rule: rule.id,
+                file: "x.html".into(),
+                line: 1,
+            };
+            let rendered = finding.render();
+            assert!(
+                rendered.contains(rule.what),
+                "{}: what is rendered",
+                rule.id
+            );
+            assert!(rendered.contains(rule.why), "{}: why is rendered", rule.id);
+            assert!(
+                rendered.contains("Fix:"),
+                "{}: remedy is announced",
+                rule.id
+            );
         }
     }
 
