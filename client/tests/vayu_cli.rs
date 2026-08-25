@@ -886,8 +886,10 @@ impl Drop for ServeChild {
     }
 }
 
-/// Spawn `vayu serve`, wait for the URL line, and return the parsed address.
-/// `view` overrides the record log when it is not the default `<store>/view`.
+/// Spawn `vayu serve`, wait for the URL line, confirm the port actually accepts, and
+/// return the parsed address. `view` overrides the record log when it is not the
+/// default `<store>/view`. On any failure the child's stderr and exit status are in
+/// the panic, because a silent null stderr turns a CI failure into a guess.
 fn spawn_serve_by_name(store: &Path, name: &str, now: &str, view: Option<&Path>) -> ServeChild {
     use std::io::BufRead;
     let mut args = vec![
@@ -907,11 +909,23 @@ fn spawn_serve_by_name(store: &Path, name: &str, now: &str, view: Option<&Path>)
     let mut child = Command::new(env!("CARGO_BIN_EXE_vayu"))
         .args(&args)
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("spawns");
-    let mut addr = None;
     let stdout = child.stdout.take().expect("piped");
+    let err_pipe = child.stderr.take().expect("piped");
+    let stderr = std::thread::spawn(move || {
+        let mut collected = String::new();
+        for line in std::io::BufReader::new(err_pipe)
+            .lines()
+            .map_while(Result::ok)
+        {
+            collected.push_str(&line);
+            collected.push('\n');
+        }
+        collected
+    });
+    let mut addr = None;
     for line in std::io::BufReader::new(stdout).lines() {
         let line = line.expect("reads");
         if let Some(rest) = line.trim().strip_prefix("serving") {
@@ -924,14 +938,38 @@ fn spawn_serve_by_name(store: &Path, name: &str, now: &str, view: Option<&Path>)
             break;
         }
     }
-    match addr {
-        Some(addr) => ServeChild { child, addr },
-        None => {
-            let _ = child.kill();
-            let _ = child.wait();
-            panic!("the server never announced its address");
+    let Some(addr) = addr else {
+        let _ = child.kill();
+        let status = child.wait();
+        let note = stderr.join().unwrap_or_default();
+        panic!("the server never announced its address (status {status:?})\nstderr:\n{note}");
+    };
+    // The announce precedes nothing — bind already happened — but under a loaded
+    // runner, prove the port accepts before handing it to a caller that counts.
+    for attempt in 0..30 {
+        match std::net::TcpStream::connect(&addr) {
+            Ok(_) => {
+                return ServeChild { child, addr };
+            }
+            Err(e) => {
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                if attempt == 29 {
+                    let alive = child.try_wait().ok().flatten().is_none();
+                    let note = if alive {
+                        String::new()
+                    } else {
+                        let _ = child.wait();
+                        format!(
+                            "\nchild exited. stderr:\n{}",
+                            stderr.join().unwrap_or_default()
+                        )
+                    };
+                    panic!("the announced address {addr} never accepted: {e}{note}");
+                }
+            }
         }
     }
+    unreachable!("the retry loop always returns or panics")
 }
 
 fn http_get(addr: &str, target: &str) -> (u16, String, Vec<u8>) {
