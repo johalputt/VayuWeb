@@ -877,6 +877,68 @@ fn quarantine_returns_a_name_to_the_open_pool() {
 struct ServeChild {
     child: std::process::Child,
     addr: String,
+    stderr: std::sync::Arc<std::sync::Mutex<String>>,
+}
+
+impl ServeChild {
+    /// GET with bounded whole-exchange retries. On total failure the panic says
+    /// whether the child DIED (with its stderr) or sat alive but unreachable —
+    /// those need opposite fixes, and a bare "refused" cannot tell them apart.
+    fn get(&mut self, target: &str) -> (u16, String, Vec<u8>) {
+        use std::io::{Read, Write};
+        let mut last_error = None;
+        for _ in 0..20 {
+            match std::net::TcpStream::connect(&self.addr) {
+                Ok(mut stream) => {
+                    let outcome = (|| -> std::io::Result<Vec<u8>> {
+                        write!(
+                            stream,
+                            "GET {target} HTTP/1.1\r\nHost: localhost\r\nConnection: \
+                             close\r\n\r\n"
+                        )?;
+                        let mut raw = Vec::new();
+                        stream.read_to_end(&mut raw)?;
+                        Ok(raw)
+                    })();
+                    match outcome {
+                        Ok(raw) => {
+                            let split = raw
+                                .windows(4)
+                                .position(|w| w == b"\r\n\r\n")
+                                .unwrap_or_else(|| panic!("a response without headers"));
+                            let head = String::from_utf8_lossy(&raw[..split]).to_string();
+                            let status: u16 = head
+                                .lines()
+                                .next()
+                                .and_then(|line| line.split_whitespace().nth(1))
+                                .and_then(|code| code.parse().ok())
+                                .expect("a status line");
+                            return (status, head, raw[split + 4..].to_vec());
+                        }
+                        Err(e) => {
+                            last_error = Some(format!("exchange failed mid-read: {e}"));
+                        }
+                    }
+                }
+                Err(e) => {
+                    last_error = Some(format!("connect: {e}"));
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        let state = match self.child.try_wait() {
+            Ok(Some(status)) => format!(
+                "THE SERVER PROCESS EXITED ({status}). stderr:\n{}",
+                self.stderr.lock().map(|g| g.clone()).unwrap_or_default()
+            ),
+            _ => "the server process is STILL RUNNING but its port refuses".to_string(),
+        };
+        panic!(
+            "GET {target} against {} never completed ({}). {state}",
+            self.addr,
+            last_error.unwrap_or_default()
+        )
+    }
 }
 
 impl Drop for ServeChild {
@@ -914,17 +976,22 @@ fn spawn_serve_by_name(store: &Path, name: &str, now: &str, view: Option<&Path>)
         .expect("spawns");
     let stdout = child.stdout.take().expect("piped");
     let err_pipe = child.stderr.take().expect("piped");
-    let stderr = std::thread::spawn(move || {
-        let mut collected = String::new();
-        for line in std::io::BufReader::new(err_pipe)
-            .lines()
-            .map_while(Result::ok)
-        {
-            collected.push_str(&line);
-            collected.push('\n');
-        }
-        collected
-    });
+    let stderr_note: std::sync::Arc<std::sync::Mutex<String>> =
+        std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let stderr = {
+        let sink = stderr_note.clone();
+        std::thread::spawn(move || {
+            for line in std::io::BufReader::new(err_pipe)
+                .lines()
+                .map_while(Result::ok)
+            {
+                if let Ok(mut guard) = sink.lock() {
+                    guard.push_str(&line);
+                    guard.push('\n');
+                }
+            }
+        })
+    };
     let mut addr = None;
     for line in std::io::BufReader::new(stdout).lines() {
         let line = line.expect("reads");
@@ -941,7 +1008,8 @@ fn spawn_serve_by_name(store: &Path, name: &str, now: &str, view: Option<&Path>)
     let Some(addr) = addr else {
         let _ = child.kill();
         let status = child.wait();
-        let note = stderr.join().unwrap_or_default();
+        let _ = stderr.join();
+        let note = stderr_note.lock().map(|g| g.clone()).unwrap_or_default();
         panic!("the server never announced its address (status {status:?})\nstderr:\n{note}");
     };
     // The announce precedes nothing — bind already happened — but under a loaded
@@ -949,7 +1017,11 @@ fn spawn_serve_by_name(store: &Path, name: &str, now: &str, view: Option<&Path>)
     for attempt in 0..30 {
         match std::net::TcpStream::connect(&addr) {
             Ok(_) => {
-                return ServeChild { child, addr };
+                return ServeChild {
+                    child,
+                    addr,
+                    stderr: stderr_note,
+                };
             }
             Err(e) => {
                 std::thread::sleep(std::time::Duration::from_millis(150));
@@ -961,7 +1033,7 @@ fn spawn_serve_by_name(store: &Path, name: &str, now: &str, view: Option<&Path>)
                         let _ = child.wait();
                         format!(
                             "\nchild exited. stderr:\n{}",
-                            stderr.join().unwrap_or_default()
+                            stderr_note.lock().map(|g| g.clone()).unwrap_or_default()
                         )
                     };
                     panic!("the announced address {addr} never accepted: {e}{note}");
@@ -970,60 +1042,6 @@ fn spawn_serve_by_name(store: &Path, name: &str, now: &str, view: Option<&Path>)
         }
     }
     unreachable!("the retry loop always returns or panics")
-}
-
-fn http_get(addr: &str, target: &str) -> (u16, String, Vec<u8>) {
-    use std::io::{Read, Write};
-    // A loopback preview under a loaded CI runner can reset an early connection
-    // (descriptor pressure, a backlog race). The request is idempotent: retry the
-    // WHOLE exchange a bounded number of times before giving up.
-    let mut last_error = None;
-    // A loaded runner schedules dozens of servers at once; give a slow child a real
-    // chance (~4.5s) before concluding anything.
-    for _ in 0..30 {
-        let stream = match std::net::TcpStream::connect(addr) {
-            Ok(stream) => stream,
-            Err(e) => {
-                last_error = Some(e.to_string());
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                continue;
-            }
-        };
-        let outcome = (|| -> std::io::Result<Vec<u8>> {
-            let mut stream = stream;
-            write!(
-                stream,
-                "GET {target} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
-            )?;
-            let mut raw = Vec::new();
-            stream.read_to_end(&mut raw)?;
-            Ok(raw)
-        })();
-        match outcome {
-            Ok(raw) => {
-                let split = raw
-                    .windows(4)
-                    .position(|w| w == b"\r\n\r\n")
-                    .expect("headers");
-                let head = String::from_utf8_lossy(&raw[..split]).to_string();
-                let status: u16 = head
-                    .lines()
-                    .next()
-                    .and_then(|line| line.split_whitespace().nth(1))
-                    .and_then(|code| code.parse().ok())
-                    .expect("a status line");
-                return (status, head, raw[split + 4..].to_vec());
-            }
-            Err(e) => {
-                last_error = Some(e.to_string());
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-        }
-    }
-    panic!(
-        "GET {target} never completed: {}",
-        last_error.unwrap_or_default()
-    );
 }
 
 #[test]
@@ -1071,8 +1089,8 @@ fn publish_holds_history_and_serve_by_name_roundtrips() {
     assert_eq!(held, 1);
 
     // And serve --name resolves through it over real HTTP.
-    let server = spawn_serve_by_name(&store, "roundtrip.vayu", &now.to_string(), None);
-    let (status, _head, body) = http_get(&server.addr, "/");
+    let mut server = spawn_serve_by_name(&store, "roundtrip.vayu", &now.to_string(), None);
+    let (status, _head, body) = server.get("/");
     assert_eq!(status, 200);
     assert!(
         body.starts_with(b"<!doctype html>"),
@@ -1446,8 +1464,8 @@ fn a_whole_site_travels_as_bundles_and_the_far_side_serves_by_name() {
 
     // The far side now resolves the name from imported history and reads the
     // content from imported blocks — over loopback HTTP, by NAME.
-    let server = spawn_serve_by_name(&store_b, "travel.vayu", &now.to_string(), Some(&view_b));
-    let (status, _head, body) = http_get(&server.addr, "/");
+    let mut server = spawn_serve_by_name(&store_b, "travel.vayu", &now.to_string(), Some(&view_b));
+    let (status, _head, body) = server.get("/");
     assert_eq!(status, 200);
     assert!(
         body.starts_with(b"<!doctype html><title>travel</title>"),
@@ -1584,8 +1602,8 @@ fn republishing_renews_the_chain_and_a_squatter_is_refused() {
     );
 
     // And serve-by-name resolves to the RENEWED content: v2, not v1.
-    let server = spawn_serve_by_name(&store, "orchard.vayu", &renewed_at.to_string(), None);
-    let (status, _head, body) = http_get(&server.addr, "/");
+    let mut server = spawn_serve_by_name(&store, "orchard.vayu", &renewed_at.to_string(), None);
+    let (status, _head, body) = server.get("/");
     assert_eq!(status, 200);
     assert!(
         body.starts_with(b"<!doctype html><title>v2</title>"),
@@ -1888,8 +1906,8 @@ fn a_transferred_name_serves_the_recipient_after_settlement() {
     assert!(stdout.contains("renewal   seq 1 -> 2"), "{stdout}");
 
     // Resolution follows the recipient's root: Bob's content, not Alice's.
-    let server = spawn_serve_by_name(&store, "passing.vayu", &settled_at.to_string(), None);
-    let (status, _head, body) = http_get(&server.addr, "/");
+    let mut server = spawn_serve_by_name(&store, "passing.vayu", &settled_at.to_string(), None);
+    let (status, _head, body) = server.get("/");
     assert_eq!(status, 200);
     assert!(
         body.starts_with(b"<!doctype html><title>bobs</title>"),
@@ -2013,8 +2031,8 @@ fn renewing_extends_the_term_inside_the_window_and_refuses_outside_it() {
     );
 
     // And the renewed chain still resolves: serve-by-name judges the RENEW tip clean.
-    let server = spawn_serve_by_name(&store, "longterm.vayu", &in_window.to_string(), None);
-    let (status, _head, _body) = http_get(&server.addr, "/");
+    let mut server = spawn_serve_by_name(&store, "longterm.vayu", &in_window.to_string(), None);
+    let (status, _head, _body) = server.get("/");
     assert_eq!(status, 200);
 }
 
@@ -2072,8 +2090,8 @@ fn an_alias_follows_within_budget_and_a_loop_refuses() {
 
     // One hop resolves; two hops resolve; three hops resolve — the budget is three.
     for name in ["nick.vayu", "deep.vayu", "deeper.vayu"] {
-        let server = spawn_serve_by_name(&store, name, &now.to_string(), None);
-        let (status, _head, body) = http_get(&server.addr, "/");
+        let mut server = spawn_serve_by_name(&store, name, &now.to_string(), None);
+        let (status, _head, body) = server.get("/");
         assert_eq!(status, 200, "{name}");
         assert!(
             body.starts_with(b"<!doctype html><title>a0</title>"),
