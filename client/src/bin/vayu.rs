@@ -102,6 +102,17 @@ USAGE:
         List every name this view holds history for, with its lifecycle state:
         LIVE, GRACE, QUARANTINE, FREE, or the revoked freeze.
 
+    vayu export --view <dir> [--out <file>]
+        Bundle every record this view holds into one canonical CBOR document
+        (an array of exact record byte strings). With --out it is written to a
+        file; without it, hex on stdout.
+
+    vayu import <bundle.cbor> --view <dir> [--now s] [--window-count n]
+        Judge each record in a bundle against this view and append only what
+        verifies. Already-held bytes are skipped; refusals and deferrals are
+        reported per record — an exchange MAY carry records this peer refuses,
+        which is data, not a tool failure.
+
     vayu pins <store-dir>
         List every block the store holds, classified, with totals.
 
@@ -124,6 +135,8 @@ fn run() -> i32 {
         Some("verify") => cmd_verify(&argv[1..]),
         Some("accept") => cmd_accept(&argv[1..]),
         Some("names") => cmd_names(&argv[1..]),
+        Some("export") => cmd_export(&argv[1..]),
+        Some("import") => cmd_import(&argv[1..]),
         Some("pins") => cmd_pins(&argv[1..]),
         Some("help") | Some("--help") | Some("-h") => {
             print!("{USAGE}");
@@ -369,6 +382,171 @@ fn cmd_names(argv: &[String]) -> i32 {
         );
     }
     println!("\n{} name(s) in {view_dir}", names.len());
+    0
+}
+
+// ---------------------------------------------------------------------------
+// vayu export / vayu import — view exchange over any channel.
+//
+// The bundle is one canonical CBOR document: an array of byte strings, each
+// string being a record's EXACT accepted bytes. Framing by CBOR rather than a
+// bespoke container means the strict decoder polices the envelope too.
+// ---------------------------------------------------------------------------
+
+fn cmd_export(argv: &[String]) -> i32 {
+    let flags = match Flags::parse(argv, &["view", "out"]) {
+        Ok(flags) => flags,
+        Err(detail) => {
+            eprintln!("vayu export: {detail}");
+            return 2;
+        }
+    };
+    let Some(view_dir) = flags.get("view") else {
+        eprintln!("vayu export needs --view <dir>");
+        return 2;
+    };
+    let view = match vayuweb_client::view::View::open(std::path::Path::new(view_dir)) {
+        Ok(view) => view,
+        Err(detail) => {
+            eprintln!("vayu export: {detail}");
+            return 2;
+        }
+    };
+    let entries = match view.entries() {
+        Ok(entries) => entries,
+        Err(detail) => {
+            eprintln!("vayu export: {detail}");
+            return 1;
+        }
+    };
+    let bundle = vayuweb_client::cbor::encode(&vayuweb_client::cbor::Value::Array(
+        entries
+            .iter()
+            .map(|e| vayuweb_client::cbor::Value::Bytes(e.bytes.clone()))
+            .collect(),
+    ))
+    .expect("an array of byte strings always encodes");
+    match flags.get("out") {
+        Some(out) => {
+            if let Err(e) = std::fs::write(out, &bundle) {
+                eprintln!("vayu export: cannot write {out:?}: {e}");
+                return 1;
+            }
+            println!(
+                "{} record(s) -> {out} ({} bytes)",
+                entries.len(),
+                bundle.len()
+            );
+        }
+        None => {
+            // No --out: hex on stdout, so the smallest possible exchange is a copy-paste.
+            for byte in &bundle {
+                print!("{byte:02x}");
+            }
+            println!();
+        }
+    }
+    0
+}
+
+fn cmd_import(argv: &[String]) -> i32 {
+    let Some(bundle_path) = argv.first().filter(|a| !a.starts_with("--")) else {
+        eprintln!("vayu import needs a bundle file");
+        return 2;
+    };
+    let flags = match Flags::parse(&argv[1..], &["view", "now", "window-count"]) {
+        Ok(flags) => flags,
+        Err(detail) => {
+            eprintln!("vayu import: {detail}");
+            return 2;
+        }
+    };
+    let Some(view_dir) = flags.get("view") else {
+        eprintln!("vayu import needs --view <dir>");
+        return 2;
+    };
+    let bytes = match std::fs::read(bundle_path) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("vayu import: cannot read {bundle_path:?}: {e}");
+            return 2;
+        }
+    };
+    let records = match vayuweb_client::record::decode_record(&bytes) {
+        Ok(vayuweb_client::cbor::Value::Array(records)) => records,
+        Ok(_) => {
+            eprintln!("vayu import: a bundle is a CBOR array of record byte strings");
+            return 2;
+        }
+        Err(e) => {
+            eprintln!("vayu import: that is not a readable bundle: {e}");
+            return 2;
+        }
+    };
+    let view = match vayuweb_client::view::View::open(std::path::Path::new(view_dir)) {
+        Ok(view) => view,
+        Err(detail) => {
+            eprintln!("vayu import: {detail}");
+            return 2;
+        }
+    };
+    let now = match resolve_now(&flags, "import") {
+        Ok(now) => now,
+        Err(code) => return code,
+    };
+    let window_count = match flags.number("window-count") {
+        Ok(value) => value.unwrap_or(0),
+        Err(detail) => {
+            eprintln!("vayu import: {detail}");
+            return 2;
+        }
+    };
+
+    let mut accepted = 0usize;
+    let mut held = 0usize;
+    let mut refused = 0usize;
+    let mut deferred = 0usize;
+    for record in &records {
+        let vayuweb_client::cbor::Value::Bytes(record_bytes) = record else {
+            refused += 1;
+            println!("REJECT BAD_RECORD: a bundle element must be a byte string");
+            continue;
+        };
+        if view.holds(record_bytes) {
+            held += 1;
+            continue;
+        }
+        match view.accept_verdict(record_bytes, now, window_count) {
+            Ok(vayuweb_client::verify::Verdict::Accept) => match view.put(record_bytes) {
+                Ok(()) => accepted += 1,
+                Err(e) => {
+                    eprintln!("vayu import: the log refused a verified write: {e}");
+                    return 1;
+                }
+            },
+            Ok(verdict) => match verdict {
+                vayuweb_client::verify::Verdict::Reject { code, detail } => {
+                    refused += 1;
+                    println!("REJECT {code}: {detail}");
+                }
+                vayuweb_client::verify::Verdict::Defer { detail } => {
+                    deferred += 1;
+                    println!("DEFER: {detail}");
+                }
+                vayuweb_client::verify::Verdict::Accept => unreachable!(),
+            },
+            Err(detail) => {
+                eprintln!("vayu import: {detail}");
+                return 1;
+            }
+        }
+    }
+    println!(
+        "\n{accepted} accepted · {held} already held · {refused} refused · {deferred} deferred \
+         (view: {view_dir})"
+    );
+    // Verdicts are data-dependent outcomes, not tool failures: an exchange SHOULD be able to
+    // carry records this peer will refuse. Only broken input or IO is an exit 2/1.
     0
 }
 

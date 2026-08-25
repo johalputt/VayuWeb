@@ -10,6 +10,24 @@ it.
 
 ## [Unreleased]
 
+### Added — view exchange: `vayu export` and `vayu import`
+
+Two machines can now sync accepted history over ANY channel, which is everything Phase 4
+needs except the transport itself. `vayu export --view <dir> [--out file]` bundles every held
+record into one canonical CBOR document — an array of exact record byte strings, so the strict
+decoder polices the envelope too (no bespoke container to get wrong). `vayu import <bundle>
+--view <dir>` judges each element against the importing view and appends only what verifies;
+already-held bytes are skipped without re-judgment; refusals and deferrals print per record.
+Verdicts are data-dependent outcomes, not tool failures — an exchange SHOULD be able to carry
+records this peer will refuse — so only broken input or IO is an error exit.
+
+The exchange test caught a subtlety worth stating rather than hiding: a forged record whose
+incumbent is already imported is refused as NAME_TAKEN before any cryptography runs, saying
+nothing about its signature's validity — exactly the registry's deliberate cheap-check-first
+ordering, surfacing in the wild for the first time. One CLI test walks publish→export→import
+into a fresh peer, answers names from imported history alone, proves idempotent re-import,
+and refuses a tampered bundle element.
+
 ### Added — the reading path closes: `publish` holds history, `serve --name` resolves
 
 The last mile of the local surface: a name can now be READ without ever handling a raw CID.

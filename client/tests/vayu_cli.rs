@@ -1103,3 +1103,173 @@ fn serve_by_name_refuses_a_lapsed_or_forged_pointer() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("does not verify"), "{stderr}");
 }
+
+// ---------------------------------------------------------------------------
+// View exchange: export a bundle on one machine, import it into another's
+// view — where every incoming record is judged before it enters.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_view_exchanges_to_a_fresh_peer_and_refuses_forgeries() {
+    let work = TempDir::new("exchange");
+    let now = 1_800_000_000u64;
+
+    // Machine A: two names, published (publish auto-holds history).
+    let site = work.path().join("site-a");
+    work.file("site-a/index.html", "<!doctype html><title>alpha</title>");
+    let store_a = work.path().join("store-a");
+    let seed_a = work.path().join("a.hex");
+    std::fs::write(&seed_a, seed_hex(0x81)).expect("writes");
+    for name in ["exchange.vayu", "second.vayu"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+            .args([
+                "publish",
+                site.to_str().expect("utf8"),
+                "--name",
+                name,
+                "--store",
+                store_a.to_str().expect("utf8"),
+                "--key-file",
+                seed_a.to_str().expect("utf8"),
+                "--now",
+                &now.to_string(),
+            ])
+            .output()
+            .expect("runs");
+        assert!(
+            output.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    assert_eq!(
+        std::fs::read_dir(store_a.join("view"))
+            .expect("view")
+            .filter_map(|e| e.ok())
+            .count(),
+        2
+    );
+
+    // Export A's whole history to one bundle.
+    let bundle_path = work.path().join("bundle.cbor");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "export",
+            "--view",
+            store_a.join("view").to_str().expect("utf8"),
+            "--out",
+            bundle_path.to_str().expect("utf8"),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(0));
+
+    // Machine B: an empty view imports the bundle; both records are judged and held.
+    let view_b = work.path().join("view-b");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "import",
+            bundle_path.to_str().expect("utf8"),
+            "--view",
+            view_b.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("2 accepted"), "{stdout}");
+    assert_eq!(
+        std::fs::read_dir(&view_b)
+            .expect("created")
+            .filter_map(|e| e.ok())
+            .count(),
+        2
+    );
+
+    // B can now answer questions about A's names from imported history alone.
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args(["names", "--view", view_b.to_str().expect("utf8")])
+        .output()
+        .expect("runs");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("exchange.vayu") && stdout.contains("LIVE"),
+        "{stdout}"
+    );
+
+    // A second import is a no-op: already-held bytes are skipped, not re-judged.
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "import",
+            bundle_path.to_str().expect("utf8"),
+            "--view",
+            view_b.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("2 already held"));
+
+    // A tampered bundle element is REFUSED, not silently dropped or accepted.
+    let mut bundle_records =
+        match vayuweb_client::record::decode_record(&std::fs::read(&bundle_path).expect("reads"))
+            .expect("decodes")
+        {
+            vayuweb_client::cbor::Value::Array(records) => records,
+            _ => panic!("an array"),
+        };
+    if let Some(vayuweb_client::cbor::Value::Bytes(record)) = bundle_records.first_mut() {
+        let forged = with_zeroed_sig(record);
+        *record = forged;
+    }
+    let forged_bundle =
+        vayuweb_client::cbor::encode(&vayuweb_client::cbor::Value::Array(bundle_records))
+            .expect("encodes");
+    let forged_path = work.path().join("forged.cbor");
+    std::fs::write(&forged_path, &forged_bundle).expect("writes");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "import",
+            forged_path.to_str().expect("utf8"),
+            "--view",
+            view_b.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "verdicts are data, not tool failure"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // The forged element is refused — and WHICH code names it depends on the registry's
+    // deliberate order: against an incumbent already imported, NAME_TAKEN answers BEFORE any
+    // cryptography (a cheap refusal that says nothing about the signature's validity);
+    // otherwise BAD_SIG. Either way: refused, counted, and never appended.
+    assert!(stdout.contains("REJECT "), "{stdout}");
+    assert!(
+        stdout.contains("REJECT NAME_TAKEN") || stdout.contains("REJECT BAD_SIG"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("1 refused"), "{stdout}");
+}
+
+/// Decode one record, zero its signature, re-encode canonically.
+fn with_zeroed_sig(bytes: &[u8]) -> Vec<u8> {
+    let vayuweb_client::cbor::Value::Map(mut members) =
+        vayuweb_client::cbor::decode(bytes).expect("decodes")
+    else {
+        panic!("a record is a map");
+    };
+    for (key, value) in members.iter_mut() {
+        if matches!(key, vayuweb_client::cbor::Key::Text(name) if name == "sig") {
+            *value = vayuweb_client::cbor::Value::Bytes(vec![0u8; 64]);
+        }
+    }
+    vayuweb_client::cbor::encode(&vayuweb_client::cbor::Value::Map(members)).expect("re-encodes")
+}

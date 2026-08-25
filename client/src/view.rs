@@ -82,6 +82,12 @@ impl View {
         std::fs::write(&path, bytes).map_err(|e| format!("cannot write {path:?}: {e}"))
     }
 
+    /// Whether these exact bytes are already held — an exchange imports a bundle and must
+    /// not count what it already has as newly judged.
+    pub fn holds(&self, bytes: &[u8]) -> bool {
+        self.path_for(bytes).exists()
+    }
+
     /// Every readable record in the log, sorted by hash for determinism. Unreadable files are
     /// skipped, not fatal: a torn final write must not take the whole log down.
     pub fn entries(&self) -> Result<Vec<Entry>, String> {
