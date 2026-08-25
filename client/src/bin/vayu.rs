@@ -124,6 +124,22 @@ USAGE:
     vayu pins <store-dir>
         List every block the store holds, classified, with totals.
 
+    vayu transfer <label>.<tld> --store <dir> --key-file <f> --recipient-seed <f> [options]
+        Hand the name to another key: both parties co-sign here (the record carries
+        sig and coSig). Only while at least the settlement window remains in the term.
+        Until settlement ends, resolution refuses the name — it is in flight.
+
+    vayu relinquish <label>.<tld> --store <dir> --key-file <f> [options]
+        The owner says they are done. Grace is skipped; quarantine is not.
+
+    vayu revoke <label>.<tld> --store <dir> --key-file <f> [options]
+        The deadman switch: resolution stops at once; the name stays frozen for the
+        rest of its term and then quarantines, accepting nothing from anyone.
+
+        All three take --now like publish, resolve the predecessor from the view
+        exactly as publish does, refuse if another key holds the name, and append
+        their signed record to the view when it verifies there.
+
     vayu help
         Show this text.
 
@@ -145,6 +161,9 @@ fn run() -> i32 {
         Some("names") => cmd_names(&argv[1..]),
         Some("export") => cmd_export(&argv[1..]),
         Some("import") => cmd_import(&argv[1..]),
+        Some("transfer") => cmd_owner_exit(&argv[1..], OwnerOp::Transfer),
+        Some("relinquish") => cmd_owner_exit(&argv[1..], OwnerOp::Relinquish),
+        Some("revoke") => cmd_owner_exit(&argv[1..], OwnerOp::Revoke),
         Some("pins") => cmd_pins(&argv[1..]),
         Some("help") | Some("--help") | Some("-h") => {
             print!("{USAGE}");
@@ -628,6 +647,207 @@ fn cmd_import(argv: &[String]) -> i32 {
     0
 }
 
+// ---------------------------------------------------------------------------
+// vayu transfer / relinquish / revoke — the owner's exits. One shape, three
+// ops: resolve the predecessor from the view exactly as publish does, sign the
+// op under that chain, judge it as received against the same view, and only
+// then append.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OwnerOp {
+    Transfer,
+    Relinquish,
+    Revoke,
+}
+
+impl OwnerOp {
+    fn verb(self) -> &'static str {
+        match self {
+            Self::Transfer => "transfer",
+            Self::Relinquish => "relinquish",
+            Self::Revoke => "revoke",
+        }
+    }
+}
+
+fn cmd_owner_exit(argv: &[String], op: OwnerOp) -> i32 {
+    let mut positional = Vec::new();
+    for arg in argv {
+        if !arg.starts_with("--") {
+            positional.push(arg.clone());
+        }
+    }
+    let Some(name_value) = positional.first() else {
+        eprintln!("vayu {}: needs <label>.<tld>", op.verb());
+        return 2;
+    };
+    // Flags::parse knows no positionals; the name was argv's head.
+    let flag_args: &[String] = if argv.first().is_some_and(|a| !a.starts_with("--")) {
+        &argv[1..]
+    } else {
+        argv
+    };
+    let (label, tld) = match parse_name(name_value) {
+        Ok(parts) => parts,
+        Err(_) => {
+            eprintln!(
+                "vayu {}: --name wants <label>.<tld>, got {name_value:?}",
+                op.verb()
+            );
+            return 2;
+        }
+    };
+    let flags = match Flags::parse(
+        flag_args,
+        &["store", "key-file", "recipient-seed", "now", "view"],
+    ) {
+        Ok(flags) => flags,
+        Err(detail) => {
+            eprintln!("vayu {}: {detail}", op.verb());
+            return 2;
+        }
+    };
+    if op == OwnerOp::Transfer && !flags.has("recipient-seed") {
+        eprintln!("vayu transfer: a transfer carries TWO signatures; give --recipient-seed");
+        return 2;
+    }
+
+    let store_path = std::path::PathBuf::from(flags.get("store").unwrap_or("vayu-store"));
+    let view_dir = flags
+        .get("view")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| store_path.join("view"));
+
+    // The identity doing the leaving.
+    let Some(key_file) = flags.get("key-file") else {
+        eprintln!("vayu {} needs --key-file <file>", op.verb());
+        return 2;
+    };
+    let identity = match read_seed_file(key_file) {
+        Ok(identity) => identity,
+        Err(code) => return code,
+    };
+
+    let now = match resolve_now(&flags, op.verb()) {
+        Ok(now) => now,
+        Err(code) => return code,
+    };
+
+    // Predecessor from the view, owner must be us — identical rule to publish.
+    let existing = match std::fs::read_dir(&view_dir) {
+        Ok(_) => match vayuweb_client::view::View::open(&view_dir) {
+            Ok(view) => Some(view),
+            Err(detail) => {
+                eprintln!("vayu {}: {detail}", op.verb());
+                return 2;
+            }
+        },
+        Err(_) => {
+            eprintln!(
+                "vayu {}: no history at {:?}: nothing to leave",
+                op.verb(),
+                view_dir
+            );
+            return 1;
+        }
+    };
+    let view = match existing {
+        Some(view) => view,
+        None => return 1,
+    };
+    let tip = match view.chain_tip(&label, &tld) {
+        Ok(Some(tip)) => tip,
+        Ok(None) => {
+            eprintln!(
+                "vayu {}: no accepted record for {label}.{tld} in {:?}",
+                op.verb(),
+                view_dir
+            );
+            return 1;
+        }
+        Err(detail) => {
+            eprintln!("vayu {}: {detail}", op.verb());
+            return 2;
+        }
+    };
+    if tip.prev.owner_key != *identity.public_key() {
+        eprintln!(
+            "vayu {}: {label}.{tld} is held in this view by another key",
+            op.verb()
+        );
+        return 1;
+    }
+    let predecessor = match Predecessor::from_bytes(&tip.entry.bytes) {
+        Ok(previous) => previous,
+        Err(e) => {
+            eprintln!("vayu {}: unusable incumbent: {e}", op.verb());
+            return 1;
+        }
+    };
+
+    // Build the op's record under that chain.
+    let built = match op {
+        OwnerOp::Transfer => {
+            let Some(recipient_file) = flags.get("recipient-seed") else {
+                unreachable!("checked above");
+            };
+            let recipient = match read_seed_file(recipient_file) {
+                Ok(identity) => identity,
+                Err(code) => return code,
+            };
+            vayuweb_client::record::build_transfer(
+                &identity,
+                &recipient,
+                &predecessor,
+                &label,
+                &tld,
+                now,
+            )
+        }
+        OwnerOp::Relinquish => {
+            vayuweb_client::record::build_relinquish(&identity, &predecessor, &label, &tld, now)
+        }
+        OwnerOp::Revoke => {
+            vayuweb_client::record::build_revoke(&identity, &predecessor, &label, &tld, now)
+        }
+    };
+    let record = match built {
+        Ok(record) => record,
+        Err(e) => {
+            eprintln!("vayu {}: refused: {e}", op.verb());
+            return 1;
+        }
+    };
+
+    // Judge it as received against the same view, then append on Accept. An owner op that
+    // cannot re-verify against its own history is a bug in the history, not a warning.
+    match view.accept_verdict(&record, now, 0) {
+        Ok(vayuweb_client::verify::Verdict::Accept) => {}
+        Ok(other) => {
+            eprintln!(
+                "vayu {}: the view refuses this record: {other:?}",
+                op.verb()
+            );
+            return 1;
+        }
+        Err(detail) => {
+            eprintln!("vayu {}: {detail}", op.verb());
+            return 2;
+        }
+    }
+    if let Err(e) = view.put(&record) {
+        eprintln!("vayu {}: {e}", op.verb());
+        return 1;
+    }
+    println!(
+        "{}    seq {} appended ({label}.{tld})",
+        op.verb(),
+        tip.prev.seq + 1
+    );
+    0
+}
+
 /// Blocks mode: every element must be [cidBytes, payload]; the payload must hash back to
 /// the digest inside its own CID before it is pinned — content addressing is the integrity
 /// check that travels with the bytes, so a flipped bit anywhere refuses that one block and
@@ -1086,6 +1306,38 @@ fn parse_name(value: &str) -> Result<(String, String), String> {
     Ok((label.to_string(), tld.to_string()))
 }
 
+/// Read a hex seed file into an identity — the one key-loading path every verb shares.
+/// Errors are already rendered; the code is 2 (usage).
+fn read_seed_file(path: &str) -> Result<Identity, i32> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) => {
+            eprintln!("vayu: cannot read key file {path:?}: {e}");
+            return Err(2);
+        }
+    };
+    match hex_decode(&text) {
+        Ok(seed) if seed.len() == 32 => match Identity::from_seed(&mut seed.clone()) {
+            Ok(identity) => Ok(identity),
+            Err(e) => {
+                eprintln!("vayu: the seed did not yield an identity: {e}");
+                Err(2)
+            }
+        },
+        Ok(seed) => {
+            eprintln!(
+                "vayu: the seed must be exactly 32 bytes (64 hex chars), got {}",
+                seed.len()
+            );
+            Err(2)
+        }
+        Err(e) => {
+            eprintln!("vayu: key file {path:?}: {e}");
+            Err(2)
+        }
+    }
+}
+
 struct Flags {
     values: Vec<(String, Option<String>)>,
 }
@@ -1245,35 +1497,10 @@ fn cmd_publish(argv: &[String]) -> i32 {
     // Identity. See the module header: --key-file is a tool choice, not the product's answer
     // to key storage.
     let identity = match flags.get("key-file") {
-        Some(path) => {
-            let text = match std::fs::read_to_string(path) {
-                Ok(text) => text,
-                Err(e) => {
-                    eprintln!("vayu publish: cannot read key file {path:?}: {e}");
-                    return 2;
-                }
-            };
-            match hex_decode(&text) {
-                Ok(seed) if seed.len() == 32 => match Identity::from_seed(&mut seed.clone()) {
-                    Ok(identity) => identity,
-                    Err(e) => {
-                        eprintln!("vayu publish: the seed did not yield an identity: {e}");
-                        return 2;
-                    }
-                },
-                Ok(seed) => {
-                    eprintln!(
-                        "vayu publish: the seed must be exactly 32 bytes (64 hex chars), got {}",
-                        seed.len()
-                    );
-                    return 2;
-                }
-                Err(e) => {
-                    eprintln!("vayu publish: key file {path:?}: {e}");
-                    return 2;
-                }
-            }
-        }
+        Some(path) => match read_seed_file(path) {
+            Ok(identity) => identity,
+            Err(code) => return code,
+        },
         None => {
             eprintln!(
                 "vayu publish: --key-file <hex-seed-file> is required for headless use. \

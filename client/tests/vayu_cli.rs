@@ -1566,3 +1566,170 @@ fn republishing_renews_the_chain_and_a_squatter_is_refused() {
         "the refusal must not have grown the history"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The owner's exits: transfer (both keys co-sign), relinquish, revoke — each
+// judged against the same view it extends, each visible to resolution.
+// ---------------------------------------------------------------------------
+
+fn publish_once(
+    work: &TempDir,
+    tag: &str,
+    name: &str,
+    seed_byte: u8,
+    now: u64,
+) -> std::path::PathBuf {
+    work.file(
+        &format!("site-{tag}/index.html"),
+        &format!("<!doctype html><title>{tag}</title>"),
+    );
+    let store = work.path().join(format!("store-{tag}"));
+    let seed = work.path().join(format!("{tag}.hex"));
+    std::fs::write(&seed, seed_hex(seed_byte)).expect("writes");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "publish",
+            work.path()
+                .join(format!("site-{tag}"))
+                .to_str()
+                .expect("utf8"),
+            "--name",
+            name,
+            "--store",
+            store.to_str().expect("utf8"),
+            "--key-file",
+            seed.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    store
+}
+
+#[test]
+fn an_owner_can_transfer_relinquish_and_revoke() {
+    let work = TempDir::new("exits");
+    let now = 1_800_000_000u64;
+
+    // TRANSFER mid-term: both keys co-sign here; the view grows by one record; the
+    // transferred tip re-judges clean as a held tip (the successor of seq 0).
+    let alice_store = publish_once(&work, "t1", "leaving.vayu", 0xB1, now);
+    let alice_seed = work.path().join("t1.hex");
+    let bob_seed = work.path().join("bob.hex");
+    std::fs::write(&bob_seed, seed_hex(0xB2)).expect("writes");
+    let mid_term = now + 90 * 86_400;
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "transfer",
+            "leaving.vayu",
+            "--store",
+            alice_store.to_str().expect("utf8"),
+            "--key-file",
+            alice_seed.to_str().expect("utf8"),
+            "--recipient-seed",
+            bob_seed.to_str().expect("utf8"),
+            "--now",
+            &mid_term.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("seq 1 appended"), "{stdout}");
+    assert_eq!(
+        std::fs::read_dir(alice_store.join("view"))
+            .expect("view")
+            .count(),
+        2
+    );
+
+    // RELINQUISH: grace is skipped; the term ends NOW. Resolution refuses at once —
+    // a lapsed pointer yields no tree.
+    let quit_store = publish_once(&work, "q1", "done.vayu", 0xC1, now);
+    let quit_seed = work.path().join("q1.hex");
+    let quit_at = now + 86_400;
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "relinquish",
+            "done.vayu",
+            "--store",
+            quit_store.to_str().expect("utf8"),
+            "--key-file",
+            quit_seed.to_str().expect("utf8"),
+            "--now",
+            &quit_at.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "serve",
+            quit_store.to_str().expect("utf8"),
+            "--name",
+            "done.vayu",
+            "--port",
+            "0",
+            "--now",
+            &(quit_at + 60).to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("refusing"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // REVOKE: the deadman switch. Resolution stops at once even though the term runs
+    // on, and `names` shows the frozen state.
+    let dead_store = publish_once(&work, "r1", "gone.vayu", 0xD1, now);
+    let dead_seed = work.path().join("r1.hex");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "revoke",
+            "gone.vayu",
+            "--store",
+            dead_store.to_str().expect("utf8"),
+            "--key-file",
+            dead_seed.to_str().expect("utf8"),
+            "--now",
+            &(now + 86_400).to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "names",
+            "--view",
+            dead_store.join("view").to_str().expect("utf8"),
+        ])
+        .output()
+        .expect("runs");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("REVOKED"), "{stdout}");
+}

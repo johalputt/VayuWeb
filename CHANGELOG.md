@@ -10,6 +10,24 @@ it.
 
 ## [Unreleased]
 
+### Added — the owner's exits: `vayu transfer`, `vayu relinquish`, `vayu revoke`
+
+An owner could enter a name and renew it, but no CLI verb could produce the records for
+LEAVING one — the builders existed, unexposed. All three exits now share one shape: resolve
+the predecessor from the view exactly as publish does (another key's name refuses), sign the
+op under that chain, judge it as received against the same view, and only then append.
+
+`transfer` co-signs both parties in place — the record carries sig AND coSig, so both seeds
+are present at build time; only while at least the settlement window remains in the term.
+`relinquish` skips grace and drops the term to now. `revoke` freezes resolution for the rest
+of the term and quarantines after. Each is visible downstream immediately: serve-by-name
+refuses a relinquished or revoked name, and `names` shows REVOKED.
+
+One CLI test walks all three exits over three fresh names: transfer appends seq 1 under two
+keys, relinquish makes serve refuse within a minute of quitting, revoke shows the frozen
+state. Suite now 144 lib + 17 CLI + 7 serve. The owner-side lifecycle is complete: enter,
+renew, hand over, walk away, or burn it down.
+
 ### Added — renewal is automatic: publish renews its own names
 
 `vayu publish` now reads the history it already holds: when the view has a chain for the name
