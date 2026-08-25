@@ -28,7 +28,8 @@ side verifies those claims against the proxy's actual header constants, and the 
 runs the publisher's own checker over HTML before answering — refusing documents whose
 violations no header can express, and refusing at startup any tree that would fail a publish.
 What still keeps this a Draft: reading resolves names THIS machine holds history for — records
-now travel between machines as bundles, but the BLOCKS they point at do not; block exchange
+and blocks now both travel between machines as bundles (a whole site moves by sneakernet, and
+the far side serves it by name), but nothing yet fetches a block on demand; block exchange
 needs a transport that does not exist, the key story is a headless seed file rather than an OS
 keystore, and the GUI does not exist. A Draft stays a Draft until a stranger can find and read
 what a stranger published.

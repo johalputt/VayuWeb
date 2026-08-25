@@ -102,16 +102,19 @@ USAGE:
         List every name this view holds history for, with its lifecycle state:
         LIVE, GRACE, QUARANTINE, FREE, or the revoked freeze.
 
-    vayu export --view <dir> [--out <file>]
-        Bundle every record this view holds into one canonical CBOR document
-        (an array of exact record byte strings). With --out it is written to a
-        file; without it, hex on stdout.
+    vayu export (--view <dir> | --store <dir>) [--out <file>]
+        Bundle what one machine holds into one canonical CBOR document. With --view:
+        every accepted record's exact bytes. With --store: every pinned block as
+        [cidBytes, payload] pairs, sorted by CID. With --out a file; without it, hex
+        on stdout. Together the two bundles carry a WHOLE site over any channel.
 
-    vayu import <bundle.cbor> --view <dir> [--now s] [--window-count n]
-        Judge each record in a bundle against this view and append only what
-        verifies. Already-held bytes are skipped; refusals and deferrals are
-        reported per record — an exchange MAY carry records this peer refuses,
-        which is data, not a tool failure.
+    vayu import <bundle.cbor> (--view <dir> | --store <dir>) [options]
+        Judge each element against its destination and keep only what verifies.
+        With --view: records re-judged as received (see vayu verify). With --store:
+        every block re-hashed — the payload must match the digest inside its own
+        CID before it is pinned, so corruption anywhere refuses that block alone.
+        Already-held items skip without re-judgment; refusals print per element.
+        Verdicts are data, not tool failures: only broken input or IO exits non-zero.
 
     vayu pins <store-dir>
         List every block the store holds, classified, with totals.
@@ -386,57 +389,78 @@ fn cmd_names(argv: &[String]) -> i32 {
 }
 
 // ---------------------------------------------------------------------------
-// vayu export / vayu import — view exchange over any channel.
+// vayu export / vayu import — exchange over any channel.
 //
-// The bundle is one canonical CBOR document: an array of byte strings, each
-// string being a record's EXACT accepted bytes. Framing by CBOR rather than a
-// bespoke container means the strict decoder polices the envelope too.
+// Bundles are canonical CBOR documents, so the strict decoder polices the
+// envelope too (no bespoke container to get wrong):
+//   --view  -> an ARRAY of byte strings: records' EXACT accepted bytes.
+//   --store -> an ARRAY of [cidBytes, payload] pairs: every block held,
+//              addressed by its own binary CID. The far side re-hashes each
+//              payload before pinning, because content addressing is the one
+//              integrity check that travels with the bytes.
 // ---------------------------------------------------------------------------
 
 fn cmd_export(argv: &[String]) -> i32 {
-    let flags = match Flags::parse(argv, &["view", "out"]) {
+    let flags = match Flags::parse(argv, &["view", "store", "out"]) {
         Ok(flags) => flags,
         Err(detail) => {
             eprintln!("vayu export: {detail}");
             return 2;
         }
     };
-    let Some(view_dir) = flags.get("view") else {
-        eprintln!("vayu export needs --view <dir>");
-        return 2;
-    };
-    let view = match vayuweb_client::view::View::open(std::path::Path::new(view_dir)) {
-        Ok(view) => view,
-        Err(detail) => {
-            eprintln!("vayu export: {detail}");
+    match (flags.get("view"), flags.get("store")) {
+        (Some(_), Some(_)) => {
+            eprintln!("vayu export: --view and --store bundle different things; give one");
             return 2;
         }
-    };
-    let entries = match view.entries() {
-        Ok(entries) => entries,
-        Err(detail) => {
-            eprintln!("vayu export: {detail}");
-            return 1;
+        (None, None) => {
+            eprintln!("vayu export needs --view <dir> (records) or --store <dir> (blocks)");
+            return 2;
+        }
+        _ => {}
+    }
+    let bundle = if let Some(view_dir) = flags.get("view") {
+        let view = match vayuweb_client::view::View::open(std::path::Path::new(view_dir)) {
+            Ok(view) => view,
+            Err(detail) => {
+                eprintln!("vayu export: {detail}");
+                return 2;
+            }
+        };
+        let entries = match view.entries() {
+            Ok(entries) => entries,
+            Err(detail) => {
+                eprintln!("vayu export: {detail}");
+                return 1;
+            }
+        };
+        let count = entries.len();
+        let encoded = vayuweb_client::cbor::encode(&vayuweb_client::cbor::Value::Array(
+            entries
+                .iter()
+                .map(|e| vayuweb_client::cbor::Value::Bytes(e.bytes.clone()))
+                .collect(),
+        ))
+        .expect("an array of byte strings always encodes");
+        (encoded, format!("{count} record(s)"))
+    } else {
+        let store_dir = flags.get("store").expect("checked above");
+        match block_bundle(std::path::Path::new(store_dir)) {
+            Ok((count, encoded)) => (encoded, format!("{count} block(s)")),
+            Err(detail) => {
+                eprintln!("vayu export: {detail}");
+                return 1;
+            }
         }
     };
-    let bundle = vayuweb_client::cbor::encode(&vayuweb_client::cbor::Value::Array(
-        entries
-            .iter()
-            .map(|e| vayuweb_client::cbor::Value::Bytes(e.bytes.clone()))
-            .collect(),
-    ))
-    .expect("an array of byte strings always encodes");
+    let (bundle, what) = bundle;
     match flags.get("out") {
         Some(out) => {
             if let Err(e) = std::fs::write(out, &bundle) {
                 eprintln!("vayu export: cannot write {out:?}: {e}");
                 return 1;
             }
-            println!(
-                "{} record(s) -> {out} ({} bytes)",
-                entries.len(),
-                bundle.len()
-            );
+            println!("{what} -> {out} ({} bytes)", bundle.len());
         }
         None => {
             // No --out: hex on stdout, so the smallest possible exchange is a copy-paste.
@@ -449,22 +473,61 @@ fn cmd_export(argv: &[String]) -> i32 {
     0
 }
 
+/// Every block a store holds as [cidBytes, payload] pairs in one canonical document,
+/// sorted by CID text for reproducible bundles.
+fn block_bundle(store_dir: &std::path::Path) -> Result<(usize, Vec<u8>), String> {
+    let mut pairs: Vec<(String, Vec<u8>, Vec<u8>)> = Vec::new();
+    let entries =
+        std::fs::read_dir(store_dir).map_err(|e| format!("cannot list {store_dir:?}: {e}"))?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Ok(cid) = Cid::from_text(&name) else {
+            continue;
+        };
+        let payload =
+            std::fs::read(entry.path()).map_err(|e| format!("cannot read {name}: {e}"))?;
+        pairs.push((name, cid.to_bytes(), payload));
+    }
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    let count = pairs.len();
+    let encoded = vayuweb_client::cbor::encode(&vayuweb_client::cbor::Value::Array(
+        pairs
+            .into_iter()
+            .map(|(_, cid_bytes, payload)| {
+                vayuweb_client::cbor::Value::Array(vec![
+                    vayuweb_client::cbor::Value::Bytes(cid_bytes),
+                    vayuweb_client::cbor::Value::Bytes(payload),
+                ])
+            })
+            .collect(),
+    ))
+    .expect("an array of arrays of byte strings always encodes");
+    Ok((count, encoded))
+}
+
 fn cmd_import(argv: &[String]) -> i32 {
     let Some(bundle_path) = argv.first().filter(|a| !a.starts_with("--")) else {
         eprintln!("vayu import needs a bundle file");
         return 2;
     };
-    let flags = match Flags::parse(&argv[1..], &["view", "now", "window-count"]) {
+    let flags = match Flags::parse(&argv[1..], &["view", "store", "now", "window-count"]) {
         Ok(flags) => flags,
         Err(detail) => {
             eprintln!("vayu import: {detail}");
             return 2;
         }
     };
-    let Some(view_dir) = flags.get("view") else {
-        eprintln!("vayu import needs --view <dir>");
-        return 2;
-    };
+    match (flags.get("view"), flags.get("store")) {
+        (Some(_), Some(_)) => {
+            eprintln!("vayu import: --view and --store fill different homes; give one");
+            return 2;
+        }
+        (None, None) => {
+            eprintln!("vayu import needs --view <dir> (records) or --store <dir> (blocks)");
+            return 2;
+        }
+        _ => {}
+    }
     let bytes = match std::fs::read(bundle_path) {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -475,7 +538,7 @@ fn cmd_import(argv: &[String]) -> i32 {
     let records = match vayuweb_client::record::decode_record(&bytes) {
         Ok(vayuweb_client::cbor::Value::Array(records)) => records,
         Ok(_) => {
-            eprintln!("vayu import: a bundle is a CBOR array of record byte strings");
+            eprintln!("vayu import: a bundle is a CBOR array");
             return 2;
         }
         Err(e) => {
@@ -483,6 +546,16 @@ fn cmd_import(argv: &[String]) -> i32 {
             return 2;
         }
     };
+
+    // Blocks mode: content-addressed payloads, each re-hashed before it is pinned.
+    if flags.has("store") {
+        return import_blocks(
+            &records,
+            std::path::Path::new(flags.get("store").expect("checked above")),
+        );
+    }
+
+    let view_dir = flags.get("view").expect("checked above");
     let view = match vayuweb_client::view::View::open(std::path::Path::new(view_dir)) {
         Ok(view) => view,
         Err(detail) => {
@@ -547,6 +620,69 @@ fn cmd_import(argv: &[String]) -> i32 {
     );
     // Verdicts are data-dependent outcomes, not tool failures: an exchange SHOULD be able to
     // carry records this peer will refuse. Only broken input or IO is an exit 2/1.
+    0
+}
+
+/// Blocks mode: every element must be [cidBytes, payload]; the payload must hash back to
+/// the digest inside its own CID before it is pinned — content addressing is the integrity
+/// check that travels with the bytes, so a flipped bit anywhere refuses that one block and
+/// nothing else.
+fn import_blocks(records: &[vayuweb_client::cbor::Value], store_dir: &std::path::Path) -> i32 {
+    let store = match vayuweb_client::store::BlockStore::open(store_dir) {
+        Ok(store) => store,
+        Err(e) => {
+            eprintln!("vayu import: {e}");
+            return 2;
+        }
+    };
+    let mut accepted = 0usize;
+    let mut held = 0usize;
+    let mut refused = 0usize;
+    for element in records {
+        let vayuweb_client::cbor::Value::Array(pair) = element else {
+            refused += 1;
+            println!("REJECT BAD_BLOCK: an element must be [cid, bytes]");
+            continue;
+        };
+        let [vayuweb_client::cbor::Value::Bytes(cid_bytes), vayuweb_client::cbor::Value::Bytes(payload)] =
+            pair.as_slice()
+        else {
+            refused += 1;
+            println!("REJECT BAD_BLOCK: an element must be two byte strings");
+            continue;
+        };
+        let cid = match Cid::from_bytes(cid_bytes) {
+            Ok(cid) => cid,
+            Err(e) => {
+                refused += 1;
+                println!("REJECT BAD_CID: {e}");
+                continue;
+            }
+        };
+        if store_dir.join(cid.to_text()).exists() {
+            held += 1;
+            continue;
+        }
+        if cid.digest != vayuweb_client::cid::sha256(payload) {
+            refused += 1;
+            println!(
+                "REJECT BAD_DIGEST: {} does not match its own address",
+                cid.to_text()
+            );
+            continue;
+        }
+        if let Err(e) = store.put_all(std::iter::once((cid, payload.clone()))) {
+            eprintln!("vayu import: the store refused a verified write: {e}");
+            return 1;
+        }
+        accepted += 1;
+    }
+    println!(
+        "\n{accepted} accepted · {held} already held · {refused} refused (store: {})",
+        store_dir.display()
+    );
+    // Same policy as records: a corrupt block in a bundle is DATA the peer refuses, not a
+    // tool failure; the rest of the bundle still lands.
     0
 }
 

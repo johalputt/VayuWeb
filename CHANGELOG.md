@@ -10,6 +10,23 @@ it.
 
 ## [Unreleased]
 
+### Added — sneakernet, whole: block bundles travel with the records
+
+`vayu export --store <dir>` now bundles every pinned block as `[cidBytes, payload]` pairs in
+one canonical CBOR document (records bundles unchanged), and `vayu import --store <dir>`
+re-hashes every payload before pinning it: the bytes must match the digest inside their own
+CID, which is the one integrity check that travels with the content. A flipped bit refuses
+that block alone; everything else in the bundle still lands. Against a store that already
+holds an address, an incoming copy skips as already held — what you hold cannot be changed by
+what arrives.
+
+The two bundles together carry a WHOLE site over any channel, and the test proves the far
+side end to end: machine A publishes two files; machine B imports history and content and
+serves the site BY NAME over loopback HTTP without ever having seen machine A; machine C,
+offered a tampered bundle, pins the two clean blocks and refuses the corrupt one with
+BAD_DIGEST. Suite now 144 lib + 15 CLI + 7 serve. This is Phase 4's payload moving by
+sneakernet; what VWIP-0005 still owes is the wire that asks for these blocks on demand.
+
 ### Added — view exchange: `vayu export` and `vayu import`
 
 Two machines can now sync accepted history over ANY channel, which is everything Phase 4

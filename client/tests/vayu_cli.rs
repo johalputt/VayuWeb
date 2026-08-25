@@ -887,19 +887,25 @@ impl Drop for ServeChild {
 }
 
 /// Spawn `vayu serve`, wait for the URL line, and return the parsed address.
-fn spawn_serve_by_name(store: &Path, name: &str, now: &str) -> ServeChild {
+/// `view` overrides the record log when it is not the default `<store>/view`.
+fn spawn_serve_by_name(store: &Path, name: &str, now: &str, view: Option<&Path>) -> ServeChild {
     use std::io::BufRead;
+    let mut args = vec![
+        "serve".to_string(),
+        store.to_str().expect("utf8").to_string(),
+        "--name".to_string(),
+        name.to_string(),
+        "--port".to_string(),
+        "0".to_string(),
+        "--now".to_string(),
+        now.to_string(),
+    ];
+    if let Some(view) = view {
+        args.push("--view".to_string());
+        args.push(view.to_str().expect("utf8").to_string());
+    }
     let mut child = Command::new(env!("CARGO_BIN_EXE_vayu"))
-        .args([
-            "serve",
-            store.to_str().expect("utf8"),
-            "--name",
-            name,
-            "--port",
-            "0",
-            "--now",
-            now,
-        ])
+        .args(&args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .spawn()
@@ -1005,7 +1011,7 @@ fn publish_holds_history_and_serve_by_name_roundtrips() {
     assert_eq!(held, 1);
 
     // And serve --name resolves through it over real HTTP.
-    let server = spawn_serve_by_name(&store, "roundtrip.vayu", &now.to_string());
+    let server = spawn_serve_by_name(&store, "roundtrip.vayu", &now.to_string(), None);
     let (status, _head, body) = http_get(&server.addr, "/");
     assert_eq!(status, 200);
     assert!(
@@ -1272,4 +1278,168 @@ fn with_zeroed_sig(bytes: &[u8]) -> Vec<u8> {
         }
     }
     vayuweb_client::cbor::encode(&vayuweb_client::cbor::Value::Map(members)).expect("re-encodes")
+}
+
+// ---------------------------------------------------------------------------
+// Sneakernet, whole: records AND blocks travel as bundles, and the far side
+// serves the site BY NAME without ever having seen the original machine.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_whole_site_travels_as_bundles_and_the_far_side_serves_by_name() {
+    let work = TempDir::new("sneakernet");
+    let now = 1_800_000_000u64;
+
+    // Machine A publishes two files.
+    let site = work.path().join("site");
+    work.file(
+        "site/index.html",
+        "<!doctype html><title>travel</title><p>whole site</p>",
+    );
+    work.file("site/logo.png", "PNGBYTES-TRAVEL");
+    let store_a = work.path().join("store-a");
+    let seed = work.path().join("seed.hex");
+    std::fs::write(&seed, seed_hex(0x91)).expect("writes");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "publish",
+            site.to_str().expect("utf8"),
+            "--name",
+            "travel.vayu",
+            "--store",
+            store_a.to_str().expect("utf8"),
+            "--key-file",
+            seed.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Two bundles leave machine A: history and content.
+    let recs_path = work.path().join("recs.cbor");
+    let blocks_path = work.path().join("blocks.cbor");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "export",
+            "--view",
+            store_a.join("view").to_str().expect("utf8"),
+            "--out",
+            recs_path.to_str().expect("utf8"),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("record(s)"), "{stdout}");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "export",
+            "--store",
+            store_a.to_str().expect("utf8"),
+            "--out",
+            blocks_path.to_str().expect("utf8"),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // index.html is one raw chunk, logo.png another, the dag-pb root a third.
+    assert!(stdout.contains("3 block(s)"), "{stdout}");
+
+    // Machine B: fresh home, imports both. Records are judged; blocks re-hashed.
+    let store_b = work.path().join("store-b");
+    let view_b = work.path().join("view-b");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "import",
+            recs_path.to_str().expect("utf8"),
+            "--view",
+            view_b.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("1 accepted"));
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "import",
+            blocks_path.to_str().expect("utf8"),
+            "--store",
+            store_b.to_str().expect("utf8"),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("3 accepted"));
+
+    // The far side now resolves the name from imported history and reads the
+    // content from imported blocks — over loopback HTTP, by NAME.
+    let server = spawn_serve_by_name(&store_b, "travel.vayu", &now.to_string(), Some(&view_b));
+    let (status, _head, body) = http_get(&server.addr, "/");
+    assert_eq!(status, 200);
+    assert!(
+        body.starts_with(b"<!doctype html><title>travel</title>"),
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    drop(server);
+
+    // A flipped payload byte refuses THAT block alone: content addressing travels
+    // with the bytes.
+    let mut bundle_records =
+        match vayuweb_client::record::decode_record(&std::fs::read(&blocks_path).expect("reads"))
+            .expect("decodes")
+        {
+            vayuweb_client::cbor::Value::Array(records) => records,
+            _ => panic!("an array"),
+        };
+    if let Some(vayuweb_client::cbor::Value::Array(pair)) = bundle_records.first_mut() {
+        if let [vayuweb_client::cbor::Value::Bytes(cid_bytes), vayuweb_client::cbor::Value::Bytes(payload)] =
+            pair.as_mut_slice()
+        {
+            let last = payload.len() - 1;
+            payload[last] ^= 0x01;
+            let _ = cid_bytes;
+        }
+    }
+    let tampered =
+        vayuweb_client::cbor::encode(&vayuweb_client::cbor::Value::Array(bundle_records))
+            .expect("encodes");
+    let tampered_path = work.path().join("tampered.cbor");
+    std::fs::write(&tampered_path, &tampered).expect("writes");
+    // Against a store that already holds those addresses, the incoming copies skip as
+    // already held — what you hold cannot be changed by what arrives. The digest refusal
+    // needs a fresh destination: machine C, which has none of these blocks yet.
+    let store_c = work.path().join("store-c");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "import",
+            tampered_path.to_str().expect("utf8"),
+            "--store",
+            store_c.to_str().expect("utf8"),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "a bad block is data, not tool failure"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("REJECT BAD_DIGEST"), "{stdout}");
+    // One refused (the tampered one), the other two verified and pinned.
+    assert!(stdout.contains("1 refused"), "{stdout}");
+    assert!(stdout.contains("2 accepted"), "{stdout}");
 }
