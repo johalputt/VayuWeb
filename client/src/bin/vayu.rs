@@ -1391,11 +1391,21 @@ fn cmd_serve(argv: &[String]) -> i32 {
             return 2;
         }
     };
-    println!(
+    // Best-effort announcements: a preview server must not DIE because whoever
+    // launched it closed the pipe its stdout was writing to (a harness that stops
+    // reading after the URL line, a supervisor rotating logs). Rust's println!
+    // panics on a broken pipe; serve's chatter never gets to be lethal.
+    let say = |text: &str| {
+        use std::io::Write;
+        let mut out = std::io::stdout().lock();
+        let _ = out.write_all(text.as_bytes());
+        let _ = out.write_all(b"\n");
+        let _ = out.flush();
+    };
+    say(&format!(
         "serving   http://{}/\nroot      {}\nstop with Ctrl-C",
         handle.addr, root_text_owned
-    );
-    let _ = std::io::stdout().flush();
+    ));
     // The default SIGINT/console-ctrl behaviour ends the process, which closes the socket:
     // exactly what a preview server should do. No signal machinery beyond that.
     loop {
