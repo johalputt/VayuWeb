@@ -10,6 +10,24 @@ it.
 
 ## [Unreleased]
 
+### Added — `vayu renew`: the only op that extends time
+
+Publish's automatic UPDATE re-points content but never extends the term — until now, a name
+died at its expiry no matter what its owner did. `vayu renew` extends the term by one more
+year measured from the OLD expiry, carries proof of work like a registration, and is legal
+only inside the renewal window (the last 60 days). Outside it, the builder refuses TOO_EARLY
+before anything expensive runs; the test proves both sides plus `names` showing the extended
+expiry and serve-by-name judging the RENEW tip clean.
+
+Resolution learned what RENEW means: a RENEW record carries no pointer, so name-based reading
+now scans BACKWARD from the tip to the most recent pointer-bearing record (`View::
+resolved_root`) — a renewed name still resolves to whatever was last published. The backward
+walk initially shipped with the same genesis-before-sort mistake fixed last round in
+judge_held_tip, caught by this round's own tests before any push.
+
+Suite now 144 lib + 19 CLI + 7 serve. The owner's vocabulary is complete against the spec's
+op set: REGISTER, RENEW, UPDATE, TRANSFER, RELINQUISH, REVOKE — every one producible by the CLI.
+
 ### Fixed + proven — settlement completion, recipient side
 
 The transfer story now closes on both sides, and the proof found one more real defect. After

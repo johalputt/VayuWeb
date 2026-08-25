@@ -22,6 +22,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::cid::Cid;
 use crate::domain::record_hash_from_bytes;
 use crate::verify::{fully_released, peek, verify, Peeked, PrevView, Verdict};
 
@@ -332,6 +333,54 @@ impl View {
         Ok(verify(tip_bytes, Some(&parent), now, window_count))
     }
 
+    /// The cid entry the chain currently points at: from the tip, scan BACKWARDS to the
+    /// most recent record that carries one. A RENEW extends time and carries no pointer;
+    /// the name still resolves to whatever the last pointer-bearing record said.
+    pub fn resolved_root(&self, label: &str, tld: &str) -> Result<Cid, String> {
+        let all = self.entries()?;
+        let mut mine: Vec<(u64, [u8; 32], [u8; 32], Entry)> = Vec::new();
+        for entry in all {
+            let Ok(peeked) = peek(&entry.bytes) else {
+                continue;
+            };
+            if peeked.label != label || peeked.tld != tld {
+                continue;
+            }
+            let Ok(prev_hash) = prev_hash_of(&entry.bytes) else {
+                continue;
+            };
+            mine.push((
+                peeked.seq,
+                record_hash_from_bytes(&entry.bytes),
+                prev_hash,
+                entry,
+            ));
+        }
+        if mine.is_empty() {
+            return Err(format!("{label}.{tld} has no accepted history"));
+        }
+        // Genesis first AFTER sorting by sequence; directory order is arbitrary.
+        mine.sort_by_key(|(seq, _, _, _)| *seq);
+        if mine[0].0 != 0 {
+            return Err(format!("{label}.{tld} has no accepted history"));
+        }
+        let mut tip_index = 0usize;
+        for index in 1..mine.len() {
+            if mine[index].0 != index as u64 || mine[index].2 != mine[index - 1].1 {
+                break;
+            }
+            tip_index = index;
+        }
+        for index in (0..=tip_index).rev() {
+            if let Some(root) = first_cid_of(&mine[index].3.bytes) {
+                return Ok(root);
+            }
+        }
+        Err(format!(
+            "no record in {label}.{tld}'s chain carries a cid entry"
+        ))
+    }
+
     /// Every named chain in the log with its current tip, for `vayu names`.
     pub fn all_names(&self) -> Result<Vec<(String, String, Tip)>, String> {
         let mut names: Vec<(String, String)> = Vec::new();
@@ -389,6 +438,34 @@ fn owner_of(bytes: &[u8]) -> Result<[u8; 32], String> {
     let mut key = [0u8; 32];
     key.copy_from_slice(&raw);
     Ok(key)
+}
+
+/// The cid entry a record points at, if it carries one — RENEW and the terminal ops
+/// carry none, and `None` is the honest answer for them.
+fn first_cid_of(bytes: &[u8]) -> Option<Cid> {
+    let value = crate::record::decode_record(bytes).ok()?;
+    let crate::cbor::Value::Map(members) = value else {
+        return None;
+    };
+    let entries = members.iter().find_map(|(k, v)| match k {
+        crate::cbor::Key::Text(name) if name == "records" => match v {
+            crate::cbor::Value::Array(entries) => Some(entries),
+            _ => None,
+        },
+        _ => None,
+    })?;
+    let first = entries.first()?;
+    let crate::cbor::Value::Map(fields) = first else {
+        return None;
+    };
+    let cid_bytes = fields.iter().find_map(|(k, v)| match k {
+        crate::cbor::Key::Text(name) if name == "value" => match v {
+            crate::cbor::Value::Bytes(bytes) => Some(bytes.clone()),
+            _ => None,
+        },
+        _ => None,
+    })?;
+    Cid::from_bytes(&cid_bytes).ok()
 }
 
 fn not_after_of(bytes: &[u8]) -> Result<u64, String> {

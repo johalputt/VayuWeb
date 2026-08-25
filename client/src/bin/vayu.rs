@@ -136,9 +136,16 @@ USAGE:
         The deadman switch: resolution stops at once; the name stays frozen for the
         rest of its term and then quarantines, accepting nothing from anyone.
 
-        All three take --now like publish, resolve the predecessor from the view
-        exactly as publish does, refuse if another key holds the name, and append
-        their signed record to the view when it verifies there.
+    vayu renew <label>.<tld> --store <dir> --key-file <f> [options]
+        Extend the term by one more year, from the old expiry. Only inside the
+        renewal window (the last 60 days of the term) and with proof of work like a
+        registration. This is how a name outlives its first year; publish's
+        automatic UPDATE re-points content but never extends time.
+
+        All four take --now like publish (--renew also --window-count/--pow-limit),
+        resolve the predecessor from the view exactly as publish does, refuse if
+        another key holds the name, and append their signed record to the view when
+        it verifies there.
 
     vayu help
         Show this text.
@@ -164,6 +171,7 @@ fn run() -> i32 {
         Some("transfer") => cmd_owner_exit(&argv[1..], OwnerOp::Transfer),
         Some("relinquish") => cmd_owner_exit(&argv[1..], OwnerOp::Relinquish),
         Some("revoke") => cmd_owner_exit(&argv[1..], OwnerOp::Revoke),
+        Some("renew") => cmd_owner_exit(&argv[1..], OwnerOp::Renew),
         Some("pins") => cmd_pins(&argv[1..]),
         Some("help") | Some("--help") | Some("-h") => {
             print!("{USAGE}");
@@ -648,10 +656,11 @@ fn cmd_import(argv: &[String]) -> i32 {
 }
 
 // ---------------------------------------------------------------------------
-// vayu transfer / relinquish / revoke — the owner's exits. One shape, three
-// ops: resolve the predecessor from the view exactly as publish does, sign the
-// op under that chain, judge it as received against the same view, and only
-// then append.
+// vayu transfer / relinquish / revoke / renew — the owner's operations. One
+// shape: resolve the predecessor from the view exactly as publish does, sign
+// the op under that chain, judge it as received against the same view, and
+// only then append. (renew EXTENDS the term by a year, proof of work
+// included; publish's automatic UPDATE only re-points within the term.)
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -659,6 +668,7 @@ enum OwnerOp {
     Transfer,
     Relinquish,
     Revoke,
+    Renew,
 }
 
 impl OwnerOp {
@@ -667,6 +677,7 @@ impl OwnerOp {
             Self::Transfer => "transfer",
             Self::Relinquish => "relinquish",
             Self::Revoke => "revoke",
+            Self::Renew => "renew",
         }
     }
 }
@@ -811,6 +822,31 @@ fn cmd_owner_exit(argv: &[String], op: OwnerOp) -> i32 {
         OwnerOp::Revoke => {
             vayuweb_client::record::build_revoke(&identity, &predecessor, &label, &tld, now)
         }
+        OwnerOp::Renew => {
+            let window_count = match flags.number("window-count") {
+                Ok(value) => value.unwrap_or(0),
+                Err(detail) => {
+                    eprintln!("vayu renew: {detail}");
+                    return 2;
+                }
+            };
+            let pow_limit = match flags.number("pow-limit") {
+                Ok(value) => value.unwrap_or(10_000_000),
+                Err(detail) => {
+                    eprintln!("vayu renew: {detail}");
+                    return 2;
+                }
+            };
+            vayuweb_client::record::build_renew(
+                &identity,
+                &predecessor,
+                &label,
+                &tld,
+                now,
+                window_count,
+                pow_limit,
+            )
+        }
     };
     let record = match built {
         Ok(record) => record,
@@ -822,7 +858,12 @@ fn cmd_owner_exit(argv: &[String], op: OwnerOp) -> i32 {
 
     // Judge it as received against the same view, then append on Accept. An owner op that
     // cannot re-verify against its own history is a bug in the history, not a warning.
-    match view.accept_verdict(&record, now, 0) {
+    let window_count_for_verdict = if op == OwnerOp::Renew {
+        flags.number("window-count").ok().flatten().unwrap_or(0)
+    } else {
+        0
+    };
+    match view.accept_verdict(&record, now, window_count_for_verdict) {
         Ok(vayuweb_client::verify::Verdict::Accept) => {}
         Ok(other) => {
             eprintln!(
@@ -1196,38 +1237,9 @@ fn resolve_name_root(
         ));
     }
 
-    // The pointer itself: the record's first entry must be a cid entry carrying the binary
-    // root — exactly what publish signed.
-    let value = vayuweb_client::record::decode_record(&tip.entry.bytes)
-        .map_err(|e| format!("the incumbent record does not decode: {e}"))?;
-    let entries = match value {
-        vayuweb_client::cbor::Value::Map(members) => {
-            members.into_iter().find_map(|(k, v)| match k {
-                vayuweb_client::cbor::Key::Text(name) if name == "records" => match v {
-                    vayuweb_client::cbor::Value::Array(entries) => Some(entries),
-                    _ => None,
-                },
-                _ => None,
-            })
-        }
-        _ => None,
-    }
-    .ok_or("the incumbent record carries no records field")?;
-    let first = entries
-        .first()
-        .ok_or("the incumbent record carries no entries")?;
-    let cid_bytes = match first {
-        vayuweb_client::cbor::Value::Map(fields) => fields.iter().find_map(|(k, v)| match k {
-            vayuweb_client::cbor::Key::Text(name) if name == "value" => match v {
-                vayuweb_client::cbor::Value::Bytes(bytes) => Some(bytes.clone()),
-                _ => None,
-            },
-            _ => None,
-        }),
-        _ => None,
-    }
-    .ok_or("the incumbent's first entry is not a well-shaped cid value")?;
-    Cid::from_bytes(&cid_bytes).map_err(|e| format!("the attested pointer is not a CID: {e:?}"))
+    // The pointer itself: scan back from the tip to the most recent record carrying a cid
+    // entry — a RENEW extends time without re-pointing, and the chain still resolves.
+    view.resolved_root(label, tld)
 }
 
 /// Walk a directory recursively, returning site files with '/'-separated relative paths in

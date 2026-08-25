@@ -1886,3 +1886,94 @@ fn a_transferred_name_serves_the_recipient_after_settlement() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+// ---------------------------------------------------------------------------
+// RENEW: the only op that extends time. Outside the window it refuses; inside
+// it, the term grows a year past the OLD expiry and resolution follows.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn renewing_extends_the_term_inside_the_window_and_refuses_outside_it() {
+    let work = TempDir::new("renewop");
+    let now = 1_800_000_000u64;
+    let term: u64 = 31_536_000;
+
+    let store = publish_once(&work, "w1", "longterm.vayu", 0xF1, now);
+    let seed = work.path().join("w1.hex");
+
+    // Far outside the window: the builder refuses before anything expensive runs.
+    let too_early = now + term - 90 * 86_400;
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "renew",
+            "longterm.vayu",
+            "--store",
+            store.to_str().expect("utf8"),
+            "--key-file",
+            seed.to_str().expect("utf8"),
+            "--now",
+            &too_early.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("TOO_EARLY"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read_dir(store.join("view")).expect("view").count(),
+        1,
+        "the refusal must not have grown the history"
+    );
+
+    // Inside the window (last 60 days): the term extends a year past the old expiry.
+    let in_window = now + term - 30 * 86_400;
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "renew",
+            "longterm.vayu",
+            "--store",
+            store.to_str().expect("utf8"),
+            "--key-file",
+            seed.to_str().expect("utf8"),
+            "--now",
+            &in_window.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("seq 1 appended"));
+    assert_eq!(
+        std::fs::read_dir(store.join("view")).expect("view").count(),
+        2
+    );
+
+    // `names` shows the EXTENDED expiry: old expiry + a full year.
+    let extended_expiry = now + term + term;
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "names",
+            "--view",
+            store.join("view").to_str().expect("utf8"),
+        ])
+        .output()
+        .expect("runs");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(&format!("expires {extended_expiry}")),
+        "{stdout}"
+    );
+
+    // And the renewed chain still resolves: serve-by-name judges the RENEW tip clean.
+    let server = spawn_serve_by_name(&store, "longterm.vayu", &in_window.to_string(), None);
+    let (status, _head, _body) = http_get(&server.addr, "/");
+    assert_eq!(status, 200);
+}

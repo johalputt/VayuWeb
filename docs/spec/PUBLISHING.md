@@ -14,7 +14,9 @@ builds,
 addresses, pins, signs — reading the history it already holds, so the next publication under
 your key is an UPDATE from that chain, a fresh REGISTER once the name lapses back to the open
 pool, and a refusal while someone else holds it — and appends the signed record to a local
-registry view; `vayu transfer`, `vayu relinquish` and `vayu revoke` are the owner's exits,
+registry view; `vayu renew` extends the term a year at a time from inside the renewal window,
+and resolution scans backward through pointerless RENEWs to whatever was last published;
+`vayu transfer`, `vayu relinquish` and `vayu revoke` are the owner's exits,
 each judged against the same view it extends; `vayu verify` judges a record
 received from somewhere else in its exact bytes — chain discipline, controlling-key signatures,
 transfer countersignatures, proof of work against a caller-supplied difficulty, clock
