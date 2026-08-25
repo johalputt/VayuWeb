@@ -10,6 +10,26 @@ it.
 
 ## [Unreleased]
 
+### Added — renewal is automatic: publish renews its own names
+
+`vayu publish` now reads the history it already holds: when the view has a chain for the name
+under YOUR key, the next publication signs an UPDATE from that chain — no `--prev` fishing
+through record files. The incumbent decides what this publish may sign: an UPDATE while the
+name is held, a fresh REGISTER once it has lapsed back to the open pool, and a flat refusal
+while someone else holds it ("a name is not taken over by publishing at it"). An explicit
+--prev still overrides for hand-carried chains.
+
+Reading a renewed name exposed a real defect in serve-by-name: re-judging a held UPDATE
+against a view whose tip IS that record demanded "seq 1 does not follow 1" — a record cannot
+follow itself. The fix is a purpose-built judgment for held tips (`View::judge_held_tip`):
+successor checks run against the chain BELOW the tip, while signature and clock discipline
+still see nothing but the bytes — so the forged-incumbent refusal survives unchanged. A first
+publish also no longer materializes anything in its store before the site passes the checker.
+
+Tests: republish inside the renewal window (which opens 60 days before expiry) yields seq 1
+and serve-by-name resolves the NEW content; a squatter's key refuses with the view untouched.
+Suite now 144 lib + 16 CLI + 7 serve.
+
 ### Added — sneakernet, whole: block bundles travel with the records
 
 `vayu export --store <dir>` now bundles every pinned block as `[cidBytes, payload]` pairs in

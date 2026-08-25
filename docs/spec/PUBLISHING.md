@@ -9,8 +9,11 @@ as described in RFC 2119.
 **Status:** Draft — not yet deployed. Section 2.3's deep-link rule is implemented in
 `registry/src/proxy.ts` and `registry/src/resolve.ts`, which read the manifest and serve `notFound`
 with 404 or `fallback` with 200. The whole normative sequence of section 1 now exists, RUNS
-locally, and its output is READABLE BY NAME: `vayu publish` checks, builds, addresses, pins,
-signs, and appends the signed record to a local registry view; `vayu verify` judges a record
+locally, and its output is READABLE BY NAME AND RENEWABLE: `vayu publish` checks, builds,
+addresses, pins, signs — reading the history it already holds, so the next publication under
+your key is an UPDATE from that chain, a fresh REGISTER once the name lapses back to the open
+pool, and a refusal while someone else holds it — and appends the signed record to a local
+registry view; `vayu verify` judges a record
 received from somewhere else in its exact bytes — chain discipline, controlling-key signatures,
 transfer countersignatures, proof of work against a caller-supplied difficulty, clock
 discipline that defers rather than rejects; `vayu accept`, `vayu names`, `vayu export` and

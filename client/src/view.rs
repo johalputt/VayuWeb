@@ -245,6 +245,86 @@ impl View {
         Ok(verify(bytes, Some(&tip.prev), now, window_count))
     }
 
+    /// Re-judge a record this view ALREADY HOLDS as the tip of its chain — the reading
+    /// path's gate. The successor checks run against the chain BELOW the tip, never against
+    /// the tip itself (a record cannot follow itself); everything else is [`verify`] with
+    /// its order preserved, so a tampered held file still refuses on signature or digest.
+    pub fn judge_held_tip(
+        &self,
+        label: &str,
+        tld: &str,
+        now: u64,
+        window_count: u64,
+    ) -> Result<Verdict, String> {
+        // Replay the walk exactly as chain_tip does, but keep every link so the parent of
+        // the tip is at hand.
+        let all = self.entries()?;
+        let mut mine: Vec<(u64, [u8; 32], [u8; 32], &Entry)> = Vec::new();
+        for entry in &all {
+            let Ok(peeked) = peek(&entry.bytes) else {
+                continue;
+            };
+            if peeked.label != label || peeked.tld != tld {
+                continue;
+            }
+            let Ok(prev_hash) = prev_hash_of(&entry.bytes) else {
+                continue;
+            };
+            mine.push((
+                peeked.seq,
+                record_hash_from_bytes(&entry.bytes),
+                prev_hash,
+                entry,
+            ));
+        }
+        if mine.is_empty() || mine[0].0 != 0 {
+            return Ok(Verdict::Reject {
+                code: "NO_PREDECESSOR",
+                detail: format!("{label}.{tld} has no accepted history in this view"),
+            });
+        }
+        mine.sort_by_key(|(seq, _, _, _)| *seq);
+        let mut tip_index = 0usize;
+        for index in 1..mine.len() {
+            if mine[index].0 != index as u64 || mine[index].2 != mine[index - 1].1 {
+                break;
+            }
+            tip_index = index;
+        }
+
+        let tip_bytes = &mine[tip_index].3.bytes;
+        let Peeked { op, .. } = peek(tip_bytes)?;
+        if op == "REGISTER" {
+            return Ok(verify(tip_bytes, None, now, window_count));
+        }
+        let Some(before) = tip_index.checked_sub(1) else {
+            return Ok(Verdict::Reject {
+                code: "BAD_SEQ",
+                detail: "a non-REGISTER cannot be seq 0".to_string(),
+            });
+        };
+        let signer_key = if op == "TRANSFER" {
+            match before.checked_sub(1) {
+                Some(settler) => owner_of(&mine[settler].3.bytes)?,
+                None => return Err("a stored TRANSFER cannot be seq 0".to_string()),
+            }
+        } else {
+            owner_of(&mine[before].3.bytes)?
+        };
+        let parent = PrevView {
+            seq: peek(&mine[before].3.bytes)?.seq,
+            not_before: peek(&mine[before].3.bytes)?.not_before,
+            not_after: not_after_of(&mine[before].3.bytes)?,
+            owner_key: owner_of(&mine[before].3.bytes)?,
+            signer_key,
+            suite: suite_of(&mine[before].3.bytes)?,
+            hash: mine[before].1,
+            revoked: false,
+            op_text: peek(&mine[before].3.bytes)?.op,
+        };
+        Ok(verify(tip_bytes, Some(&parent), now, window_count))
+    }
+
     /// Every named chain in the log with its current tip, for `vayu names`.
     pub fn all_names(&self) -> Result<Vec<(String, String, Tip)>, String> {
         let mut names: Vec<(String, String)> = Vec::new();

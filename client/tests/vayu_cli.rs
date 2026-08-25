@@ -1443,3 +1443,126 @@ fn a_whole_site_travels_as_bundles_and_the_far_side_serves_by_name() {
     assert!(stdout.contains("1 refused"), "{stdout}");
     assert!(stdout.contains("2 accepted"), "{stdout}");
 }
+
+// ---------------------------------------------------------------------------
+// Renewal, automatic: publishing again under your own chain is an UPDATE;
+// publishing at a name someone else holds refuses; and serve-by-name follows
+// the renewed root without being told.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn republishing_renews_the_chain_and_a_squatter_is_refused() {
+    let work = TempDir::new("renew");
+    let now = 1_800_000_000u64;
+
+    // First publication.
+    work.file("site/index.html", "<!doctype html><title>v1</title>");
+    let store = work.path().join("store");
+    let seed = work.path().join("seed.hex");
+    std::fs::write(&seed, seed_hex(0xA1)).expect("writes");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "publish",
+            work.path().join("site").to_str().expect("utf8"),
+            "--name",
+            "orchard.vayu",
+            "--store",
+            store.to_str().expect("utf8"),
+            "--key-file",
+            seed.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read_dir(store.join("view")).expect("view").count(),
+        1
+    );
+
+    // Second publication, same key, changed content: the view supplies the
+    // predecessor, so this is an UPDATE — no --prev was passed. The clock moves
+    // into the renewal window, which opens 60 days before the term ends; an
+    // UPDATE outside it is refused by design.
+    std::fs::write(
+        work.path().join("site/index.html"),
+        "<!doctype html><title>v2</title><p>renewed</p>",
+    )
+    .expect("rewrites");
+    let renewed_at = now + 31_536_000 - 30 * 86_400;
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "publish",
+            work.path().join("site").to_str().expect("utf8"),
+            "--name",
+            "orchard.vayu",
+            "--store",
+            store.to_str().expect("utf8"),
+            "--key-file",
+            seed.to_str().expect("utf8"),
+            "--now",
+            &renewed_at.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("renewal   seq 0 -> 1"), "{stdout}");
+    // History grew by exactly the one new record.
+    assert_eq!(
+        std::fs::read_dir(store.join("view")).expect("view").count(),
+        2
+    );
+
+    // And serve-by-name resolves to the RENEWED content: v2, not v1.
+    let server = spawn_serve_by_name(&store, "orchard.vayu", &renewed_at.to_string(), None);
+    let (status, _head, body) = http_get(&server.addr, "/");
+    assert_eq!(status, 200);
+    assert!(
+        body.starts_with(b"<!doctype html><title>v2</title>"),
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    drop(server);
+
+    // A different key publishing AT orchard.vayu refuses: a name is not taken
+    // over by pointing at it. The view is untouched.
+    let squatter_seed = work.path().join("squatter.hex");
+    std::fs::write(&squatter_seed, seed_hex(0xA2)).expect("writes");
+    work.file(
+        "site-squat/index.html",
+        "<!doctype html><title>mine!</title>",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "publish",
+            work.path().join("site-squat").to_str().expect("utf8"),
+            "--name",
+            "orchard.vayu",
+            "--store",
+            store.to_str().expect("utf8"),
+            "--key-file",
+            squatter_seed.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("another key"), "{stderr}");
+    assert_eq!(
+        std::fs::read_dir(store.join("view")).expect("view").count(),
+        2,
+        "the refusal must not have grown the history"
+    );
+}

@@ -44,16 +44,21 @@ USAGE:
         Check, build, address, pin locally, then sign the pointer — in that order.
         Prints the signed record as hex on stdout.
 
+        Renewal is automatic: if the view already holds this name under YOUR key,
+        this publish signs an UPDATE (seq + 1) from that chain; once the name has
+        lapsed back to the open pool, it registers anew; while someone else holds
+        it, publishing refuses. --prev overrides for a hand-carried chain.
+
     Options for publish:
         --name <label>.<tld>    the name to register or update (required)
         --store <dir>           block store directory (default: ./vayu-store)
         --key-file <file>       file holding a hex-encoded identity seed (64 hex chars)
-        --prev <file>           previous record bytes; presence makes this an UPDATE
+        --prev <file>           previous record bytes; forces an UPDATE under that chain
         --out <file>            also write the record bytes here
         --window-count <n>      TLD registration count over the trailing window (default 0)
         --pow-limit <n>         nonce-search ceiling (default 10000000)
         --now <unix-seconds>    override the clock (for reproducible runs)
-        --view <dir>            registry view to append the signed record to
+        --view <dir>            registry view appended to AND renews from
                                 (default: <store>/view)
 
     vayu serve <store-dir> (--root <cid> | --name <label>.<tld>) [options]
@@ -952,10 +957,11 @@ fn resolve_name_root(
         .chain_tip(label, tld)?
         .ok_or_else(|| format!("no accepted record for {label}.{tld} in {:?}", view_dir))?;
 
-    // Re-judge the incumbent's exact bytes before trusting where they point. For an
-    // incumbent REGISTER this is the convergence re-check; for a successor tip it is the
-    // ordinary chain verdict.
-    match view.accept_verdict(&tip.entry.bytes, now, window_count)? {
+    // Re-judge the incumbent's exact bytes before trusting where they point: successor
+    // checks against the chain BELOW it, signature and discipline against nothing but the
+    // bytes themselves — a tampered held file refuses here, a legitimate tip of any
+    // sequence number does not have to follow itself.
+    match view.judge_held_tip(label, tld, now, window_count)? {
         vayuweb_client::verify::Verdict::Accept => {}
         other => {
             return Err(format!(
@@ -1356,6 +1362,67 @@ fn cmd_publish(argv: &[String]) -> i32 {
             eprintln!("vayu publish: {detail}");
             return 2;
         }
+    };
+
+    // Renewal, automatic: the view this publish appends to is also the history it renews
+    // FROM. When it already holds a chain for this name, the incumbent decides what kind of
+    // record this publish signs — an UPDATE under your own chain while the name is held, a
+    // fresh REGISTER once it has lapsed back to the open pool, and a refusal while someone
+    // else holds it. An explicit --prev overrides all of this for hand-carried chains.
+    let predecessor = if predecessor.is_none() {
+        let view_dir = flags
+            .get("view")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| store_path.join("view"));
+        // Lookup only: a first-ever publish must not materialize anything in its store
+        // before the site has even passed the checker.
+        let existing = match std::fs::read_dir(&view_dir) {
+            Ok(_) => match vayuweb_client::view::View::open(&view_dir) {
+                Ok(view) => Some(view),
+                Err(detail) => {
+                    eprintln!("vayu publish: {detail}");
+                    return 2;
+                }
+            },
+            Err(_) => None,
+        };
+        match existing.map(|view| view.chain_tip(&label, &tld)) {
+            Some(Ok(Some(tip))) => {
+                if tip.prev.owner_key != *identity.public_key() {
+                    eprintln!(
+                        "vayu publish: {label}.{tld} is already held in this view by another \
+                         key; a name is not taken over by publishing at it"
+                    );
+                    return 1;
+                }
+                match vayuweb_client::verify::lifecycle_state(&tip.prev, now) {
+                    "FREE" => {
+                        println!(
+                            "note      {label}.{tld} lapsed back to the open pool; \
+                             registering anew"
+                        );
+                        None
+                    }
+                    _ => match Predecessor::from_bytes(&tip.entry.bytes) {
+                        Ok(previous) => {
+                            println!("renewal   seq {} -> {}", tip.prev.seq, tip.prev.seq + 1);
+                            Some(previous)
+                        }
+                        Err(e) => {
+                            eprintln!("vayu publish: unusable incumbent: {e}");
+                            return 1;
+                        }
+                    },
+                }
+            }
+            Some(Ok(None)) | None => None,
+            Some(Err(detail)) => {
+                eprintln!("vayu publish: {detail}");
+                return 2;
+            }
+        }
+    } else {
+        predecessor
     };
 
     let outcome = publish_site(
