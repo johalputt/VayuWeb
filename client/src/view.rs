@@ -277,13 +277,20 @@ impl View {
                 entry,
             ));
         }
-        if mine.is_empty() || mine[0].0 != 0 {
+        if mine.is_empty() {
             return Ok(Verdict::Reject {
                 code: "NO_PREDECESSOR",
                 detail: format!("{label}.{tld} has no accepted history in this view"),
             });
         }
+        // Genesis must be FIRST once sorted by sequence; directory order is arbitrary.
         mine.sort_by_key(|(seq, _, _, _)| *seq);
+        if mine[0].0 != 0 {
+            return Ok(Verdict::Reject {
+                code: "NO_PREDECESSOR",
+                detail: format!("{label}.{tld} has no accepted history in this view"),
+            });
+        }
         let mut tip_index = 0usize;
         for index in 1..mine.len() {
             if mine[index].0 != index as u64 || mine[index].2 != mine[index - 1].1 {

@@ -1733,3 +1733,136 @@ fn an_owner_can_transfer_relinquish_and_revoke() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("REVOKED"), "{stdout}");
 }
+
+// ---------------------------------------------------------------------------
+// Settlement completion, recipient side: after the horizon, the RECIPIENT
+// controls the name — renewal under their key just works, and the transferor's
+// key is locked out.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_transferred_name_serves_the_recipient_after_settlement() {
+    let work = TempDir::new("settled");
+    let now = 1_800_000_000u64;
+
+    // Alice registers and transfers mid-term to Bob.
+    work.file("site-a/index.html", "<!doctype html><title>alices</title>");
+    let store = work.path().join("store");
+    let alice_seed = work.path().join("alice.hex");
+    std::fs::write(&alice_seed, seed_hex(0xE1)).expect("writes");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "publish",
+            work.path().join("site-a").to_str().expect("utf8"),
+            "--name",
+            "passing.vayu",
+            "--store",
+            store.to_str().expect("utf8"),
+            "--key-file",
+            alice_seed.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let bob_seed = work.path().join("bob.hex");
+    std::fs::write(&bob_seed, seed_hex(0xE2)).expect("writes");
+    let transferred_at = now + 90 * 86_400;
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "transfer",
+            "passing.vayu",
+            "--store",
+            store.to_str().expect("utf8"),
+            "--key-file",
+            alice_seed.to_str().expect("utf8"),
+            "--recipient-seed",
+            bob_seed.to_str().expect("utf8"),
+            "--now",
+            &transferred_at.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // After settlement (14 days), BOB renews: auto-renewal reads the TRANSFER tip,
+    // whose owner is now him.
+    let settled_at = transferred_at + 14 * 86_400 + 86_400;
+    work.file(
+        "site-b/index.html",
+        "<!doctype html><title>bobs</title><p>under new management</p>",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "publish",
+            work.path().join("site-b").to_str().expect("utf8"),
+            "--name",
+            "passing.vayu",
+            "--store",
+            store.to_str().expect("utf8"),
+            "--key-file",
+            bob_seed.to_str().expect("utf8"),
+            "--now",
+            &settled_at.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert!(
+        output.status.success(),
+        "the recipient renews after settlement: {} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("renewal   seq 1 -> 2"), "{stdout}");
+
+    // Resolution follows the recipient's root: Bob's content, not Alice's.
+    let server = spawn_serve_by_name(&store, "passing.vayu", &settled_at.to_string(), None);
+    let (status, _head, body) = http_get(&server.addr, "/");
+    assert_eq!(status, 200);
+    assert!(
+        body.starts_with(b"<!doctype html><title>bobs</title>"),
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    drop(server);
+
+    // And Alice is locked out: her key no longer matches the chain's owner.
+    std::fs::write(
+        work.path().join("site-a/index.html"),
+        "<!doctype html><title>sneak-back</title>",
+    )
+    .expect("writes");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "publish",
+            work.path().join("site-a").to_str().expect("utf8"),
+            "--name",
+            "passing.vayu",
+            "--store",
+            store.to_str().expect("utf8"),
+            "--key-file",
+            alice_seed.to_str().expect("utf8"),
+            "--now",
+            &(settled_at + 86_400).to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("another key"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

@@ -10,6 +10,19 @@ it.
 
 ## [Unreleased]
 
+### Fixed + proven — settlement completion, recipient side
+
+The transfer story now closes on both sides, and the proof found one more real defect. After
+the 14-day settlement horizon, the RECIPIENT renews under their own key: auto-renewal reads
+the TRANSFER tip (whose owner is them), signs the UPDATE, and serve-by-name resolves to THEIR
+content; the transferor's key refuses with "another key". No new mechanism was needed — only
+the guarantee that it works, now locked by test.
+
+The defect: `judge_held_tip` checked for a seq-0 genesis BEFORE sorting its records by
+sequence, so arbitrary directory order could make a later record surface as `mine[0]` and
+refuse a perfectly held history with NO_PREDECESSOR. Genesis is now checked after the sort,
+matching `chain_tip`. Suite now 144 lib + 18 CLI + 7 serve.
+
 ### Added — the owner's exits: `vayu transfer`, `vayu relinquish`, `vayu revoke`
 
 An owner could enter a name and renew it, but no CLI verb could produce the records for
