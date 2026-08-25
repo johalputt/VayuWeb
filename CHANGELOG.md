@@ -10,6 +10,16 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a preview server outlives its audience
+
+Serve's startup announcements are best-effort writes now. Rust's `println!` panics
+when stdout is a broken pipe; under CI load the test harness closed its read end
+of the child's stdout right after the URL line, the child's next print panicked,
+and the listener died with it — every later connect refused. A preview must not
+die because whoever launched it stopped listening; diagnostics stay on stderr.
+Found by teaching the reading test to report the child's exit status and captured
+stderr verbatim instead of a bare "connection refused".
+
 ### Added — alias entries: one name pointing at another, followed within budget
 
 REGISTRY.md's third entry type is now real end to end. `vayu alias <name> --to <other>`
