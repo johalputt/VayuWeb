@@ -433,8 +433,15 @@ pub fn serve_until(
     limits: WalkLimits,
 ) {
     while running.load(Ordering::SeqCst) {
-        let Ok((mut stream, _)) = listener.accept() else {
-            break;
+        let mut stream = match listener.accept() {
+            Ok((stream, _)) => stream,
+            Err(_) => {
+                // A transient accept failure — descriptor pressure on a loaded machine —
+                // must not end the preview: ending it resets every client already waiting
+                // in the backlog. Back off briefly and keep serving until told to stop.
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                continue;
+            }
         };
         // Read up to the blank line, refusing oversized heads. An oversized head is DRAINED
         // (up to a bound) rather than abandoned: a server that stops reading and closes while

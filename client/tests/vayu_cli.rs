@@ -936,34 +936,54 @@ fn spawn_serve_by_name(store: &Path, name: &str, now: &str, view: Option<&Path>)
 
 fn http_get(addr: &str, target: &str) -> (u16, String, Vec<u8>) {
     use std::io::{Read, Write};
-    let mut attempt = 0;
-    let mut stream = loop {
-        if let Ok(stream) = std::net::TcpStream::connect(addr) {
-            break stream;
+    // A loopback preview under a loaded CI runner can reset an early connection
+    // (descriptor pressure, a backlog race). The request is idempotent: retry the
+    // WHOLE exchange a bounded number of times before giving up.
+    let mut last_error = None;
+    for _ in 0..5 {
+        let stream = match std::net::TcpStream::connect(addr) {
+            Ok(stream) => stream,
+            Err(e) => {
+                last_error = Some(e.to_string());
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                continue;
+            }
+        };
+        let outcome = (|| -> std::io::Result<Vec<u8>> {
+            let mut stream = stream;
+            write!(
+                stream,
+                "GET {target} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+            )?;
+            let mut raw = Vec::new();
+            stream.read_to_end(&mut raw)?;
+            Ok(raw)
+        })();
+        match outcome {
+            Ok(raw) => {
+                let split = raw
+                    .windows(4)
+                    .position(|w| w == b"\r\n\r\n")
+                    .expect("headers");
+                let head = String::from_utf8_lossy(&raw[..split]).to_string();
+                let status: u16 = head
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .and_then(|code| code.parse().ok())
+                    .expect("a status line");
+                return (status, head, raw[split + 4..].to_vec());
+            }
+            Err(e) => {
+                last_error = Some(e.to_string());
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
         }
-        attempt += 1;
-        assert!(attempt < 100, "the server never accepted a connection");
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    };
-    write!(
-        stream,
-        "GET {target} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
-    )
-    .expect("writes");
-    let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).expect("reads");
-    let split = raw
-        .windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .expect("headers");
-    let head = String::from_utf8_lossy(&raw[..split]).to_string();
-    let status: u16 = head
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|code| code.parse().ok())
-        .expect("a status line");
-    (status, head, raw[split + 4..].to_vec())
+    }
+    panic!(
+        "GET {target} never completed: {}",
+        last_error.unwrap_or_default()
+    );
 }
 
 #[test]
