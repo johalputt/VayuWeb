@@ -867,3 +867,239 @@ fn quarantine_returns_a_name_to_the_open_pool() {
         .expect("runs");
     assert!(String::from_utf8_lossy(&output.stdout).contains("LIVE"));
 }
+
+// ---------------------------------------------------------------------------
+// The local reading path, END TO END: publish holds its own history, and
+// serve --name resolves through it — refusing anything that does not verify.
+// ---------------------------------------------------------------------------
+
+/// A running `vayu serve` child plus the address it printed.
+struct ServeChild {
+    child: std::process::Child,
+    addr: String,
+}
+
+impl Drop for ServeChild {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Spawn `vayu serve`, wait for the URL line, and return the parsed address.
+fn spawn_serve_by_name(store: &Path, name: &str, now: &str) -> ServeChild {
+    use std::io::BufRead;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "serve",
+            store.to_str().expect("utf8"),
+            "--name",
+            name,
+            "--port",
+            "0",
+            "--now",
+            now,
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawns");
+    let mut addr = None;
+    let stdout = child.stdout.take().expect("piped");
+    for line in std::io::BufReader::new(stdout).lines() {
+        let line = line.expect("reads");
+        if let Some(rest) = line.trim().strip_prefix("serving") {
+            let url = rest.trim();
+            addr = Some(
+                url.trim_start_matches("http://")
+                    .trim_end_matches('/')
+                    .to_string(),
+            );
+            break;
+        }
+    }
+    match addr {
+        Some(addr) => ServeChild { child, addr },
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("the server never announced its address");
+        }
+    }
+}
+
+fn http_get(addr: &str, target: &str) -> (u16, String, Vec<u8>) {
+    use std::io::{Read, Write};
+    let mut attempt = 0;
+    let mut stream = loop {
+        if let Ok(stream) = std::net::TcpStream::connect(addr) {
+            break stream;
+        }
+        attempt += 1;
+        assert!(attempt < 100, "the server never accepted a connection");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    write!(
+        stream,
+        "GET {target} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+    )
+    .expect("writes");
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).expect("reads");
+    let split = raw
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .expect("headers");
+    let head = String::from_utf8_lossy(&raw[..split]).to_string();
+    let status: u16 = head
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse().ok())
+        .expect("a status line");
+    (status, head, raw[split + 4..].to_vec())
+}
+
+#[test]
+fn publish_holds_history_and_serve_by_name_roundtrips() {
+    let work = TempDir::new("by-name");
+    let site = work.path().join("site");
+    work.file(
+        "site/index.html",
+        "<!doctype html><title>roundtrip</title><h1>readable by NAME</h1>",
+    );
+    let store = work.path().join("store");
+    let seed_path = work.path().join("seed.hex");
+    std::fs::write(&seed_path, seed_hex(0x71)).expect("writes");
+    let now = 1_800_000_000u64;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "publish",
+            site.to_str().expect("utf8"),
+            "--name",
+            "roundtrip.vayu",
+            "--store",
+            store.to_str().expect("utf8"),
+            "--key-file",
+            seed_path.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Publish appended its own record to the view at <store>/view.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("history"), "{stdout}");
+    let view_dir = store.join("view");
+    let held = std::fs::read_dir(&view_dir)
+        .expect("view exists")
+        .filter_map(|e| e.ok())
+        .count();
+    assert_eq!(held, 1);
+
+    // And serve --name resolves through it over real HTTP.
+    let server = spawn_serve_by_name(&store, "roundtrip.vayu", &now.to_string());
+    let (status, _head, body) = http_get(&server.addr, "/");
+    assert_eq!(status, 200);
+    assert!(
+        body.starts_with(b"<!doctype html>"),
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+}
+
+#[test]
+fn serve_by_name_refuses_a_lapsed_or_forged_pointer() {
+    let work = TempDir::new("by-name-refuse");
+    let site = work.path().join("site");
+    work.file("site/index.html", "<!doctype html><title>refuse</title>");
+    let store = work.path().join("store");
+    let seed_path = work.path().join("seed.hex");
+    std::fs::write(&seed_path, seed_hex(0x72)).expect("writes");
+    let registered_at = 1_000_000_000u64; // a year that ended long ago
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "publish",
+            site.to_str().expect("utf8"),
+            "--name",
+            "lapsed.vayu",
+            "--store",
+            store.to_str().expect("utf8"),
+            "--key-file",
+            seed_path.to_str().expect("utf8"),
+            "--now",
+            &registered_at.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Long expired: the pointer verifies but the term is over. Refuses CLOSED. (For a
+    // registration this old the clock discipline answers first — notBefore sits more than a
+    // day behind any post-expiry clock — so BACKDATED precedes EXPIRED; both are refusals,
+    // and neither yields a root.)
+    let long_after = registered_at + 31_536_000 + 86_400;
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "serve",
+            store.to_str().expect("utf8"),
+            "--name",
+            "lapsed.vayu",
+            "--now",
+            &long_after.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("refusing to serve by name"), "{stderr}");
+
+    // A forged incumbent (signature zeroed): refuses before anything is served.
+    let view_file = std::fs::read_dir(store.join("view"))
+        .expect("lists")
+        .filter_map(|e| e.ok())
+        .next()
+        .expect("one record")
+        .path();
+    let bytes = std::fs::read(&view_file).expect("reads");
+    let vayuweb_client::cbor::Value::Map(mut members) =
+        vayuweb_client::cbor::decode(&bytes).expect("decodes")
+    else {
+        panic!("a record is a map");
+    };
+    for (key, value) in members.iter_mut() {
+        if matches!(key, vayuweb_client::cbor::Key::Text(name) if name == "sig") {
+            *value = vayuweb_client::cbor::Value::Bytes(vec![0u8; 64]);
+        }
+    }
+    let forged = vayuweb_client::cbor::encode(&vayuweb_client::cbor::Value::Map(members))
+        .expect("re-encodes");
+    std::fs::write(&view_file, &forged).expect("overwrites");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "serve",
+            store.to_str().expect("utf8"),
+            "--name",
+            "lapsed.vayu",
+            "--now",
+            &registered_at.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("does not verify"), "{stderr}");
+}

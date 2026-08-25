@@ -10,6 +10,27 @@ it.
 
 ## [Unreleased]
 
+### Added — the reading path closes: `publish` holds history, `serve --name` resolves
+
+The last mile of the local surface: a name can now be READ without ever handling a raw CID.
+`vayu publish` appends its freshly signed record to the local registry view (default
+`<store>/view`) — one command now means check, build, pin, sign, AND hold your own history. A
+view refusal there does not undo the publish; it is surfaced as a loud warning, because the
+tree is already pinned and serving by name will refuse until resolved.
+
+`vayu serve <store> --name <label>.<tld>` implements RESOLUTION.md's steps against that view,
+refusing CLOSED at every gate: the incumbent's exact bytes are re-judged as received, the term
+must be LIVE at this instant (grace does not resolve — grace is for the owner's renewal, not
+for readers), and only then does the record's signed cid entry supply the root. One guard had
+to be specified rather than assumed: re-judging an incumbent REGISTER must not answer
+NAME_TAKEN against its own existence — convergence re-verifies what it holds, exactly what the
+registry's `ignoreIncumbent` exists for.
+
+Two CLI tests prove the path over real HTTP: publish → serve-by-name → 200 on `/`; and a
+lapsed or forged pointer refuses before anything is served. Suite now 144 lib + 13 CLI + 7
+serve. What still separates this from Phase 4 is transport: this resolves names THIS machine
+holds history for; VWIP-0005's block exchange is what would carry both sides to a stranger.
+
 ### Added — the local registry view: `vayu accept`, `vayu names`, and `verify --view`
 
 Single-record verification answered everything except the two questions that need HISTORY: is

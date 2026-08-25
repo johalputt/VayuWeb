@@ -9,24 +9,26 @@ as described in RFC 2119.
 **Status:** Draft — not yet deployed. Section 2.3's deep-link rule is implemented in
 `registry/src/proxy.ts` and `registry/src/resolve.ts`, which read the manifest and serve `notFound`
 with 404 or `fallback` with 200. The whole normative sequence of section 1 now exists, RUNS
-locally, and its output is READABLE: `vayu publish` checks, builds, addresses, pins and signs;
-`vayu verify` judges a record received from somewhere else in its exact bytes — chain
-discipline, controlling-key signatures, transfer countersignatures, proof of work against a
-caller-supplied difficulty, clock discipline that defers rather than rejects; `vayu accept`
-and `vayu names` maintain a local registry view — an append-only log of accepted records whose
-per-name state is derived by replay, answering NAME_TAKEN before any cryptography and resolving
-a transfer's authority from the chain itself; and `vayu serve` reads one pinned tree back over
-loopback HTTP through a verified traversal (`client/src/dagnode.rs`, `client/src/serve.rs`)
-with this document's routing rule and CONTENT-SECURITY.md's header set byte for byte. 3.1.6 is
+locally, and its output is READABLE BY NAME: `vayu publish` checks, builds, addresses, pins,
+signs, and appends the signed record to a local registry view; `vayu verify` judges a record
+received from somewhere else in its exact bytes — chain discipline, controlling-key signatures,
+transfer countersignatures, proof of work against a caller-supplied difficulty, clock
+discipline that defers rather than rejects; `vayu accept` and `vayu names` maintain that view —
+an append-only log whose per-name state is derived by replay, answering NAME_TAKEN before any
+cryptography and resolving a transfer's authority from the chain itself; and `vayu serve --name`
+resolves name → current accepted record (re-judged as received) → LIVE check → signed cid entry
+→ one pinned tree over loopback HTTP through a verified traversal (`client/src/dagnode.rs`,
+`client/src/serve.rs`) with this document's routing rule and CONTENT-SECURITY.md's header set
+byte for byte. A pointer that does not verify, or a lapsed history, refuses to serve. 3.1.6 is
 now satisfied END TO END for this surface: every rule carries an enforcement classification
 (header-enforced, document-scan, advice, publish-only) in `conformance/rules.json`, the registry
 side verifies those claims against the proxy's actual header constants, and the serving surface
 runs the publisher's own checker over HTML before answering — refusing documents whose
 violations no header can express, and refusing at startup any tree that would fail a publish.
-What still keeps this a Draft: reading requires the publisher's own store and root CID — no
-resolver resolves names for anyone else, block exchange needs a transport that does not exist,
-the key story is a headless seed file rather than an OS keystore, and the GUI does not exist. A
-Draft stays a Draft until a stranger can find and read what a stranger published.
+What still keeps this a Draft: reading resolves names THIS machine holds history for — no
+resolver resolves names for anyone else yet, block exchange needs a transport that does not
+exist, the key story is a headless seed file rather than an OS keystore, and the GUI does not
+exist. A Draft stays a Draft until a stranger can find and read what a stranger published.
 
 ## 0. The design rule
 

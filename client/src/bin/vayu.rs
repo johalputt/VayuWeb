@@ -53,13 +53,25 @@ USAGE:
         --window-count <n>      TLD registration count over the trailing window (default 0)
         --pow-limit <n>         nonce-search ceiling (default 10000000)
         --now <unix-seconds>    override the clock (for reproducible runs)
+        --view <dir>            registry view to append the signed record to
+                                (default: <store>/view)
 
-    vayu serve <store-dir> --root <cid> [options]
+    vayu serve <store-dir> (--root <cid> | --name <label>.<tld>) [options]
         Serve one pinned tree over loopback HTTP for local preview. Prints the URL,
         then Ctrl-C to stop. This is a preview of ONE tree, not the browsing proxy.
 
+        With --name, the tree comes from the registry view: the name's current
+        accepted record is re-judged as received, must be LIVE at this instant,
+        and its cid entry supplies the root. A pointer that does not verify —
+        or a lapsed or missing history — refuses to serve. Publish appends to
+        the view automatically (default: <store>/view).
+
     Options for serve:
-        --root <cid-text>       the tree to serve (required)
+        --root <cid-text>       the tree to serve (or use --name)
+        --name <label>.<tld>    resolve through the view instead of a raw CID
+        --view <dir>            the record log (default with --name: <store>/view)
+        --now <unix-seconds>    override the verifier clock (with --name)
+        --window-count <n>      TLD registration count (with --name)
         --port <n>              port to bind (default: 0, an ephemeral free port)
 
     vayu verify <record.cbor> [options]
@@ -452,20 +464,73 @@ fn cmd_serve(argv: &[String]) -> i32 {
         eprintln!("vayu serve needs a store directory");
         return 2;
     };
-    let flags = match Flags::parse(&argv[1..], &["root", "port"]) {
+    let flags = match Flags::parse(
+        &argv[1..],
+        &["root", "port", "name", "view", "now", "window-count"],
+    ) {
         Ok(flags) => flags,
         Err(detail) => {
             eprintln!("vayu serve: {detail}");
             return 2;
         }
     };
-    let Some(root_text) = flags.get("root") else {
-        eprintln!("vayu serve: --root <cid> naming the tree to serve is required");
+    if flags.has("name") && flags.has("root") {
+        eprintln!("vayu serve: --name and --root are alternatives, not companions");
         return 2;
-    };
-    let Ok(root) = Cid::from_text(root_text) else {
-        eprintln!("vayu serve: {root_text:?} is not a CID this protocol admits");
-        return 2;
+    }
+    let root = match (flags.get("root"), flags.get("name")) {
+        (Some(root_text), None) => match Cid::from_text(root_text) {
+            Ok(root) => root,
+            Err(_) => {
+                eprintln!("vayu serve: {root_text:?} is not a CID this protocol admits");
+                return 2;
+            }
+        },
+        (None, Some(name_value)) => {
+            let (label, tld) = match parse_name(name_value) {
+                Ok(parts) => parts,
+                Err(_) => {
+                    eprintln!("vayu serve: --name wants <label>.<tld>, got {name_value:?}");
+                    return 2;
+                }
+            };
+            let now = match resolve_now(&flags, "serve") {
+                Ok(now) => now,
+                Err(code) => return code,
+            };
+            let window_count = match flags.number("window-count") {
+                Ok(value) => value.unwrap_or(0),
+                Err(detail) => {
+                    eprintln!("vayu serve: {detail}");
+                    return 2;
+                }
+            };
+            let view_dir = flags
+                .get("view")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from(store_dir).join("view"));
+            match resolve_name_root(&view_dir, &label, &tld, now, window_count) {
+                Ok(root) => {
+                    println!(
+                        "pointer   {}.{} -> {}\njudged against {}",
+                        label,
+                        tld,
+                        root.to_text(),
+                        view_dir.display()
+                    );
+                    root
+                }
+                Err(detail) => {
+                    eprintln!("vayu serve: refusing to serve by name: {detail}");
+                    return 1;
+                }
+            }
+        }
+        (None, None) => {
+            eprintln!("vayu serve: give either --root <cid> or --name <label>.<tld>");
+            return 2;
+        }
+        (Some(_), Some(_)) => unreachable!(),
     };
     let port = match flags.number("port") {
         Ok(Some(port)) if port <= u16::MAX as u64 => port as u16,
@@ -539,6 +604,91 @@ fn cmd_serve(argv: &[String]) -> i32 {
 // ---------------------------------------------------------------------------
 // Shared helpers.
 // ---------------------------------------------------------------------------
+
+/// The verifier clock: `--now` if given, else the system clock.
+fn resolve_now(flags: &Flags, verb: &str) -> Result<u64, i32> {
+    match flags.number("now") {
+        Ok(Some(now)) => Ok(now),
+        Ok(None) => Ok(std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default()),
+        Err(detail) => {
+            eprintln!("vayu {verb}: {detail}");
+            Err(2)
+        }
+    }
+}
+
+/// Name-based reading, RESOLUTION.md's steps 1-7 against a LOCAL view:
+/// name -> current accepted record (replay) -> re-judged as received ->
+/// live at this instant -> its cid entry -> the tree to serve.
+///
+/// Every gate refuses CLOSED: a pointer that does not verify, a lapsed term,
+/// or a missing history never yields a root.
+fn resolve_name_root(
+    view_dir: &std::path::Path,
+    label: &str,
+    tld: &str,
+    now: u64,
+    window_count: u64,
+) -> Result<Cid, String> {
+    let view = vayuweb_client::view::View::open(view_dir)?;
+    let tip = view
+        .chain_tip(label, tld)?
+        .ok_or_else(|| format!("no accepted record for {label}.{tld} in {:?}", view_dir))?;
+
+    // Re-judge the incumbent's exact bytes before trusting where they point. For an
+    // incumbent REGISTER this is the convergence re-check; for a successor tip it is the
+    // ordinary chain verdict.
+    match view.accept_verdict(&tip.entry.bytes, now, window_count)? {
+        vayuweb_client::verify::Verdict::Accept => {}
+        other => {
+            return Err(format!(
+                "the record attesting {label}.{tld} does not verify against this view: {other:?}"
+            ))
+        }
+    }
+    let state = vayuweb_client::verify::lifecycle_state(&tip.prev, now);
+    if state != "LIVE" {
+        return Err(format!(
+            "{label}.{tld} is not LIVE ({state}); only a live name resolves"
+        ));
+    }
+
+    // The pointer itself: the record's first entry must be a cid entry carrying the binary
+    // root — exactly what publish signed.
+    let value = vayuweb_client::record::decode_record(&tip.entry.bytes)
+        .map_err(|e| format!("the incumbent record does not decode: {e}"))?;
+    let entries = match value {
+        vayuweb_client::cbor::Value::Map(members) => {
+            members.into_iter().find_map(|(k, v)| match k {
+                vayuweb_client::cbor::Key::Text(name) if name == "records" => match v {
+                    vayuweb_client::cbor::Value::Array(entries) => Some(entries),
+                    _ => None,
+                },
+                _ => None,
+            })
+        }
+        _ => None,
+    }
+    .ok_or("the incumbent record carries no records field")?;
+    let first = entries
+        .first()
+        .ok_or("the incumbent record carries no entries")?;
+    let cid_bytes = match first {
+        vayuweb_client::cbor::Value::Map(fields) => fields.iter().find_map(|(k, v)| match k {
+            vayuweb_client::cbor::Key::Text(name) if name == "value" => match v {
+                vayuweb_client::cbor::Value::Bytes(bytes) => Some(bytes.clone()),
+                _ => None,
+            },
+            _ => None,
+        }),
+        _ => None,
+    }
+    .ok_or("the incumbent's first entry is not a well-shaped cid value")?;
+    Cid::from_bytes(&cid_bytes).map_err(|e| format!("the attested pointer is not a CID: {e:?}"))
+}
 
 /// Walk a directory recursively, returning site files with '/'-separated relative paths in
 /// deterministic (sorted) order. The manifest at `.vayu/manifest.json` is INCLUDED — it is part
@@ -750,6 +900,7 @@ fn cmd_publish(argv: &[String]) -> i32 {
             "window-count",
             "pow-limit",
             "now",
+            "view",
         ],
     ) {
         Ok(flags) => flags,
@@ -936,6 +1087,29 @@ fn cmd_publish(argv: &[String]) -> i32 {
             eprintln!("vayu publish: cannot write {out:?}: {e}");
             return 1;
         }
+    }
+
+    // Step 6: hold your own history. The record this command just signed is appended to the
+    // local registry view — the same log a stranger's record would be judged against later.
+    // A refusal here does NOT undo the publish (the tree is pinned, the signature exists);
+    // it is surfaced loudly instead, because serving by name will refuse until it is fixed.
+    let view_dir = flags
+        .get("view")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| store_path.join("view"));
+    match vayuweb_client::view::View::open(&view_dir) {
+        Ok(view) => match view.accept_verdict(&published.record, now, window_count) {
+            Ok(vayuweb_client::verify::Verdict::Accept) => match view.put(&published.record) {
+                Ok(()) => println!("history  {} appended", view_dir.display()),
+                Err(e) => eprintln!("warning: the view refused the write: {e}"),
+            },
+            Ok(verdict) => eprintln!(
+                "warning: signed and pinned, but your own view would not hold this record \
+                 ({verdict:?}); resolve before relying on serve --name"
+            ),
+            Err(e) => eprintln!("warning: could not judge against the view: {e}"),
+        },
+        Err(e) => eprintln!("warning: could not open the registry view: {e}"),
     }
 
     println!(

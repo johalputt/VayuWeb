@@ -208,10 +208,15 @@ impl View {
 
         // NAME_TAKEN before any cryptography — the ordinary case (registering a plainly-taken
         // name) costs a lookup, not 64 MiB of Argon2id, and says nothing about whether the
-        // record would otherwise have been valid.
+        // record would otherwise have been valid. One exception, and it is not a loophole:
+        // re-judging the INCUMBENT ITSELF (the bytes this view already accepted) must not
+        // answer NAME_TAKEN against its own existence — convergence re-verifies what it holds,
+        // exactly as the registry's ignoreIncumbent exists for.
         if op == "REGISTER" {
             if let Some(tip) = self.chain_tip(&label, &tld)? {
-                if !fully_released(&tip.prev, now) {
+                let incoming = crate::domain::record_hash_from_bytes(bytes);
+                let incoming_hex: String = incoming.iter().map(|b| format!("{b:02x}")).collect();
+                if tip.entry.hash_hex != incoming_hex && !fully_released(&tip.prev, now) {
                     return Ok(Verdict::Reject {
                         code: "NAME_TAKEN",
                         detail: format!(
