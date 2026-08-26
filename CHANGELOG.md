@@ -10,6 +10,16 @@ it.
 
 ## [Unreleased]
 
+### Changed — the difficulty schedule and the return-to-the-pool rule bind both languages too
+
+The conformance consumer grew past resolution: all forty proof-of-work vectors
+(base difficulty by label length, the rate ramp, the rate window's half-open epoch
+arithmetic, salt derivation from a reference-signed record, and leading-zero-bit
+tag checks) and all eleven release vectors (ordinary grace plus quarantine, REVOKE's
+frozen term, RELINQUISH skipping grace) now execute against the Rust implementation.
+Sixty-four reference-authored vectors decide identically on both sides; a vector
+whose check this consumer does not know is a failure to extend it, never a skip.
+
 ### Changed — entry selection follows RESOLUTION.md's order, and the vectors bind both implementations
 
 Reading a record's content source was "first entry wins"; RESOLUTION.md orders the

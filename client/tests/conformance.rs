@@ -241,3 +241,151 @@ fn every_resolution_vector_decides_as_the_reference_does() {
         failures.join("\n")
     );
 }
+
+#[test]
+fn every_pow_vector_agrees_with_the_difficulty_schedule() {
+    let raw = std::fs::read_to_string(VECTORS_PATH).expect("vectors.json exists");
+    let doc: Value = serde_json::from_str(&raw).expect("vectors.json parses");
+    let vectors = doc
+        .get("pow")
+        .and_then(Value::as_array)
+        .expect("a pow section")
+        .clone();
+
+    let mut failures: Vec<String> = Vec::new();
+    for vector in &vectors {
+        let name = vector.get("name").and_then(Value::as_str).unwrap_or("?");
+        let rule = vector.get("rule").and_then(Value::as_str).unwrap_or("");
+        let check = vector
+            .get("check")
+            .and_then(Value::as_str)
+            .unwrap_or("?")
+            .to_string();
+        let expect = vector.get("expect");
+
+        // Each check names its own inputs. A miss is a FAILURE, not a skip: an
+        // unknown check means the two suites have drifted apart structurally and
+        // this consumer must grow the case, not ignore it.
+        let agrees: bool = match check.as_str() {
+            "baseBits" => {
+                let len = vector
+                    .get("labelLength")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize;
+                vayuweb_client::pow::base_bits(len)
+                    == expect.and_then(Value::as_u64).unwrap_or(u64::MAX) as u32
+            }
+            "requiredBits" => {
+                let len = vector
+                    .get("labelLength")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize;
+                let window_count = vector
+                    .get("windowCount")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                vayuweb_client::pow::required_bits(len, window_count)
+                    == expect.and_then(Value::as_u64).unwrap_or(u64::MAX) as u32
+            }
+            "rateWindow" => {
+                let not_before = vector.get("notBefore").and_then(Value::as_u64).unwrap_or(0);
+                let (start, end) = vayuweb_client::pow::rate_window(not_before);
+                start
+                    == expect
+                        .and_then(|e| e.get("start"))
+                        .and_then(Value::as_u64)
+                        .unwrap_or(1)
+                    && end
+                        == expect
+                            .and_then(|e| e.get("end"))
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0)
+            }
+            "salt" => {
+                // REGISTRY.md: salt = SHA-256("vayuweb-pow-v1" || record without sig
+                // and without powProof.nonce)[0..16]. The reference authored the
+                // record; both sides must derive the same 16 bytes from it.
+                let hex = vector.get("record").and_then(Value::as_str).unwrap_or("");
+                let want = expect.and_then(Value::as_str).unwrap_or("").to_lowercase();
+                match vayuweb_client::record::decode_record(&hex_to_bytes(hex)) {
+                    Ok(vayuweb_client::cbor::Value::Map(members)) => matches!(
+                        vayuweb_client::pow::pow_salt(&members),
+                        Ok(salt) if bytes_to_hex(&salt) == want
+                    ),
+                    _ => false,
+                }
+            }
+            "tagSatisfies" => {
+                let tag = hex_to_bytes(vector.get("tag").and_then(Value::as_str).unwrap_or(""));
+                let bits = vector.get("bits").and_then(Value::as_u64).unwrap_or(0) as u32;
+                vayuweb_client::pow::tag_satisfies(&tag, bits)
+                    == expect.and_then(Value::as_bool).unwrap_or(!true)
+            }
+            other => {
+                failures.push(format!(
+                    "{name}: unknown check {other:?} — the suites have drifted; extend this consumer"
+                ));
+                continue;
+            }
+        };
+        if !agrees {
+            failures.push(format!("{name}\n  rule: {rule}\n  check: {check}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} pow vector(s) disagree:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn every_release_vector_names_the_same_return_to_the_pool() {
+    let raw = std::fs::read_to_string(VECTORS_PATH).expect("vectors.json exists");
+    let doc: Value = serde_json::from_str(&raw).expect("vectors.json parses");
+    let vectors = doc
+        .get("release")
+        .and_then(Value::as_array)
+        .expect("a release section")
+        .clone();
+
+    let mut failures: Vec<String> = Vec::new();
+    for vector in &vectors {
+        let name = vector.get("name").and_then(Value::as_str).unwrap_or("?");
+        let at = vector.get("at").and_then(Value::as_u64).unwrap_or(0);
+        let want = vector
+            .get("expectFullyReleased")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let hex = vector
+            .get("predecessor")
+            .and_then(Value::as_str)
+            .expect("a predecessor record");
+        let bytes = hex_to_bytes(hex);
+        let peeked = vayuweb_client::verify::peek(&bytes).expect("peeks");
+        let tip = vayuweb_client::verify::PrevView {
+            op_text: peeked.op,
+            seq: peeked.seq,
+            not_before: peeked.not_before,
+            not_after: field_u64(&bytes, "notAfter").expect("notAfter"),
+            owner_key: [0u8; 32],
+            signer_key: [0u8; 32],
+            suite: 1,
+            hash: [0u8; 32],
+            revoked: false,
+        };
+        let got = vayuweb_client::verify::fully_released(&tip, at);
+        if got != want {
+            failures.push(format!(
+                "{name}\n  at {at}: want fullyReleased={want}, got {got}"
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} release vector(s) disagree:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
