@@ -10,6 +10,19 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a forked log converges instead of obeying directory order
+
+A view could hold two competing histories for one name — an equivocation fork
+arriving through exchange, both records individually valid. The replay walk sorted by
+sequence with a stable sort, so WHICH fork won depended on file order in the
+directory: two peers holding the same evidence in different orders would name
+different tips and serve different sites. REGISTRY.md's convergence rule is now the
+walk's rule: at every contested slot the smaller record_hash as a big-endian integer
+wins, arrival order decides nothing, and one shared deterministic chain feeds the
+naming path, the reading path and held-tip judging alike. Pinned by a test that
+inserts the same fork in both orders and requires the same winner, and by the
+convergence vectors now running on the Rust side too.
+
 ### Changed — the difficulty schedule and the return-to-the-pool rule bind both languages too
 
 The conformance consumer grew past resolution: all forty proof-of-work vectors

@@ -57,6 +57,63 @@ pub struct View {
     dir: PathBuf,
 }
 
+/// One candidate in a name's history: sequence, own content address, the predecessor
+/// address it CLAIMS, and the held entry itself.
+type Candidate<'a> = (u64, [u8; 32], [u8; 32], &'a Entry);
+
+/// THE chain for a name, chosen deterministically even when the view holds forks.
+///
+/// REGISTRY.md's convergence rule: where two records claim the same slot — the same
+/// sequence number, each a valid link from the record before — the SMALLER record_hash,
+/// read as a big-endian unsigned integer, wins. A peer MUST NOT decide by its own log
+/// position or arrival order, which is precisely what a stable sort would smuggle in:
+/// two peers holding the same forked set in different directory orders must converge
+/// on the same tip or they serve different sites from the same evidence.
+///
+/// The walk starts at seq 0 and the first gap ends the chain — what no link reaches is
+/// not part of this history, exactly as before; forks only change WHO wins a slot,
+/// never that a link must exist.
+fn deterministic_chain<'a>(mine: &mut Vec<Candidate<'a>>) -> Vec<Candidate<'a>> {
+    mine.sort_by_key(|(seq, _, _, _)| *seq);
+    let mut chain: Vec<Candidate> = Vec::new();
+    let mut index = 0usize;
+    while index < mine.len() {
+        let expected_seq = chain.len() as u64;
+        if mine[index].0 != expected_seq {
+            break;
+        }
+        let mut group_end = index;
+        while group_end < mine.len() && mine[group_end].0 == expected_seq {
+            group_end += 1;
+        }
+        let prev_hash = chain.last().map(|candidate| candidate.1);
+        let mut best: Option<Candidate> = None;
+        for candidate in &mine[index..group_end] {
+            let linked = match prev_hash {
+                // Only slot 0 opens a history; later slots must follow the winner so far.
+                None => expected_seq == 0,
+                Some(hash) => candidate.2 == hash,
+            };
+            if !linked {
+                continue;
+            }
+            best = match best {
+                None => Some(*candidate),
+                Some(current) if candidate.1 < current.1 => Some(*candidate),
+                other => other,
+            };
+        }
+        match best {
+            Some(chosen) => {
+                chain.push(chosen);
+                index = group_end;
+            }
+            None => break,
+        }
+    }
+    chain
+}
+
 impl View {
     /// Open (creating if needed) a directory that holds accepted records.
     pub fn open(dir: &Path) -> Result<Self, String> {
@@ -130,13 +187,14 @@ impl View {
         Ok(out)
     }
 
-    /// The current record for a name, by replay: walk from seq 0 through prevHash links and
-    /// stop at the first break. `None` when this peer holds no history for the name.
+    /// The current record for a name, by replay: walk from seq 0 through prevHash links,
+    /// choosing deterministically at any fork, and stop at the first break. `None` when
+    /// this peer holds no history for the name.
     pub fn chain_tip(&self, label: &str, tld: &str) -> Result<Option<Tip>, String> {
         // Everything this peer holds for the name: sequence number, own content address,
         // claimed predecessor address.
         let all = self.entries()?;
-        let mut mine: Vec<(u64, [u8; 32], [u8; 32], &Entry)> = Vec::new();
+        let mut mine: Vec<Candidate> = Vec::new();
         for entry in &all {
             let Ok(peeked) = peek(&entry.bytes) else {
                 continue;
@@ -158,31 +216,19 @@ impl View {
         if mine.is_empty() {
             return Ok(None);
         }
-        mine.sort_by_key(|(seq, _, _, _)| *seq);
-
-        // Walk from genesis: a valid history STARTS at seq 0, and every later record carries
-        // both the next sequence number and the previous record's content address. First
-        // break ends the chain — what follows the break is not part of this peer's history.
-        if mine[0].0 != 0 {
+        let chain = deterministic_chain(&mut mine);
+        if chain.is_empty() {
             return Ok(None);
         }
-        let mut tip_index = 0usize;
-        for index in 1..mine.len() {
-            let (seq, _, claimed_prev, _) = mine[index];
-            let (_, actual_prev, _, _) = mine[index - 1];
-            if seq != index as u64 || claimed_prev != actual_prev {
-                break;
-            }
-            tip_index = index;
-        }
+        let tip_index = chain.len() - 1;
 
         // The tip and — when it is a TRANSFER — the record before it, whose ownerKey is the
         // transferor that still controls the name during settlement.
-        let tip_entry = mine[tip_index].3.clone();
+        let tip_entry = chain[tip_index].3.clone();
         let tip_peeked = peek(&tip_entry.bytes)?;
         let signer_key = if tip_peeked.op == "TRANSFER" {
             match tip_index.checked_sub(1) {
-                Some(before) => owner_of(&mine[before].3.bytes)?,
+                Some(before) => owner_of(&chain[before].3.bytes)?,
                 None => return Err("a stored TRANSFER cannot be seq 0".to_string()),
             }
         } else {
@@ -196,7 +242,7 @@ impl View {
             owner_key: owner_of(&tip_entry.bytes)?,
             signer_key,
             suite: suite_of(&tip_entry.bytes)?,
-            hash: mine[tip_index].1,
+            hash: chain[tip_index].1,
             revoked: op_text == "REVOKE",
             op_text,
         };
@@ -264,10 +310,10 @@ impl View {
         now: u64,
         window_count: u64,
     ) -> Result<Verdict, String> {
-        // Replay the walk exactly as chain_tip does, but keep every link so the parent of
-        // the tip is at hand.
+        // Replay the walk exactly as chain_tip does — same deterministic fork choice —
+        // but keep every link so the parent of the tip is at hand.
         let all = self.entries()?;
-        let mut mine: Vec<(u64, [u8; 32], [u8; 32], &Entry)> = Vec::new();
+        let mut mine: Vec<Candidate> = Vec::new();
         for entry in &all {
             let Ok(peeked) = peek(&entry.bytes) else {
                 continue;
@@ -291,23 +337,16 @@ impl View {
                 detail: format!("{label}.{tld} has no accepted history in this view"),
             });
         }
-        // Genesis must be FIRST once sorted by sequence; directory order is arbitrary.
-        mine.sort_by_key(|(seq, _, _, _)| *seq);
-        if mine[0].0 != 0 {
+        let chain = deterministic_chain(&mut mine);
+        if chain.is_empty() {
             return Ok(Verdict::Reject {
                 code: "NO_PREDECESSOR",
                 detail: format!("{label}.{tld} has no accepted history in this view"),
             });
         }
-        let mut tip_index = 0usize;
-        for index in 1..mine.len() {
-            if mine[index].0 != index as u64 || mine[index].2 != mine[index - 1].1 {
-                break;
-            }
-            tip_index = index;
-        }
+        let tip_index = chain.len() - 1;
 
-        let tip_bytes = &mine[tip_index].3.bytes;
+        let tip_bytes = &chain[tip_index].3.bytes;
         let Peeked { op, .. } = peek(tip_bytes)?;
         if op == "REGISTER" {
             return Ok(verify(tip_bytes, None, now, window_count));
@@ -320,22 +359,22 @@ impl View {
         };
         let signer_key = if op == "TRANSFER" {
             match before.checked_sub(1) {
-                Some(settler) => owner_of(&mine[settler].3.bytes)?,
+                Some(settler) => owner_of(&chain[settler].3.bytes)?,
                 None => return Err("a stored TRANSFER cannot be seq 0".to_string()),
             }
         } else {
-            owner_of(&mine[before].3.bytes)?
+            owner_of(&chain[before].3.bytes)?
         };
         let parent = PrevView {
-            seq: peek(&mine[before].3.bytes)?.seq,
-            not_before: peek(&mine[before].3.bytes)?.not_before,
-            not_after: not_after_of(&mine[before].3.bytes)?,
-            owner_key: owner_of(&mine[before].3.bytes)?,
+            seq: peek(&chain[before].3.bytes)?.seq,
+            not_before: peek(&chain[before].3.bytes)?.not_before,
+            not_after: not_after_of(&chain[before].3.bytes)?,
+            owner_key: owner_of(&chain[before].3.bytes)?,
             signer_key,
-            suite: suite_of(&mine[before].3.bytes)?,
-            hash: mine[before].1,
+            suite: suite_of(&chain[before].3.bytes)?,
+            hash: chain[before].1,
             revoked: false,
-            op_text: peek(&mine[before].3.bytes)?.op,
+            op_text: peek(&chain[before].3.bytes)?.op,
         };
         Ok(verify(tip_bytes, Some(&parent), now, window_count))
     }
@@ -346,7 +385,7 @@ impl View {
     /// ratified name and the RESOLVER follows it within budget.
     pub fn resolved_pointer(&self, label: &str, tld: &str) -> Result<Pointer, String> {
         let all = self.entries()?;
-        let mut mine: Vec<(u64, [u8; 32], [u8; 32], &Entry)> = Vec::new();
+        let mut mine: Vec<Candidate> = Vec::new();
         for entry in &all {
             let Ok(peeked) = peek(&entry.bytes) else {
                 continue;
@@ -367,25 +406,19 @@ impl View {
         if mine.is_empty() {
             return Err(format!("{label}.{tld} has no accepted history"));
         }
-        // Genesis first AFTER sorting by sequence; directory order is arbitrary.
-        mine.sort_by_key(|(seq, _, _, _)| *seq);
-        if mine[0].0 != 0 {
+        // Same deterministic fork choice as chain_tip — the two readers of one log must
+        // never disagree about which history is THE history.
+        let chain = deterministic_chain(&mut mine);
+        if chain.is_empty() {
             return Err(format!("{label}.{tld} has no accepted history"));
-        }
-        let mut tip_index = 0usize;
-        for index in 1..mine.len() {
-            if mine[index].0 != index as u64 || mine[index].2 != mine[index - 1].1 {
-                break;
-            }
-            tip_index = index;
         }
         // The most recent record with a SELECTED source decides. A record whose
         // selection is an ipns pointer names content this offline view cannot fetch,
         // and a malformed cid address is content no reader can verify — both refuse
         // CLOSED rather than quietly serving the older record beneath them, which is
         // exactly the frozen-snapshot fork RESOLUTION.md's ordering exists to prevent.
-        for index in (0..=tip_index).rev() {
-            match selected_pointer(&mine[index].3.bytes) {
+        for candidate in chain.iter().rev() {
+            match selected_pointer(&candidate.3.bytes) {
                 Some(Selected::Cid(bytes)) => {
                     return match Cid::from_bytes(&bytes) {
                         Ok(cid) => Ok(Pointer::Cid(cid)),
@@ -613,6 +646,40 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let view = View::open(&dir).expect("opens");
         (dir, view)
+    }
+
+    #[test]
+    fn a_fork_converges_on_the_smaller_digest_regardless_of_arrival() {
+        let alice = identity(0xA5);
+        let bob = identity(0xB2);
+
+        // Two independent registrations of the SAME name: a genuine equivocation
+        // fork, both records individually valid. REGISTRY.md decides by the smaller
+        // record_hash as a big-endian integer — never by who arrived first.
+        let a = build_register(&alice, "split", "vayu", NOW, &[], 0, None, LIMIT).expect("a");
+        let b = build_register(&bob, "split", "vayu", NOW + 1, &[], 0, None, LIMIT).expect("b");
+        let (hash_a, hash_b) = (record_hash_from_bytes(&a), record_hash_from_bytes(&b));
+        assert_ne!(hash_a, hash_b, "distinct records must hash apart");
+        let (winner_bytes, loser_bytes) = if hash_a < hash_b { (&a, &b) } else { (&b, &a) };
+
+        // Two peers holding the SAME forked set in OPPOSITE arrival orders must
+        // converge on the same tip; anything else serves different sites from the
+        // same evidence.
+        for order in [[loser_bytes, winner_bytes], [winner_bytes, loser_bytes]] {
+            let (_dir, view) = temp_view("fork");
+            for record in order {
+                view.put(record).expect("puts");
+            }
+            let tip = view
+                .chain_tip("split", "vayu")
+                .expect("replays")
+                .expect("a tip despite the fork");
+            assert_eq!(
+                tip.prev.hash,
+                record_hash_from_bytes(winner_bytes),
+                "the smaller digest wins whatever the insertion order"
+            );
+        }
     }
 
     #[test]

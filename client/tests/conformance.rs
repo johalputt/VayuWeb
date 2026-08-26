@@ -389,3 +389,52 @@ fn every_release_vector_names_the_same_return_to_the_pool() {
         failures.join("\n")
     );
 }
+
+#[test]
+fn every_convergence_vector_picks_the_smaller_digest() {
+    let raw = std::fs::read_to_string(VECTORS_PATH).expect("vectors.json exists");
+    let doc: Value = serde_json::from_str(&raw).expect("vectors.json parses");
+    let vectors = doc
+        .get("convergence")
+        .and_then(Value::as_array)
+        .expect("a convergence section")
+        .clone();
+
+    let mut failures: Vec<String> = Vec::new();
+    for vector in &vectors {
+        let name = vector.get("name").and_then(Value::as_str).unwrap_or("?");
+        // REGISTRY.md's convergence rule, decided on the record_hash of the EXACT
+        // bytes each side holds: the smaller hash as a big-endian integer wins. This
+        // is the same comparison the client's replay walk now applies at every fork
+        // slot; these vectors pin the primitive both directions.
+        let a_hex = vector.get("a").and_then(Value::as_str).unwrap_or("");
+        let b_hex = vector.get("b").and_then(Value::as_str).unwrap_or("");
+        let hash_a = vayuweb_client::domain::record_hash_from_bytes(&hex_to_bytes(a_hex));
+        let hash_b = vayuweb_client::domain::record_hash_from_bytes(&hex_to_bytes(b_hex));
+        let winner = if hash_a < hash_b { "a" } else { "b" };
+        let want_winner = vector
+            .get("expect")
+            .and_then(|e| e.get("winner"))
+            .and_then(Value::as_str)
+            .unwrap_or("?");
+        if winner != want_winner {
+            failures.push(format!("{name}: want {want_winner}, got {winner}"));
+        }
+        let want_rule = vector
+            .get("expect")
+            .and_then(|e| e.get("rule"))
+            .and_then(Value::as_str)
+            .unwrap_or("?");
+        if want_rule != "SMALLER_HASH" {
+            failures.push(format!(
+                "{name}: this consumer implements SMALLER_HASH only, vector says {want_rule:?}"
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} convergence vector(s) disagree:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
