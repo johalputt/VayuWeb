@@ -24,6 +24,7 @@ pub mod pow;
 pub mod publish;
 pub mod publish_flow;
 pub mod record;
+pub mod replicate;
 pub mod secrets;
 pub mod serve;
 pub mod store;

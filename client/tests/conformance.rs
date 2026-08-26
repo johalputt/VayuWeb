@@ -568,3 +568,70 @@ fn every_block_exchange_vector_decodes_as_the_wire_contract_requires() {
         failures.join("\n")
     );
 }
+
+#[test]
+fn every_replication_vector_decodes_as_the_wire_contract_requires() {
+    let raw = std::fs::read_to_string(VECTORS_PATH).expect("vectors.json exists");
+    let doc: Value = serde_json::from_str(&raw).expect("vectors.json parses");
+    let vectors = doc
+        .get("replication")
+        .and_then(Value::as_array)
+        .expect("a replication section")
+        .clone();
+
+    let mut failures: Vec<String> = Vec::new();
+    for vector in &vectors {
+        let name = vector.get("name").and_then(Value::as_str).unwrap_or("?");
+        let hex = vector.get("message").and_then(Value::as_str).unwrap_or("");
+        let expect = vector.get("expect");
+        let want_decode = expect
+            .and_then(|e| e.get("decode"))
+            .and_then(Value::as_str)
+            .unwrap_or("?")
+            .to_string();
+        let want_code = expect.and_then(|e| e.get("code")).and_then(Value::as_str);
+        let result = vayuweb_client::replicate::decode_message(&hex_to_bytes(hex));
+        match (want_decode.as_str(), want_code) {
+            ("ok", _) => match result {
+                Ok(message) => {
+                    let kind = match message {
+                        vayuweb_client::replicate::ReplicationMessage::Hello { .. } => "HELLO",
+                        vayuweb_client::replicate::ReplicationMessage::Want { .. } => "WANT",
+                        vayuweb_client::replicate::ReplicationMessage::Records { .. } => "RECORDS",
+                        vayuweb_client::replicate::ReplicationMessage::Checkpoint { .. } => {
+                            "CHECKPOINT"
+                        }
+                        vayuweb_client::replicate::ReplicationMessage::Equivocation { .. } => {
+                            "EQUIVOCATION"
+                        }
+                    };
+                    let want_type = expect
+                        .and_then(|e| e.get("type"))
+                        .and_then(Value::as_str)
+                        .unwrap_or(kind);
+                    if kind != want_type {
+                        failures.push(format!(
+                            "{name}: decoded as {kind}, vector names {want_type}"
+                        ));
+                    }
+                }
+                Err(e) => failures.push(format!("{name}: refused but should decode: {e}")),
+            },
+            ("reject", Some(want)) => match result {
+                Ok(_) => failures.push(format!("{name}: decoded but should refuse {want}")),
+                Err(e) => {
+                    if !e.to_string().contains(want) {
+                        failures.push(format!("{name}: refused as {e}, vector names {want}"));
+                    }
+                }
+            },
+            _ => failures.push(format!("{name}: unreadable expectation")),
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} replication vector(s) disagree:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}

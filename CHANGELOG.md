@@ -10,6 +10,23 @@ it.
 
 ## [Unreleased]
 
+### Added — replication message codecs, the fifth of five types now spoken on both sides
+
+`replicate` lands in the client crate beside `blockx`: HELLO, WANT, RECORDS, CHECKPOINT
+and EQUIVOCATION encoded and decoded as pure functions over bytes — the session logic
+comes later, against these shapes. The reference suite's own history made the coverage
+argument: it once had positive vectors for only two of the five, and a second
+implementation could pass having never successfully decoded a RECORDS, a CHECKPOINT or
+an EQUIVOCATION. All seven replication vectors now run here, including the 257-record
+batch refused LIMIT_EXCEEDED before any element is inspected and the unknown type named
+rather than guessed at.
+
+Bounds bind cheapest-first as everywhere else: whole-message size before parsing, batch
+length before elements, root fields exact to 32 bytes. An EQUIVOCATION message decodes
+to exactly the pair `verify::is_equivocation_evidence` judges.
+
+Ninety-four reference-authored vectors now decide identically on both languages.
+
 ### Added — the block-exchange wire format, spoken by both languages before the transport exists
 
 `blockx` lands in the client crate: BHELLO, BWANT, BLOCKS and BDONE encoded and decoded
