@@ -10,6 +10,15 @@ it.
 
 ## [Unreleased]
 
+### Added — `vayu names --json`, a machine-readable inventory
+
+Scripts and the future GUI should not scrape prose. `names --view <dir> --json` emits
+one JSON array — name, lifecycle state, sequence, record hash, owner key, expiry —
+sorted by name for reproducible output, and an empty view is `[]`, not a sentence. No
+string escaping is needed anywhere in the document: labels and TLDs are refused at
+registration unless they match the strict charset, states are fixed words, hashes and
+keys are hex.
+
 ### Added — `vayu import` names a forked bundle instead of just refusing it
 
 A bundle can carry BOTH halves of one owner's fork. Until now the second half was

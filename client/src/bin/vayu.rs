@@ -412,7 +412,36 @@ fn cmd_names(argv: &[String]) -> i32 {
         }
     };
     if names.is_empty() {
-        println!("this view holds no accepted records yet.");
+        if flags.has("json") {
+            println!("[]");
+        } else {
+            println!("this view holds no accepted records yet.");
+        }
+        return 0;
+    }
+    if flags.has("json") {
+        // Machine-readable inventory for scripts and the future GUI. No string escaping
+        // is needed: labels and TLDs are refused at registration unless they match the
+        // strict charset, lifecycle states are this file's own fixed words, and hashes
+        // and keys print as hex.
+        let items: Vec<String> = names
+            .iter()
+            .map(|(label, tld, tip)| {
+                let state = vayuweb_client::verify::lifecycle_state(&tip.prev, now);
+                let owner: String = tip
+                    .prev
+                    .owner_key
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect();
+                format!(
+                    "{{\"name\": \"{label}.{tld}\", \"state\": \"{state}\", \"seq\": {}, \
+                     \"record\": \"{}\", \"owner\": \"{owner}\", \"expires\": {}}}",
+                    tip.prev.seq, tip.entry.hash_hex, tip.prev.not_after
+                )
+            })
+            .collect();
+        println!("[{}]", items.join(", "));
         return 0;
     }
     for (label, tld, tip) in &names {

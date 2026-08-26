@@ -1444,6 +1444,79 @@ fn an_import_detects_and_records_a_forked_bundle_as_evidence() {
     );
 }
 
+#[test]
+fn names_json_is_a_parseable_inventory_scripts_can_trust() {
+    let work = TempDir::new("names-json");
+    let view_dir = work.path().join("view");
+    let now = 1_800_000_000u64;
+
+    let id = vayuweb_client::identity::Identity::from_seed(&mut vec![0x33; 32]).expect("identity");
+    let reg = vayuweb_client::record::build_register(
+        &id,
+        "ledger",
+        "vayu",
+        now,
+        &[],
+        0,
+        None,
+        10_000_000,
+    )
+    .expect("registers");
+    let reg_path = work.path().join("reg.cbor");
+    std::fs::write(&reg_path, &reg).expect("writes");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "accept",
+            reg_path.to_str().expect("utf8"),
+            "--view",
+            view_dir.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(0));
+
+    // The JSON inventory parses and carries the fields a script needs.
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "names",
+            "--view",
+            view_dir.to_str().expect("utf8"),
+            "--json",
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).expect("parses as JSON");
+    let entries = parsed.as_array().expect("an array");
+    assert_eq!(entries.len(), 1);
+    let item = &entries[0];
+    assert_eq!(item["name"], "ledger.vayu");
+    assert_eq!(item["state"], "LIVE");
+    assert_eq!(item["seq"], 0);
+    assert_eq!(item["expires"], now + vayuweb_client::record::TERM_SECONDS);
+    let owner = item["owner"].as_str().expect("owner hex");
+    let expected_owner: String = id.public_key().iter().map(|b| format!("{b:02x}")).collect();
+    assert_eq!(owner, expected_owner);
+
+    // An empty view is still valid JSON: an empty array, not prose.
+    let empty_view = work.path().join("empty-view");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "names",
+            "--view",
+            empty_view.to_str().expect("utf8"),
+            "--json",
+        ])
+        .output()
+        .expect("runs");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).expect("parses as JSON");
+    assert_eq!(parsed.as_array().expect("array").len(), 0, "{stdout}");
+}
+
 // ---------------------------------------------------------------------------
 // Sneakernet, whole: records AND blocks travel as bundles, and the far side
 // serves the site BY NAME without ever having seen the original machine.
