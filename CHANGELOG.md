@@ -10,6 +10,23 @@ it.
 
 ## [Unreleased]
 
+### Added — equivocation evidence a recipient can verify without trusting anyone
+
+`verify::is_equivocation_evidence(a, b)` judges REPLICATION.md 6.1 evidence from the
+two encodings alone: same name, TLD and sequence under the SAME owner key but
+different bytes, each half attributable by its controlling signature — the countersignature
+on a TRANSFER. Self-contained on purpose: a recipient verifies it without trusting the
+sender, holding prior state, or having been online when it happened; a report that must
+be believed is a report that can be faked.
+
+Deliberately NOT checked: expiry, proof of work, chain position, lifecycle state.
+Requiring validity would hand an equivocator a one-line evasion — break your own proof
+of work in both halves and no report of you can be verified. The signatures are the
+exception: they are not a validity condition, they are what makes a record attributable.
+All eleven equivocation vectors now run on the Rust side too (seventy-seven total),
+with lib tests pinning the honest-race and duplicate-bytes non-cases and the malleated-
+forgery collapse.
+
 ### Fixed — a forked log converges instead of obeying directory order
 
 A view could hold two competing histories for one name — an equivocation fork

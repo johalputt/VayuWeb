@@ -438,3 +438,43 @@ fn every_convergence_vector_picks_the_smaller_digest() {
         failures.join("\n")
     );
 }
+
+#[test]
+fn every_equivocation_vector_judges_the_evidence_alike() {
+    let raw = std::fs::read_to_string(VECTORS_PATH).expect("vectors.json exists");
+    let doc: Value = serde_json::from_str(&raw).expect("vectors.json parses");
+    let vectors = doc
+        .get("equivocation")
+        .and_then(Value::as_array)
+        .expect("an equivocation section")
+        .clone();
+
+    let mut failures: Vec<String> = Vec::new();
+    for vector in &vectors {
+        let name = vector.get("name").and_then(Value::as_str).unwrap_or("?");
+        // REPLICATION.md 6.1 evidence, judged from the two encodings alone: same
+        // name+tld+seq under the SAME owner key but different bytes, each half
+        // attributable by its controlling signature. Validity conditions — expiry,
+        // proof of work, chain position — are deliberately NOT part of the judgment.
+        let a_hex = vector.get("a").and_then(Value::as_str).unwrap_or("");
+        let b_hex = vector.get("b").and_then(Value::as_str).unwrap_or("");
+        let got = vayuweb_client::verify::is_equivocation_evidence(
+            &hex_to_bytes(a_hex),
+            &hex_to_bytes(b_hex),
+        );
+        let want = vector
+            .get("expect")
+            .and_then(|e| e.get("equivocation"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if got != want {
+            failures.push(format!("{name}: want equivocation={want}, got {got}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} equivocation vector(s) disagree:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}

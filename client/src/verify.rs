@@ -415,6 +415,85 @@ pub fn lifecycle_state(tip: &PrevView, now: u64) -> &'static str {
     "FREE"
 }
 
+/// Verify equivocation evidence from its two encodings alone (REPLICATION.md 6.1).
+///
+/// Self-contained on purpose, and this is the property that makes the evidence worth
+/// forwarding: a recipient verifies it without trusting the sender, without holding
+/// prior state, and without having been online when it happened. A report that must be
+/// believed is a report that can be faked.
+///
+/// The rule: two DIFFERENT records — same name, same TLD, same sequence number, SAME
+/// owner key — each carrying the controlling signature (the countersignature on a
+/// TRANSFER), verified over that record's own signing input.
+///
+/// Note what this does NOT check: whether either record would be ACCEPTED by a
+/// verifier. Expiry, proof of work, chain position and lifecycle state are all reasons
+/// a record would be refused, and requiring them here would hand an equivocator a
+/// one-line evasion — break your own proof of work in both halves and no report of you
+/// can be verified. The signatures are the exception: a signature is not a validity
+/// condition, it is the thing that makes a record attributable, and without it the
+/// evidence names nobody.
+pub fn is_equivocation_evidence(a: &[u8], b: &[u8]) -> bool {
+    if a == b || a.len() > MAX_RECORD_BYTES || b.len() > MAX_RECORD_BYTES {
+        return false;
+    }
+    // Decode and parse both halves; anything either side chokes on means no evidence,
+    // not a partial one.
+    let parse = |bytes: &[u8]| -> Option<(ParsedRecord, [u8; 32])> {
+        let decoded = decode_record(bytes).ok()?;
+        let canonical = cbor::encode(&decoded).ok()?;
+        if canonical.as_slice() != bytes {
+            return None;
+        }
+        let record = parse_record(&decoded).ok()?;
+        let hash = record_hash_from_bytes(bytes);
+        Some((record, hash))
+    };
+    let (left, left_hash) = match parse(a) {
+        Some(parsed) => parsed,
+        None => return false,
+    };
+    let (right, right_hash) = match parse(b) {
+        Some(parsed) => parsed,
+        None => return false,
+    };
+
+    // Same slot, same owner, different content — or it is not equivocation: two
+    // owners racing for a free name is an honest partition conflict, and identical
+    // bytes are a duplicate.
+    let conflicts = left.label == right.label
+        && left.tld == right.tld
+        && left.seq == right.seq
+        && left.owner_key == right.owner_key
+        && left_hash != right_hash;
+    if !conflicts {
+        return false;
+    }
+
+    // The signature that makes each half attributable: the countersignature on a
+    // TRANSFER (the recipient accepting control), otherwise the owner's own.
+    let attributable = |record: &ParsedRecord| -> bool {
+        let core = match core_of(&record.map) {
+            Ok(core) => core,
+            Err(_) => return false,
+        };
+        let core_cbor = match encode_core(&core) {
+            Ok(bytes) => bytes,
+            Err(_) => return false,
+        };
+        let input = signing_input(&core_cbor, record.suite);
+        let signature = match record.op.as_str() {
+            "TRANSFER" => match &record.co_sig {
+                Some(sig) => sig.clone(),
+                None => return false,
+            },
+            _ => record.sig.clone(),
+        };
+        Identity::verify(&record.owner_key, &input, &signature)
+    };
+    attributable(&left) && attributable(&right)
+}
+
 /// Verify one record's exact bytes against an optional predecessor and the clock.
 ///
 /// `window_count` is the trailing-window registration count for the name's TLD — index state
@@ -788,6 +867,53 @@ mod tests {
             Verdict::Reject { code, .. } => format!("REJECT {code}"),
             Verdict::Defer { .. } => "DEFER".to_string(),
         }
+    }
+
+    #[test]
+    fn equivocation_evidence_names_its_signer_and_nothing_else() {
+        // One owner key signing two different records at the same seq for one name:
+        // the textbook fork, and the evidence proves it from the bytes alone.
+        let id = identity(3);
+        let left = registered(&id, "forked");
+        let right =
+            build_register(&id, "forked", "vayu", NOW + 1, &[], 0, None, LIMIT).expect("registers");
+        assert!(is_equivocation_evidence(&left, &right));
+        // Symmetric: evidence does not have an order.
+        assert!(is_equivocation_evidence(&right, &left));
+
+        // Two DIFFERENT owners racing for a free name is an honest partition
+        // conflict, not equivocation — the owner keys differ.
+        let other = identity(4);
+        let racing = build_register(&other, "forked", "vayu", NOW + 2, &[], 0, None, LIMIT)
+            .expect("registers");
+        assert!(!is_equivocation_evidence(&left, &racing));
+
+        // Identical bytes are a duplicate.
+        assert!(!is_equivocation_evidence(&left, &left));
+
+        // Different sequence numbers are two slots, not one contested one.
+        let later = build_update(
+            &id,
+            &Predecessor::from_bytes(&left).expect("pred"),
+            "forked",
+            "vayu",
+            NOW + 600,
+            &[],
+        )
+        .expect("builds");
+        assert!(!is_equivocation_evidence(&left, &later));
+
+        // A tampered half is not attributable: malleate the label inside one side's
+        // bytes — canonical CBOR, broken signature over content that was never
+        // signed — and the evidence collapses. An attacker cannot forge a report
+        // against an honest peer by editing a copy of their record.
+        let mut forged = left.clone();
+        let name_pos = forged
+            .windows(6)
+            .position(|w| w == b"forked")
+            .expect("name present");
+        forged[name_pos] = b'g';
+        assert!(!is_equivocation_evidence(&forged, &right));
     }
 
     #[test]
