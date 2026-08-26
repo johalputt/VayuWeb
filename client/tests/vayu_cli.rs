@@ -1358,6 +1358,92 @@ fn with_zeroed_sig(bytes: &[u8]) -> Vec<u8> {
     vayuweb_client::cbor::encode(&vayuweb_client::cbor::Value::Map(members)).expect("re-encodes")
 }
 
+#[test]
+fn an_import_detects_and_records_a_forked_bundle_as_evidence() {
+    let work = TempDir::new("fork-evidence");
+    let view_dir = work.path().join("view");
+    let now = 1_800_000_000u64;
+
+    // One owner key, two different registrations of one name: the textbook fork.
+    let id = vayuweb_client::identity::Identity::from_seed(&mut vec![0x71; 32]).expect("identity");
+    let left =
+        vayuweb_client::record::build_register(&id, "split", "vayu", now, &[], 0, None, 10_000_000)
+            .expect("registers");
+    let right = vayuweb_client::record::build_register(
+        &id,
+        "split",
+        "vayu",
+        now + 1_000,
+        &[],
+        0,
+        None,
+        10_000_000,
+    )
+    .expect("registers");
+    let bundle = vayuweb_client::cbor::encode(&vayuweb_client::cbor::Value::Array(vec![
+        vayuweb_client::cbor::Value::Bytes(left.clone()),
+        vayuweb_client::cbor::Value::Bytes(right.clone()),
+    ]))
+    .expect("encodes");
+    let bundle_path = work.path().join("fork.cbor");
+    std::fs::write(&bundle_path, &bundle).expect("writes");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "import",
+            bundle_path.to_str().expect("utf8"),
+            "--view",
+            view_dir.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // The import still completes — verdicts are outcomes, not tool failures — and it
+    // says WHY this bundle is trouble instead of just refusing a record.
+    assert_eq!(output.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("EQUIVOCATION EVIDENCE"),
+        "the bundle must be named as a fork: {stdout}"
+    );
+    assert!(stdout.contains("recorded under"), "{stdout}");
+
+    // Exactly one evidence file, canonical regardless of arrival order, carrying both
+    // halves as hex for anyone to re-verify without trusting this peer.
+    let evidence_dir = view_dir.join("evidence");
+    let files: Vec<_> = std::fs::read_dir(&evidence_dir)
+        .expect("evidence dir exists")
+        .map(|e| e.expect("entry").path())
+        .collect();
+    assert_eq!(files.len(), 1, "one canonical pair file, got {files:?}");
+    let saved = std::fs::read_to_string(&files[0]).expect("reads");
+    assert!(
+        saved.contains("\"rule\": \"REPLICATION.md 6.1\""),
+        "{saved}"
+    );
+
+    // Re-importing the same fork records nothing new: idempotent on evidence too.
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "import",
+            bundle_path.to_str().expect("utf8"),
+            "--view",
+            view_dir.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(0), "{stdout}");
+    assert!(
+        !stdout.contains("EQUIVOCATION EVIDENCE"),
+        "already-recorded evidence must not re-report: {stdout}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Sneakernet, whole: records AND blocks travel as bundles, and the far side
 // serves the site BY NAME without ever having seen the original machine.

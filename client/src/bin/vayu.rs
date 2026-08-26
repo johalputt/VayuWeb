@@ -544,6 +544,43 @@ fn block_bundle(store_dir: &std::path::Path) -> Result<(usize, Vec<u8>), String>
     Ok((count, encoded))
 }
 
+/// Canonical filename for an evidence pair: sorted by record hash, so whichever order
+/// the two halves arrive in lands on the same file and a re-report is idempotent.
+fn evidence_path(view_dir: &std::path::Path, a: &[u8], b: &[u8]) -> std::path::PathBuf {
+    let hash = |bytes: &[u8]| vayuweb_client::domain::record_hash_from_bytes(bytes);
+    let (first, second) = if hash(a) <= hash(b) { (a, b) } else { (b, a) };
+    let hex = |bytes: &[u8]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    view_dir
+        .join("evidence")
+        .join(format!("{}-{}.pair", hex(&hash(first)), hex(&hash(second))))
+}
+
+/// Persist one verified equivocation pair beside the log that witnessed it.
+///
+/// REPLICATION.md 6.1 makes evidence worth forwarding BECAUSE anyone can verify it from
+/// the two encodings alone — so what gets saved is the exact bytes, in JSON with hex
+/// fields, re-verifiable by any implementation without trusting this one.
+fn record_evidence(
+    view_dir: &std::path::Path,
+    a: &[u8],
+    b: &[u8],
+) -> Result<Option<std::path::PathBuf>, String> {
+    let path = evidence_path(view_dir, a, b);
+    if path.exists() {
+        return Ok(None);
+    }
+    let parent = path.parent().expect("evidence dir under view");
+    std::fs::create_dir_all(parent).map_err(|e| format!("cannot create {parent:?}: {e}"))?;
+    let hex = |bytes: &[u8]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let document = format!(
+        "{{\"rule\": \"REPLICATION.md 6.1\", \"a\": \"{}\", \"b\": \"{}\"}}\n",
+        hex(a),
+        hex(b)
+    );
+    std::fs::write(&path, document).map_err(|e| format!("cannot write {path:?}: {e}"))?;
+    Ok(Some(path))
+}
+
 fn cmd_import(argv: &[String]) -> i32 {
     let Some(bundle_path) = argv.first().filter(|a| !a.starts_with("--")) else {
         eprintln!("vayu import needs a bundle file");
@@ -618,6 +655,37 @@ fn cmd_import(argv: &[String]) -> i32 {
     let mut held = 0usize;
     let mut refused = 0usize;
     let mut deferred = 0usize;
+    let mut evidence = 0usize;
+
+    // A bundle can carry BOTH halves of a fork. Judge every pair before anything is
+    // judged singly: two records at one seq by one owner are equivocation evidence no
+    // matter what the verifier would later say about either half's validity, and the
+    // pair deserves reporting even when both halves expire unaccepted.
+    let raw_records: Vec<&vayuweb_client::cbor::Value> = records.iter().collect();
+    for (index, a) in raw_records.iter().enumerate() {
+        let vayuweb_client::cbor::Value::Bytes(a_bytes) = a else {
+            continue;
+        };
+        for b in &raw_records[index + 1..] {
+            let vayuweb_client::cbor::Value::Bytes(b_bytes) = b else {
+                continue;
+            };
+            if vayuweb_client::verify::is_equivocation_evidence(a_bytes, b_bytes) {
+                match record_evidence(std::path::Path::new(view_dir), a_bytes, b_bytes) {
+                    Ok(Some(path)) => {
+                        evidence += 1;
+                        println!(
+                            "EQUIVOCATION EVIDENCE: this bundle carries both halves of one \
+                             owner's fork; saved {path:?}"
+                        );
+                    }
+                    Ok(None) => {}
+                    Err(e) => eprintln!("vayu import: could not record evidence: {e}"),
+                }
+            }
+        }
+    }
+
     for record in &records {
         let vayuweb_client::cbor::Value::Bytes(record_bytes) = record else {
             refused += 1;
@@ -640,6 +708,32 @@ fn cmd_import(argv: &[String]) -> i32 {
                 vayuweb_client::verify::Verdict::Reject { code, detail } => {
                     refused += 1;
                     println!("REJECT {code}: {detail}");
+                    // A refusal at a contested slot may be equivocation against
+                    // something already held. Evidence survives the refusal either way.
+                    let held_entries = view.entries().unwrap_or_default();
+                    for entry in &held_entries {
+                        if vayuweb_client::verify::is_equivocation_evidence(
+                            &entry.bytes,
+                            record_bytes,
+                        ) {
+                            match record_evidence(
+                                std::path::Path::new(view_dir),
+                                &entry.bytes,
+                                record_bytes,
+                            ) {
+                                Ok(Some(path)) => {
+                                    evidence += 1;
+                                    println!(
+                                        "EQUIVOCATION EVIDENCE: refused record conflicts with \
+                                         held {} under one owner key; saved {path:?}",
+                                        entry.hash_hex
+                                    );
+                                }
+                                Ok(None) => {}
+                                Err(e) => eprintln!("vayu import: could not record evidence: {e}"),
+                            }
+                        }
+                    }
                 }
                 vayuweb_client::verify::Verdict::Defer { detail } => {
                     deferred += 1;
@@ -657,6 +751,9 @@ fn cmd_import(argv: &[String]) -> i32 {
         "\n{accepted} accepted · {held} already held · {refused} refused · {deferred} deferred \
          (view: {view_dir})"
     );
+    if evidence > 0 {
+        println!("{evidence} equivocation pair(s) recorded under {view_dir}/evidence/");
+    }
     // Verdicts are data-dependent outcomes, not tool failures: an exchange SHOULD be able to
     // carry records this peer will refuse. Only broken input or IO is an exit 2/1.
     0

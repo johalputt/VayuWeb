@@ -10,6 +10,17 @@ it.
 
 ## [Unreleased]
 
+### Added — `vayu import` names a forked bundle instead of just refusing it
+
+A bundle can carry BOTH halves of one owner's fork. Until now the second half was
+simply refused and the reason — that this bundle is evidence of equivocation, not
+merely a bad record — went unstated. Import now judges every pair in the bundle before
+judging anything singly, checks each refusal against what the view already holds, and
+when two records at one seq share an owner key while differing in bytes, it says so on
+stdout and persists the exact pair as JSON under `<view>/evidence/<hashA>-<hashB>.pair`
+— canonical regardless of arrival order, re-verifiable by anyone via REPLICATION.md 6.1
+without trusting this peer, idempotent across re-imports.
+
 ### Added — replication message codecs, the fifth of five types now spoken on both sides
 
 `replicate` lands in the client crate beside `blockx`: HELLO, WANT, RECORDS, CHECKPOINT
