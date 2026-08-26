@@ -478,3 +478,93 @@ fn every_equivocation_vector_judges_the_evidence_alike() {
         failures.join("\n")
     );
 }
+
+#[test]
+fn every_block_exchange_vector_decodes_as_the_wire_contract_requires() {
+    let raw = std::fs::read_to_string(VECTORS_PATH).expect("vectors.json exists");
+    let doc: Value = serde_json::from_str(&raw).expect("vectors.json parses");
+    let vectors = doc
+        .get("blockExchange")
+        .and_then(Value::as_array)
+        .expect("a blockExchange section")
+        .clone();
+
+    let mut failures: Vec<String> = Vec::new();
+    for vector in &vectors {
+        let name = vector.get("name").and_then(Value::as_str).unwrap_or("?");
+        // Some vectors carry fixed bytes; others CONSTRUCT a message at runtime
+        // (an oversized block is a megabyte of zeros nobody wants to ship in JSON).
+        // The construction mirrors the reference suite's exactly.
+        let bytes = match vector.get("message").and_then(Value::as_str) {
+            Some(hex) => hex_to_bytes(hex),
+            None => {
+                let construct = vector.get("construct").expect("message or construct");
+                let count = construct.get("count").and_then(Value::as_u64).unwrap_or(0);
+                let size = construct.get("bytes").and_then(Value::as_u64).unwrap_or(0);
+                vayuweb_client::cbor::encode(&vayuweb_client::cbor::Value::Map(vec![
+                    (
+                        vayuweb_client::cbor::Key::Text("t".to_string()),
+                        vayuweb_client::cbor::Value::Text("BLOCKS".to_string()),
+                    ),
+                    (
+                        vayuweb_client::cbor::Key::Text("blks".to_string()),
+                        vayuweb_client::cbor::Value::Array(
+                            (0..count)
+                                .map(|_| {
+                                    vayuweb_client::cbor::Value::Bytes(vec![0u8; size as usize])
+                                })
+                                .collect(),
+                        ),
+                    ),
+                ]))
+                .expect("constructed message encodes")
+            }
+        };
+        let expect = vector.get("expect");
+        let want_decode = expect
+            .and_then(|e| e.get("decode"))
+            .and_then(Value::as_str)
+            .unwrap_or("?")
+            .to_string();
+        let want_code = expect.and_then(|e| e.get("code")).and_then(Value::as_str);
+        let result = vayuweb_client::blockx::decode_block_message(&bytes);
+        match (want_decode.as_str(), want_code) {
+            ("ok", _) => match result {
+                Ok(message) => {
+                    let kind = match message {
+                        vayuweb_client::blockx::BlockMessage::BHello { .. } => "BHELLO",
+                        vayuweb_client::blockx::BlockMessage::BWant { .. } => "BWANT",
+                        vayuweb_client::blockx::BlockMessage::Blocks { .. } => "BLOCKS",
+                        vayuweb_client::blockx::BlockMessage::BDone { .. } => "BDONE",
+                    };
+                    let want_type = expect
+                        .and_then(|e| e.get("type"))
+                        .and_then(Value::as_str)
+                        .unwrap_or(kind);
+                    if kind != want_type {
+                        failures.push(format!(
+                            "{name}: decoded as {kind}, vector names {want_type}"
+                        ));
+                    }
+                }
+                Err(e) => failures.push(format!("{name}: refused but should decode: {e}")),
+            },
+            ("reject", Some(want)) => match result {
+                Ok(_) => failures.push(format!("{name}: decoded but should refuse {want}")),
+                Err(e) => {
+                    // The error Display carries the wire-contract code verbatim.
+                    if !e.to_string().contains(want) {
+                        failures.push(format!("{name}: refused as {e}, vector names {want}"));
+                    }
+                }
+            },
+            _ => failures.push(format!("{name}: unreadable expectation")),
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} block-exchange vector(s) disagree:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}

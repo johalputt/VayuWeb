@@ -9,6 +9,7 @@
 //! Phase 6 asks for one written by parties with no common employer or funder; a second language
 //! written by the same hands does not satisfy it and must not be reported as though it did.
 
+pub mod blockx;
 pub mod cbor;
 pub mod cid;
 pub mod control;

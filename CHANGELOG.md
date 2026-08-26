@@ -10,6 +10,26 @@ it.
 
 ## [Unreleased]
 
+### Added — the block-exchange wire format, spoken by both languages before the transport exists
+
+`blockx` lands in the client crate: BHELLO, BWANT, BLOCKS and BDONE encoded and decoded
+as pure functions over bytes — no sockets, no discovery, no fetching. The rollout gate
+(VWIP-0005 Draft) governs when peers start ASKING each other for blocks; it never
+required the wire format to be a mystery until then. When Phase 4 unblocks, this client
+already speaks octets proven identical to the reference by all ten block-exchange
+vectors, including the constructed megabyte-of-zeros case that refuses before its
+identifier is computed.
+
+The limits live in one auditable place and bind in the order that costs least: whole-
+message size before parsing, array length before elements. Sender-side prohibitions are
+enforced on emit (a declared max above the block limit; a repeated identifier), while a
+hand-crafted duplicate-cid request still DECODES — 3.6.a binds senders, receivers verify
+every block against what they themselves asked for, and differing refusals would fork
+the wire. `max` is read and not acted upon: a peer declaring 2^53 costs the receiver
+nothing beyond the message.
+
+Eighty-seven reference-authored vectors now decide identically on both sides.
+
 ### Added — equivocation evidence a recipient can verify without trusting anyone
 
 `verify::is_equivocation_evidence(a, b)` judges REPLICATION.md 6.1 evidence from the
