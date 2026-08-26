@@ -1049,6 +1049,13 @@ export interface ResolutionVector {
   readonly host: string;
   /** The record the local index holds for that name, or null. */
   readonly record: string | null;
+  /**
+   * Records the local index ALSO holds, keyed `label.tld`, for vectors whose
+   * resolution walks through other names — an alias chain needs its targets
+   * present or the walk stops at NAME_NOT_FOUND before it shows anything about
+   * hopping.
+   */
+  readonly others?: Record<string, string>;
   readonly hasVerifiedHead: boolean;
   readonly now: number;
   readonly expect:
@@ -1187,6 +1194,13 @@ export function buildResolutionVectors(): ResolutionVector[] {
   // rule says so by typing the value as a byte string, which a first draft of these vectors got
   // wrong by passing the base32 text and being refused as BAD_RECORD_ENTRY.
   const CID = Uint8Array.from([0x01, 0x55, 0x12, 0x20, ...new Uint8Array(32).fill(0xab)]);
+  const cidHex = toHex(CID);
+  /** A REGISTER whose single entry redirects: the whole record an alias is. */
+  const aliasRecord = (label: string, target: string): Uint8Array =>
+    registration({ name: label, records: [entry('alias', target)] });
+  /** A REGISTER whose single entry is content. */
+  const cidRecord = (label: string): Uint8Array =>
+    registration({ name: label, records: [entry('cid', CID)] });
   return [
     {
       // Two entries of one type, which the selection rule ordered across types and never within
@@ -1274,6 +1288,63 @@ export function buildResolutionVectors(): ResolutionVector[] {
       hasVerifiedHead: true,
       now: VECTOR_NOW,
       expect: { outcome: 'error', code: 'NAME_NOT_FOUND' },
+    },
+    {
+      // One alias hop. The walker lands on the target and answers with the TARGET's entry —
+      // the alias itself is never a served answer, only a direction.
+      name: 'resolve/alias-follows-one-hop',
+      rule: 'RESOLUTION.md step 10: an alias restarts the algorithm against the target',
+      host: 'nick.vayu',
+      record: toHex(aliasRecord('nick', 'target.vayu')),
+      others: { 'target.vayu': toHex(cidRecord('target')) },
+      hasVerifiedHead: true,
+      now: VECTOR_NOW + 60,
+      expect: { outcome: 'ok', source: 'cid', value: cidHex },
+    },
+    {
+      // Two hops through distinct names. Budget is counted per ORIGINAL request, so this
+      // spends two of three.
+      name: 'resolve/alias-follows-two-hops',
+      rule: 'RESOLUTION.md: at most three hops per original request; each hop re-enters fully',
+      host: 'deep.vayu',
+      record: toHex(aliasRecord('deep', 'mid.vayu')),
+      others: {
+        'mid.vayu': toHex(aliasRecord('mid', 'base.vayu')),
+        'base.vayu': toHex(cidRecord('base')),
+      },
+      hasVerifiedHead: true,
+      now: VECTOR_NOW + 60,
+      expect: { outcome: 'ok', source: 'cid', value: cidHex },
+    },
+    {
+      // Four aliases in a row need a fifth iteration; the budget of three ends the walk
+      // even though every name on it is distinct. Depth alone is a refusal — an attacker
+      // must not be able to trade someone else's resolver time for their chain length.
+      name: 'resolve/alias-budget-exhausted-without-a-cycle',
+      rule: 'RESOLUTION.md: the budget counts hops per original request; deeper than three refuses ALIAS_LOOP',
+      host: 'one.vayu',
+      record: toHex(aliasRecord('one', 'two.vayu')),
+      others: {
+        'two.vayu': toHex(aliasRecord('two', 'three.vayu')),
+        'three.vayu': toHex(aliasRecord('three', 'four.vayu')),
+        'four.vayu': toHex(aliasRecord('four', 'five.vayu')),
+        'five.vayu': toHex(cidRecord('five')),
+      },
+      hasVerifiedHead: true,
+      now: VECTOR_NOW + 60,
+      expect: { outcome: 'error', code: 'ALIAS_LOOP' },
+    },
+    {
+      // A genuine two-name cycle. The repeat is detected by NAME, which reports the loop
+      // accurately instead of dressing it up as an exhausted budget.
+      name: 'resolve/alias-cycle-named-by-the-names-in-it',
+      rule: 'RESOLUTION.md: a name already visited on this walk is ALIAS_LOOP before any budget question',
+      host: 'ping.vayu',
+      record: toHex(aliasRecord('ping', 'pong.vayu')),
+      others: { 'pong.vayu': toHex(aliasRecord('pong', 'ping.vayu')) },
+      hasVerifiedHead: true,
+      now: VECTOR_NOW + 60,
+      expect: { outcome: 'error', code: 'ALIAS_LOOP' },
     },
   ];
 }

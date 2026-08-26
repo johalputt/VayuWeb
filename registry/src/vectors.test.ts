@@ -203,9 +203,19 @@ test('every resolution vector returns the outcome the specification requires', (
   const failures: string[] = [];
   for (const vector of buildResolutionVectors()) {
     const record = vector.record === null ? null : parseRecordBytes(fromHex(vector.record));
+    // Alias vectors walk through OTHER names; the index holds those records too.
+    const others = vector.others ?? {};
     const outcome = resolveName(
       vector.host,
-      { lookup: () => record, hasVerifiedHead: () => vector.hasVerifiedHead },
+      {
+        lookup: (label, tld) => {
+          const key = `${label}.${tld}`;
+          if (key === vector.host) return record;
+          const hex = others[key];
+          return hex === undefined ? null : parseRecordBytes(fromHex(hex));
+        },
+        hasVerifiedHead: () => vector.hasVerifiedHead,
+      },
       vector.now,
     );
     // The VALUE is compared as well as the type, where the vector names one. Comparing only the

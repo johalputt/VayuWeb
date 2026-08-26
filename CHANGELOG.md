@@ -10,6 +10,29 @@ it.
 
 ## [Unreleased]
 
+### Changed — entry selection follows RESOLUTION.md's order, and the vectors bind both implementations
+
+Reading a record's content source was "first entry wins"; RESOLUTION.md orders the
+TYPES — `ipns`, then `cid`, then `alias` — and takes the first of the selected type,
+with record order deciding only within one type. A record carrying `[cid, ipns]`
+would have served the frozen snapshot forever while the living pointer went
+unconsulted: the exact silent fork the ordering exists to prevent. Selection is now
+structural (`View::selected_pointer`), and when the selected source is something an
+offline view cannot honestly serve — an IPNS pointer it cannot follow, or a malformed
+content address it cannot verify — serve-by-name refuses closed instead of quietly
+serving an older record beneath it.
+
+Four new resolution vectors walk real alias chains through the reference resolver —
+one hop, two hops, a four-alias chain exhausting the three-hop budget without any
+cycle, and a two-name cycle named by the names in it. Vectors gained an optional
+`others` map so an alias chain's targets can be present in the index.
+
+And for the first time the Rust implementation consumes the registry's vectors:
+`client/tests/conformance.rs` executes every resolution vector through a faithful port
+of steps 1-10, so records authored by the reference implementation must decide the
+same way here. The mirror image of `client-built.json` (built there, verified there)
+is now complete in both directions.
+
 ### Fixed — a preview server outlives its audience
 
 Serve's startup announcements are best-effort writes now. Rust's `println!` panics

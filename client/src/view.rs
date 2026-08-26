@@ -379,13 +379,35 @@ impl View {
             }
             tip_index = index;
         }
+        // The most recent record with a SELECTED source decides. A record whose
+        // selection is an ipns pointer names content this offline view cannot fetch,
+        // and a malformed cid address is content no reader can verify — both refuse
+        // CLOSED rather than quietly serving the older record beneath them, which is
+        // exactly the frozen-snapshot fork RESOLUTION.md's ordering exists to prevent.
         for index in (0..=tip_index).rev() {
-            if let Some(pointer) = pointer_of(&mine[index].3.bytes) {
-                return Ok(pointer);
+            match selected_pointer(&mine[index].3.bytes) {
+                Some(Selected::Cid(bytes)) => {
+                    return match Cid::from_bytes(&bytes) {
+                        Ok(cid) => Ok(Pointer::Cid(cid)),
+                        Err(_) => Err(format!(
+                            "{label}.{tld}'s current record selects a malformed content \
+                             address; refusing it rather than serving an older record"
+                        )),
+                    };
+                }
+                Some(Selected::Alias(target)) => return Ok(Pointer::Alias(target)),
+                Some(Selected::Ipns(text)) => {
+                    return Err(format!(
+                        "{label}.{tld} currently points at an IPNS pointer ({text}); an \
+                         offline view cannot follow it and will not serve an older snapshot \
+                         in its place"
+                    ))
+                }
+                None => continue,
             }
         }
         Err(format!(
-            "no record in {label}.{tld}'s chain carries an entry"
+            "no record in {label}.{tld}'s chain carries a servable entry"
         ))
     }
 
@@ -457,10 +479,26 @@ fn owner_of(bytes: &[u8]) -> Result<[u8; 32], String> {
     Ok(key)
 }
 
-/// The pointer a record's first entry carries, if any — RENEW and the terminal ops carry
-/// none, and `None` is the honest answer for them. Entry types follow REGISTRY.md: `cid`
-/// carries binary content, `alias` names another ratified name.
-fn pointer_of(bytes: &[u8]) -> Option<Pointer> {
+/// What a record's entries select as the thing to serve. RESOLUTION.md orders the
+/// TYPES — `ipns`, then `cid`, then `alias` — and takes the first entry of the
+/// selected type; record order decides only within a type, never between them.
+/// RENEW and the terminal ops carry no entries at all, and `None` is the honest
+/// answer for anything with no selectable source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Selected {
+    /// A living IPNS pointer. Names content that exists elsewhere; a LOCAL view
+    /// cannot follow it and says so rather than silently serving an older `cid`.
+    Ipns(String),
+    /// Raw content-address bytes. Selection is STRUCTURAL — RESOLUTION.md checks
+    /// integrity at fetch time, not selection time — so a malformed address still
+    /// wins selection here, and the local server refuses on it rather than quietly
+    /// falling back to an older record.
+    Cid(Vec<u8>),
+    Alias(crate::record::AliasTarget),
+}
+
+/// Apply RESOLUTION.md's selection to one record's entries.
+pub fn selected_pointer(bytes: &[u8]) -> Option<Selected> {
     let value = crate::record::decode_record(bytes).ok()?;
     let crate::cbor::Value::Map(members) = value else {
         return None;
@@ -472,39 +510,57 @@ fn pointer_of(bytes: &[u8]) -> Option<Pointer> {
         },
         _ => None,
     })?;
-    let first = entries.first()?;
-    let crate::cbor::Value::Map(fields) = first else {
-        return None;
-    };
-    let entry_type = fields.iter().find_map(|(k, v)| match k {
-        crate::cbor::Key::Text(name) if name == "type" => match v {
-            crate::cbor::Value::Text(text) => Some(text.clone()),
+    // (type, value) pairs in wire order.
+    let mut typed: Vec<(&str, &crate::cbor::Value)> = Vec::new();
+    for entry in entries {
+        let crate::cbor::Value::Map(fields) = entry else {
+            continue;
+        };
+        let kind = fields.iter().find_map(|(k, v)| match k {
+            crate::cbor::Key::Text(name) if name == "type" => match v {
+                crate::cbor::Value::Text(text) => Some(text.as_str()),
+                _ => None,
+            },
             _ => None,
-        },
-        _ => None,
-    })?;
-    let entry_value = fields.iter().find_map(|(k, v)| match k {
-        crate::cbor::Key::Text(name) if name == "value" => Some(v.clone()),
-        _ => None,
-    })?;
-    match entry_type.as_str() {
-        "cid" => match entry_value {
-            crate::cbor::Value::Bytes(bytes) => Cid::from_bytes(&bytes).ok().map(Pointer::Cid),
+        })?;
+        let val = fields.iter().find_map(|(k, v)| match k {
+            crate::cbor::Key::Text(name) if name == "value" => Some(v),
             _ => None,
-        },
-        "alias" => match entry_value {
-            crate::cbor::Value::Text(text) => {
-                let (label, tld) = text.rsplit_once('.')?;
-                Some(Pointer::Alias(crate::record::AliasTarget {
-                    label: label.to_string(),
-                    tld: tld.to_string(),
-                }))
-            }
-            _ => None,
-        },
-        // ipns/txt entries are real entry types but name no local content to serve.
-        _ => None,
+        })?;
+        typed.push((kind, val));
     }
+    for wanted in ["ipns", "cid", "alias"] {
+        let Some(val) = typed
+            .iter()
+            .find(|(kind, _)| *kind == wanted)
+            .map(|(_, value)| *value)
+        else {
+            continue;
+        };
+        match wanted {
+            "ipns" => match val {
+                crate::cbor::Value::Text(text) => return Some(Selected::Ipns(text.clone())),
+                _ => continue,
+            },
+            "cid" => match val {
+                crate::cbor::Value::Bytes(bytes) => return Some(Selected::Cid(bytes.clone())),
+                _ => continue,
+            },
+            // verify enforces alias-alone, so this branch is reached only when the
+            // whole entries list is exactly one alias.
+            _ => match val {
+                crate::cbor::Value::Text(text) => {
+                    let (label, tld) = text.rsplit_once('.')?;
+                    return Some(Selected::Alias(crate::record::AliasTarget {
+                        label: label.to_string(),
+                        tld: tld.to_string(),
+                    }));
+                }
+                _ => continue,
+            },
+        }
+    }
+    None
 }
 
 fn not_after_of(bytes: &[u8]) -> Result<u64, String> {
@@ -585,6 +641,63 @@ mod tests {
 
         // An unrelated name is invisible to this chain.
         assert!(view.chain_tip("other", "vayu").expect("replays").is_none());
+    }
+
+    #[test]
+    fn selection_orders_types_and_then_record_order() {
+        use crate::record::{AliasTarget, Entry, EntryValue};
+        let alice = identity(0xA4);
+        let entry = |value| Entry { value, ttl: None };
+        let cid_a = entry(EntryValue::Cid({
+            let mut bytes = vec![0x01, 0x55, 0x12, 0x20];
+            bytes.extend([7u8; 32]);
+            bytes
+        }));
+        let cid_b = entry(EntryValue::Cid(vec![0xEE; 36]));
+        let pointer = entry(EntryValue::Ipns("k51qzi5uqu5d".to_string()));
+        let note = entry(EntryValue::Txt("v=vayuweb1".to_string()));
+        let redirect = entry(EntryValue::Alias(AliasTarget {
+            label: "target".to_string(),
+            tld: "vayu".to_string(),
+        }));
+        let build = |entries: &[Entry]| {
+            build_register(&alice, "order", "vayu", NOW + 60, entries, 0, None, LIMIT)
+                .expect("builds")
+        };
+
+        // ipns beats cid regardless of wire order: the living pointer is the point.
+        for entries in [
+            [cid_a.clone(), pointer.clone()],
+            [pointer.clone(), cid_a.clone()],
+        ] {
+            match selected_pointer(&build(&entries)) {
+                Some(Selected::Ipns(text)) => assert_eq!(text, "k51qzi5uqu5d"),
+                other => panic!("expected the ipns selection, got {other:?}"),
+            }
+        }
+        // Within one type, record order decides — both ways, so an implementation
+        // preferring a particular VALUE cannot pass by accident.
+        for (entries, want) in [
+            (vec![cid_a.clone(), cid_b.clone()], 7u8),
+            (vec![cid_b.clone(), cid_a.clone()], 0xEEu8),
+        ] {
+            match selected_pointer(&build(&entries)) {
+                Some(Selected::Cid(bytes)) => {
+                    assert_eq!(bytes[4], want, "first in record order must win");
+                }
+                other => panic!("expected a cid selection, got {other:?}"),
+            }
+        }
+        // txt is never a source; cid behind it still is.
+        match selected_pointer(&build(&[note, cid_a])) {
+            Some(Selected::Cid(_)) => {}
+            other => panic!("expected cid behind a txt note, got {other:?}"),
+        }
+        // An alias is selected only when it is alone.
+        match selected_pointer(&build(std::slice::from_ref(&redirect))) {
+            Some(Selected::Alias(target)) => assert_eq!(target.label, "target"),
+            other => panic!("expected the alias, got {other:?}"),
+        }
     }
 
     #[test]
