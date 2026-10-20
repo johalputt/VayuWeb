@@ -6,7 +6,8 @@
     "docs/spec/RESOLUTION.md",
     "docs/spec/REPLICATION.md",
     "docs/spec/PROOF-OF-WORK.md",
-    "docs/spec/VWIP-0005.md"
+    "docs/spec/VWIP-0005.md",
+    "docs/spec/HOSTING.md"
   ],
   "notes": {
     "clock": "now is a Unix timestamp in seconds. Vectors never depend on the wall clock of the machine running them.",
@@ -16,7 +17,8 @@
     "otherKey": "c853ad0f0cd2b619aea92ceec4fd56a24d6499d584ce79257e45cfd8139b60a7",
     "baseInstant": 1782518400,
     "release": "A `release` vector is a predecessor record in hex and an instant, and the answer every implementation must derive: is the name claimable again by anyone. It is the one thing the record suite could not test, because `state.fullyReleased` is an INPUT there — every other vector in this file is handed the answer and checked on what it does with it. Two implementations deriving it differently accept different owners for the same name, and neither ever rejects anything. REVOKE is why it is published rather than assumed: an ordinary record is released at notAfter + 2592000 + 2592000, a revoked one at notAfter + 2592000, because grace would be a window in which a compromised key could renew. Applying the ordinary rule to both holds a revoked name for thirty days longer than peers who do not. Read the `predecessor` bytes, compute the answer at `at`, compare with `expectFullyReleased`; no internal state label is published, because the name being available is the only part of this that peers see.",
-    "suites": "The suites, by their key in this file. `vectors` pins what a verifier accepts. `convergence`, `resolution`, `replication`, `equivocation`, `pow` and `release` pin what implementations must AGREE about after that, which is where a fork lives — every consensus-critical defect found in this project so far was invisible to record verification and visible only to the question \"what would a second implementation do\". blockExchange is the wire format of VWIP-0005, which is a DRAFT: these vectors are generated so that the proposal carries executed encodings rather than transcribed ones, and they are not stable until it leaves Draft.",
+    "suites": "The suites, by their key in this file. `vectors` pins what a verifier accepts. `convergence`, `resolution`, `replication`, `equivocation`, `pow`, `release` and `pins` pin what implementations must AGREE about after that, which is where a fork lives — every consensus-critical defect found in this project so far was invisible to record verification and visible only to the question \"what would a second implementation do\". blockExchange is the wire format of VWIP-0005, which is a DRAFT: these vectors are generated so that the proposal carries executed encodings rather than transcribed ones, and they are not stable until it leaves Draft. `pins` is the honest availability report of HOSTING.md: how many peers were asked, how many answered, and the one sentence a client may show — because a report that renders silence as absence, or a self-pin as redundancy, is worse than no report.",
+    "availability": "A `pins` vector is a CID, how many peers were asked, the observations that were made, how long an observation counts for, and the instant to read the report at. `expect.answered` is the number of DISTINCT holders seen, `expect.peersHolding` counts peers alone, `expect.servicesHolding` counts paid services alone, `expect.selfPinned` says whether this node holds it, and `expect.observedAt` is the newest sighting or null. `expect.summary` is the sentence a client may show a person, transcribed in full: two implementations that counted the same holders but worded them differently have still shipped two user experiences. `expect.onlyThisNodeHoldsIt` is the case the summary has to warn about — the site loads only while this node is up. There is deliberately no field for a percentage, a total or an uptime: Constitution Article 23 forbids the figure, so a runner must not compute one.",
     "construct": "A vector carries EITHER a `message` in hex OR a `construct` recipe, never neither. A recipe is used where publishing the bytes would publish no information: the one case today is a block one octet over the megabyte limit, which written out is 2.1 MB of hex zeros of which every byte after the first says nothing. Build the message from the recipe and decode it exactly as you would a hex one. Kinds: `blocks-of-zeros` — a BLOCKS message whose `blks` array holds `count` byte strings of `bytes` zero octets each, encoded as deterministic CBOR per REGISTRY.md. This list is closed; a runner meeting a kind it does not know must fail rather than skip, because a skipped vector reports as a passing one."
   },
   "vectors": [
@@ -2320,6 +2322,250 @@
       "predecessor": "ad626f70665245564f4b45637365710163736967584091661ab2cc8515acac4cc93c38e971c8b84743cbbdd9abdfb2fa016b843971ae1dd875327c4b5fe8a6b734369299e63b646ca4292bb2a23c2f3cff70dbea9b0563746c646476617975646e616d656561746c617365737569746501677265636f726473806776657273696f6e01686e6f7441667465721a6c204600686f776e65724b657958202152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1268706f7750726f6f66f66870726576486173685820339aa2a96b991d731810495453cc3dc1d9b2bc27e54f7e5a81c9362f68554eb0696e6f744265666f72651a6a3f14d8",
       "at": 1819238400,
       "expectFullyReleased": true
+    }
+  ],
+  "pins": [
+    {
+      "name": "pins/no-peers-were-asked",
+      "rule": "HOSTING.md Availability: silence is not absence — a node that asked nobody knows nothing about who holds the content",
+      "cid": "bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e",
+      "asked": 0,
+      "observations": [],
+      "staleAfter": 300,
+      "now": 1782518400,
+      "expect": {
+        "answered": 0,
+        "peersHolding": 0,
+        "servicesHolding": 0,
+        "selfPinned": false,
+        "observedAt": null,
+        "onlyThisNodeHoldsIt": false,
+        "summary": "No peers were asked. Nothing is known about who holds this."
+      }
+    },
+    {
+      "name": "pins/silence-is-not-absence",
+      "rule": "HOSTING.md Availability: a peer that did not answer is not a peer that lacks the content",
+      "cid": "bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e",
+      "asked": 3,
+      "observations": [],
+      "staleAfter": 300,
+      "now": 1782518400,
+      "expect": {
+        "answered": 0,
+        "peersHolding": 0,
+        "servicesHolding": 0,
+        "selfPinned": false,
+        "observedAt": null,
+        "onlyThisNodeHoldsIt": false,
+        "summary": "No peer answered out of 3 asked. That is not the same as nobody holding it."
+      }
+    },
+    {
+      "name": "pins/self-only-and-nobody-asked",
+      "rule": "HOSTING.md Availability: one always-on node is the difference between a site that loads and a site that does not",
+      "cid": "bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e",
+      "asked": 0,
+      "observations": [
+        {
+          "holder": {
+            "kind": "self"
+          },
+          "observedAt": 1782518400
+        }
+      ],
+      "staleAfter": 300,
+      "now": 1782518400,
+      "expect": {
+        "answered": 1,
+        "peersHolding": 0,
+        "servicesHolding": 0,
+        "selfPinned": true,
+        "observedAt": 1782518400,
+        "onlyThisNodeHoldsIt": true,
+        "summary": "pinned here, and no peer has been asked. Nothing is known about who else holds it — if this node goes offline the site stops loading."
+      }
+    },
+    {
+      "name": "pins/self-only-and-every-peer-silent",
+      "rule": "HOSTING.md Availability: the self-only case says the consequence, and it did not",
+      "cid": "bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e",
+      "asked": 3,
+      "observations": [
+        {
+          "holder": {
+            "kind": "self"
+          },
+          "observedAt": 1782518400
+        }
+      ],
+      "staleAfter": 300,
+      "now": 1782518400,
+      "expect": {
+        "answered": 1,
+        "peersHolding": 0,
+        "servicesHolding": 0,
+        "selfPinned": true,
+        "observedAt": 1782518400,
+        "onlyThisNodeHoldsIt": true,
+        "summary": "pinned here, and none of the 3 peers asked answered for it — if this node goes offline the site stops loading. Observed, not guaranteed."
+      }
+    },
+    {
+      "name": "pins/one-peer-answering",
+      "rule": "HOSTING.md Availability: a peer that answered is one observed holder",
+      "cid": "bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e",
+      "asked": 3,
+      "observations": [
+        {
+          "holder": {
+            "kind": "self"
+          },
+          "observedAt": 1782518400
+        },
+        {
+          "holder": {
+            "kind": "peer",
+            "id": "peer-one"
+          },
+          "observedAt": 1782518400
+        }
+      ],
+      "staleAfter": 300,
+      "now": 1782518400,
+      "expect": {
+        "answered": 2,
+        "peersHolding": 1,
+        "servicesHolding": 0,
+        "selfPinned": true,
+        "observedAt": 1782518400,
+        "onlyThisNodeHoldsIt": false,
+        "summary": "pinned here, 1 other peer answered. Observed, not guaranteed."
+      }
+    },
+    {
+      "name": "pins/the-same-peer-twice-is-one-holder",
+      "rule": "HOSTING.md Availability: two observations of one peer are one holder — otherwise a peer answering repeatedly reads as two independent copies",
+      "cid": "bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e",
+      "asked": 2,
+      "observations": [
+        {
+          "holder": {
+            "kind": "peer",
+            "id": "peer-one"
+          },
+          "observedAt": 1782518390
+        },
+        {
+          "holder": {
+            "kind": "peer",
+            "id": "peer-one"
+          },
+          "observedAt": 1782518400
+        }
+      ],
+      "staleAfter": 300,
+      "now": 1782518400,
+      "expect": {
+        "answered": 1,
+        "peersHolding": 1,
+        "servicesHolding": 0,
+        "selfPinned": false,
+        "observedAt": 1782518400,
+        "onlyThisNodeHoldsIt": false,
+        "summary": "1 other peer answered. Observed, not guaranteed."
+      }
+    },
+    {
+      "name": "pins/a-service-is-counted-apart",
+      "rule": "HOSTING.md Availability: a paid service is a legitimate holder and a different dependency from a peer",
+      "cid": "bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e",
+      "asked": 2,
+      "observations": [
+        {
+          "holder": {
+            "kind": "service",
+            "name": "pin-service"
+          },
+          "observedAt": 1782518400
+        }
+      ],
+      "staleAfter": 300,
+      "now": 1782518400,
+      "expect": {
+        "answered": 1,
+        "peersHolding": 0,
+        "servicesHolding": 1,
+        "selfPinned": false,
+        "observedAt": 1782518400,
+        "onlyThisNodeHoldsIt": false,
+        "summary": "1 pinning service. Observed, not guaranteed."
+      }
+    },
+    {
+      "name": "pins/a-stale-observation-no-longer-counts",
+      "rule": "HOSTING.md Availability: an observation is a statement about a moment, and how long a moment stays interesting is a policy question",
+      "cid": "bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e",
+      "asked": 2,
+      "observations": [
+        {
+          "holder": {
+            "kind": "peer",
+            "id": "peer-one"
+          },
+          "observedAt": 1782518099
+        }
+      ],
+      "staleAfter": 300,
+      "now": 1782518400,
+      "expect": {
+        "answered": 0,
+        "peersHolding": 0,
+        "servicesHolding": 0,
+        "selfPinned": false,
+        "observedAt": null,
+        "onlyThisNodeHoldsIt": false,
+        "summary": "No peer answered out of 2 asked. That is not the same as nobody holding it."
+      }
+    },
+    {
+      "name": "pins/the-newest-observation-stamps-the-report",
+      "rule": "HOSTING.md Availability: a report is about a past moment, and names which one",
+      "cid": "bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e",
+      "asked": 3,
+      "observations": [
+        {
+          "holder": {
+            "kind": "peer",
+            "id": "peer-one"
+          },
+          "observedAt": 1782518280
+        },
+        {
+          "holder": {
+            "kind": "peer",
+            "id": "peer-two"
+          },
+          "observedAt": 1782518370
+        },
+        {
+          "holder": {
+            "kind": "self"
+          },
+          "observedAt": 1782518340
+        }
+      ],
+      "staleAfter": 300,
+      "now": 1782518400,
+      "expect": {
+        "answered": 3,
+        "peersHolding": 2,
+        "servicesHolding": 0,
+        "selfPinned": true,
+        "observedAt": 1782518370,
+        "onlyThisNodeHoldsIt": false,
+        "summary": "pinned here, 2 other peers answered. Observed, not guaranteed."
+      }
     }
   ]
 }

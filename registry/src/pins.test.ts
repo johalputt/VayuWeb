@@ -197,10 +197,45 @@ test('what unpublishing cannot do is data, not prose a UI can drop', () => {
   assert.match(limits, /no protocol mechanism can compel a third party to delete/);
 });
 
+test('an act the operation set cannot express is not listed as one a client can do', () => {
+  // **The list said the charter says, and the charter is not the protocol.** Article 19.2 grants
+  // six acts, one of which is "publish a signed TOMBSTONE record". REGISTRY.md's own operation
+  // table records `TOMBSTONE` as **Absent**: Article 29.4 closes the record set, so a record of
+  // that type is one every conformant peer must refuse.
+  //
+  // So a client that rendered `guaranteed` as a list of things it can do would claim a capability
+  // no conformant implementation has — and the claim is invisible, because the sentence is TRUE
+  // about the charter. It reads as reassurance about software and is a statement about a document.
+  // This module exists to stop exactly that, and it was doing it in the one place that mattered.
+  //
+  // The fix is not to drop the act — the charter grants it, and a client must not hide it — but to
+  // say which act the operation set cannot express, and to name the substitute the specification
+  // itself names for it.
+  const tombstone = UNPUBLISH_EFFECTS.notExpressible.find((entry) => /tombstone/i.test(entry.act));
+  assert.ok(tombstone, 'the tombstone must be named as not expressible');
+  assert.match(tombstone.why, /TOMBSTONE/);
+  assert.match(tombstone.why, /29\.4/);
+  assert.match(tombstone.substitute, /UPDATE carrying no entries/);
+
+  // And the charter's list still holds the act, because the charter grants it.
+  assert.ok(
+    UNPUBLISH_EFFECTS.guaranteed.some((act) => /tombstone/i.test(act)),
+    'the charter still grants it; the gap is in the protocol, not in the charter',
+  );
+
+  // Nothing else in the two lists may be quietly unexpressible: every other act is one of the
+  // six the operation set can carry out.
+  assert.equal(UNPUBLISH_EFFECTS.notExpressible.length, 1);
+});
+
 test('nothing here claims erasure', () => {
   // Article 19.7: VayuWeb guarantees the cessation of authorised publication, not erasure, "and no
   // implementation or document SHALL state or imply that it does".
-  const everything = [...UNPUBLISH_EFFECTS.guaranteed, ...UNPUBLISH_EFFECTS.notGuaranteed]
+  const everything = [
+    ...UNPUBLISH_EFFECTS.guaranteed,
+    ...UNPUBLISH_EFFECTS.notGuaranteed,
+    ...UNPUBLISH_EFFECTS.notExpressible.map((entry) => `${entry.act} ${entry.why} ${entry.substitute}`),
+  ]
     .join(' ')
     .toLowerCase();
   for (const word of ['erase', 'erasure', 'delete everywhere', 'permanently remove', 'wipe']) {

@@ -31,7 +31,7 @@ meet for itself, the reason is stated there rather than hidden behind a percenta
 
 | Phase | Built | Acceptance test |
 |---|---|---|
-| **0** Charter and specification | Every document drafted; the improvement process, the threat model and the namespace annex are settled. Seven conformance suites cover the wire-visible rules. Thirteen mechanical checkers refuse the drift classes that produced most past defects | **Not met, and not meetable here.** Article 44.6 wants a competent implementer reading the specifications alone. The party that wrote them cannot be that reader |
+| **0** Charter and specification | Every document drafted; the improvement process, the threat model and the namespace annex are settled. Nine conformance suites cover the wire-visible rules. Thirteen mechanical checkers refuse the drift classes that produced most past defects | **Not met, and not meetable here.** Article 44.6 wants a competent implementer reading the specifications alone. The party that wrote them cannot be that reader |
 | **1** Registry core | **Effectively complete.** The log, the record schema, deterministic CBOR, Ed25519, Argon2id, all six operations with their validation ordering, and the lifecycle state machine including grace and quarantine. Sixteen commands drive it | Half met: the tool does everything the row asks. The second tool written from the specification does not exist |
 | **2** Peer replication | **Mostly done.** Transport-agnostic state machine, the reference binding, discovery topic and framing, and a `sync` verb. Two OS processes over a real socket converge, partition and heal. Equivocation is detected on both sides of a real fork and now *reported to the operator* rather than only written to a file | Partly met. "Independent peers" — two processes are that. Two machines, two network stacks and two genuinely independent clocks are not yet exercised |
 | **3** Resolution proxy | **Complete on one machine.** The browsing proxy, the fifteen-endpoint control API on a 0600 Unix socket, the resolution cache with bounded and now *ceilinged* sizes, the manifest path mapping, and the security header profile. Thirty-seven live checks plus an executable browser criterion | **Met on one machine** — the first acceptance test here to pass at all |
@@ -64,7 +64,7 @@ well enough that the second implementer in Phase 1 and the strangers in Phase 6 
 | Threat model | Complete (draft) |
 | Whitepaper, architecture, governance guide, glossary, FAQ | Complete (draft) |
 | Independent adversarial review of the above | **Findings all dispositioned; the review itself is not finished.** The 2026-08-04 audit raised 66 surviving findings and every one now carries an outcome in [AUDIT-FINDINGS.md](AUDIT-FINDINGS.md) — fixed, escalated to an amendment, or verified stale. That is one audit, by seven agents, on one corpus. It is not the *independent* review this row asks for, and it cannot be: Article 44.6's standard is a competent implementer reading the specifications alone, and the same party that wrote them cannot supply that reader |
-| Test vectors for every wire-visible rule | **Eight suites**, in [`conformance/vectors.json`](../conformance/vectors.json): record verification (a vector for every rejection code), convergence, resolution, replication, equivocation, proof-of-work derivation, block exchange, and release — the instant a name returns to the pool, which every other vector was handed as an input rather than asked to derive. All but the first pin what implementations must *agree* about rather than what one accepts — which is where a fork lives, and where every consensus-critical defect found here so far has been. `blockExchange` is the one that is not yet stable: VWIP-0005 is a Draft, and its vectors move with it |
+| Test vectors for every wire-visible rule | **Nine suites**, in [`conformance/vectors.json`](../conformance/vectors.json): record verification (a vector for every rejection code), convergence, resolution, replication, equivocation, proof-of-work derivation, block exchange, release — the instant a name returns to the pool, which every other vector was handed as an input rather than asked to derive — and availability, the report a node gives about whether a pin is being kept alive. All but the first pin what implementations must *agree* about rather than what one accepts — which is where a fork lives, and where every consensus-critical defect found here so far has been. The availability suite is the one that pins a *sentence* rather than a verdict, because a user reads the sentence and believes it: two implementations that count the same holders and word them differently have shipped two user experiences. `blockExchange` is the one that is not yet stable: VWIP-0005 is a Draft, and its vectors move with it |
 
 **Done when:** a competent implementer can read the specifications alone — without access to any
 source code and without asking a question — and produce a client that would interoperate. That
@@ -358,6 +358,14 @@ Article 23 forbids the figure, so the number does not exist. Article 19's limits
 are held as a list rather than as prose, so a user interface has to render them or deliberately
 drop them.
 
+The client's `client/src/pins.rs` is the Rust mirror of that module, and the `pins` suite in
+`conformance/vectors.json` is what keeps the two honest with each other: it pins the counts and
+the sentence, so the two languages cannot drift into shipping different user experiences. One
+thing the mirror does NOT carry is the reference's `PinSet` — the client has no separate notion of
+"undertaken to keep", because everything in its block store is kept, and `vayu unpublish` removes
+blocks outright rather than releasing a promise about them. A mirror of a class with no caller
+would be a class kept for symmetry, which is the opposite of the point of these modules.
+
 `registry/src/blockstore.ts` is the Helia integration, and it is deliberately thin: the
 blockstore is exposed as the `BlockSource` the verified traversal already takes, so every check
 in `fetch.ts` stays in front of the network rather than being replaced by a library's own
@@ -456,9 +464,18 @@ VWIP-0005 in Draft. It is recorded here as an open item rather than made unilate
 **What remains.** The session and the transport binding; a real exchange with a stranger who
 declines to send a block or sends a different one; the end-to-end acceptance test, which needs two
 machines and which this repository cannot honestly claim from a sandbox; and pin-set management
-beyond inventory and unpinning — the client can say what it holds and drop what it no longer
-needs, but it cannot yet report AVAILABILITY the way `registry/src/pins.ts` does, with silence
-reported as silence and a self-pin never counted as redundancy.
+beyond inventory, unpinning and the availability report. The report itself is built — `vayu pins`
+now says, for every tree it holds, how many peers were asked (none, this client has no transport),
+how many answered, whether this node is the only observed holder, and the one sentence a person
+may read, with silence reported as silence and a self-pin never counted as redundancy. What is
+still missing is the other half of the promise: asking anybody. A report that can only ever say
+"nobody answered" because nothing has been asked is honest and nearly useless, and the transport
+that would let it ask is the same transport this phase is waiting on.
+
+That report is also a cross-language contract now. The `pins` suite in `conformance/vectors.json`
+pins the counts AND the sentence, so a second implementation cannot ship a different user
+experience by counting the same holders differently — the fork that matters here is not in what
+two nodes hold but in what they tell a person about it.
 
 Starting the phase surfaced two settled-spec contradictions and one gap, all recorded in the
 changelog: the resolver preferred the frozen snapshot over the living pointer, so a conforming
@@ -595,7 +612,7 @@ is a defect against Constitution Article 4.
 This section said "not with code — there is no code to write against yet" for as long as that was
 true, and it stopped being true without anybody editing it. There is now a registry, a
 replication state machine, a resolver, a browsing proxy, a control API, the content-addressing
-and UnixFS encoders, and six conformance suites. A contributor reading the old sentence would
+and UnixFS encoders, and nine conformance suites. A contributor reading the old sentence would
 have been told the opposite of the situation, which is the same defect as any other stale claim
 in this corpus — it just happened to be in the paragraph telling people what to do about it.
 

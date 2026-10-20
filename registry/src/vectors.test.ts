@@ -12,6 +12,7 @@ import {
   buildEquivocationVectors,
   buildPowVectors,
   buildReleaseVectors,
+  buildPinsVectors,
   fromHex,
   toHex,
   type Vector,
@@ -19,6 +20,11 @@ import {
 } from './vectors.ts';
 import { resolveConflict, type Candidate } from './converge.ts';
 import { resolveName } from './resolve.ts';
+import {
+  report as availabilityReport,
+  summarise,
+  onlyThisNodeHoldsIt,
+} from './pins.ts';
 import { decodeMessage, verifyEquivocation, MESSAGE_TYPES, ReplicationError } from './replicate.ts';
 import { recordHashFromBytes } from './domain.ts';
 import { compareBytes, decode, encode, type CborMap, type CborValue } from './cbor.ts';
@@ -239,6 +245,78 @@ test('every resolution vector returns the outcome the specification requires', (
     }
   }
   assert.deepEqual(failures, []);
+});
+
+test('every availability vector produces the report and the sentence the rule requires', () => {
+  // The counts AND the sentence, because the sentence is the contract a person reads. Two
+  // implementations that counted the same holders but worded them differently have shipped two
+  // user experiences, and the difference between "no peer answered" and "nobody has it" is the
+  // whole point of the module.
+  const failures: string[] = [];
+  for (const vector of buildPinsVectors()) {
+    let report;
+    try {
+      report = availabilityReport(
+        vector.cid,
+        vector.asked,
+        vector.observations,
+        vector.staleAfter,
+        vector.now,
+      );
+    } catch (e) {
+      failures.push(`${vector.name}\n      rule:     ${vector.rule}\n      refused:  ${String(e)}`);
+      continue;
+    }
+    const actual = {
+      answered: report.answered,
+      peersHolding: report.peersHolding,
+      servicesHolding: report.servicesHolding,
+      selfPinned: report.selfPinned,
+      observedAt: report.observedAt,
+      onlyThisNodeHoldsIt: onlyThisNodeHoldsIt(report),
+      summary: summarise(report),
+    };
+    const want = vector.expect;
+    for (const key of Object.keys(want) as (keyof typeof want)[]) {
+      if (actual[key] !== want[key]) {
+        failures.push(
+          `${vector.name}\n      rule:     ${vector.rule}` +
+            `\n      field:    ${key}\n      expected: ${JSON.stringify(want[key])}` +
+            `\n      actual:   ${JSON.stringify(actual[key])}`,
+        );
+      }
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+test('the availability suite pins the ways a correct count lies', () => {
+  // A suite of happy paths would let every one of these through.
+  const byName = new Map(buildPinsVectors().map((vector) => [vector.name, vector]));
+  const has = (name: string): boolean => byName.has(name);
+
+  // Silence rendered as absence.
+  assert.ok(has('pins/silence-is-not-absence'));
+  // A self-pin counted as redundancy.
+  assert.ok(has('pins/self-only-and-nobody-asked'));
+  // One peer answering twice counted as two copies.
+  assert.ok(has('pins/the-same-peer-twice-is-one-holder'));
+  // A stale sighting counted as a current one.
+  assert.ok(has('pins/a-stale-observation-no-longer-counts'));
+  // A service folded into the peer count.
+  assert.ok(has('pins/a-service-is-counted-apart'));
+
+  // And the suite must not contain a field that could become a percentage: Article 23 forbids
+  // the figure, so the artifact must not even carry a place to put one.
+  const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')) as Record<string, unknown>;
+  const suite = (artifact['pins'] ?? []) as Record<string, unknown>[];
+  const forbidden = ['percentage', 'uptime', 'total', 'durable'];
+  for (const vector of suite) {
+    const text = JSON.stringify(vector).toLowerCase();
+    for (const word of forbidden) {
+      assert.equal(text.includes(`"${word}"`), false, `${String(vector['name'])} carries ${word}`);
+    }
+  }
 });
 
 test('every replication vector decodes, or is refused with the code the specification names', () => {
@@ -526,7 +604,7 @@ test('AUDIT: BDONE has no field that could vary with what a peer holds', () => {
   assert.equal(decodeBlockMessage(fromHex(held.message)).t, 'BDONE');
 });
 
-test('the committed artifact carries all seven suites', () => {
+test('the committed artifact carries all nine suites', () => {
   // A suite that exists in code and not in the artifact is a suite no second implementation can
   // run, which makes it a test of this implementation rather than a contract between two.
   const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')) as Record<string, unknown>;
@@ -538,6 +616,8 @@ test('the committed artifact carries all seven suites', () => {
     'equivocation',
     'pow',
     'blockExchange',
+    'release',
+    'pins',
   ]) {
     assert.ok(Array.isArray(artifact[suite]), `${suite} must be an array in the artifact`);
     assert.ok((artifact[suite] as unknown[]).length > 0, `${suite} must not be empty`);
@@ -552,6 +632,7 @@ test('the committed artifact carries all seven suites', () => {
   assert.deepEqual(artifact['resolution'], buildResolutionVectors());
   assert.deepEqual(artifact['replication'], buildReplicationVectors());
   assert.deepEqual(artifact['blockExchange'], buildBlockExchangeVectors());
+  assert.deepEqual(artifact['pins'], buildPinsVectors());
 });
 
 /** Build a convergence candidate from a record's hex, as a second implementation would. */
@@ -599,10 +680,10 @@ test('AUDIT: every field a runner must act on is explained inside the artifact',
       v.length > 0 &&
       v.every((e) => typeof e === 'object' && e !== null && 'name' in e),
   ) as [string, Record<string, unknown>[]][];
-  // Eight since `release` was added. The number is asserted rather than counted from the artifact
+  // Nine since `pins` was added. The number is asserted rather than counted from the artifact
   // for the reason this whole test exists: a suite that appears without anyone declaring it is a
   // suite nobody wrote an explanation for.
-  assert.equal(suites.length, 8, 'the artifact carries exactly its eight vector suites');
+  assert.equal(suites.length, 9, 'the artifact carries exactly its nine vector suites');
 
   // **And each is named in the index, which the count alone never checked.** Adding a suite with
   // no note passed this test the moment the count was updated to match. The first fix for that

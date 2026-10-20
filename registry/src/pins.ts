@@ -242,8 +242,21 @@ export const TOMBSTONE_CACHE_SECONDS = 3_600;
  * What unpublishing actually does, enumerated so a client cannot imply more.
  *
  * Article 19.1 opens by saying it is "stated with deliberate precision, because unpublishing is
- * where charters lie". The two lists below are that precision, and they are data rather than prose
- * so that a user interface has to render both or deliberately drop one.
+ * where charters lie". The lists below are that precision, and they are data rather than prose so
+ * that a user interface has to render them or deliberately drop them.
+ *
+ * **`guaranteed` is Article 19.2's list of acts, not a list of things an implementation can do
+ * today.** One of the six cannot be done by any conformant implementation at present, and saying
+ * so here is the point: REGISTRY.md's own operation table records `TOMBSTONE` as **Absent** — the
+ * charter mandates it (Articles 19.2, 19.3 and 19.4, with a conformance test at 19.9), but
+ * Article 29.4 closes the record set, so a record of that type is one every conformant peer must
+ * refuse. A list that promised the tombstone as something a client can do would be the exact
+ * overstatement this module exists to prevent, and it would be invisible: the sentence is true
+ * about the CHARTER and false about the PROTOCOL, and only the second one is about the software.
+ *
+ * So the six acts stay as the charter states them, the act the operation set cannot express is
+ * named in `notExpressible` with the substitute the specification itself names, and a client can
+ * say exactly what it did.
  */
 export const UNPUBLISH_EFFECTS = {
   /** Article 19.2: what a registrant can always do. */
@@ -261,6 +274,23 @@ export const UNPUBLISH_EFFECTS = {
     'a tombstone adds a record; it removes nothing',
     'content already retrieved by others may be re-pinned and re-served indefinitely, by parties you will never identify',
     'no protocol mechanism can compel a third party to delete bytes they already hold',
+  ],
+  /**
+   * An act the charter grants and the current operation set cannot express.
+   *
+   * Kept apart from `guaranteed` so that a client can render the charter's list without claiming
+   * a capability no conformant peer would accept.
+   */
+  notExpressible: [
+    {
+      act: 'publish a signed tombstone that conformant clients must honour',
+      why:
+        'the operation set closes at six and TOMBSTONE is not among them: Article 29.4 requires a ' +
+        'record of an unrecognised type to be refused, so no conformant peer would honour one',
+      substitute:
+        'an UPDATE carrying no entries breaks the binding, which is the substitute REGISTRY.md names ' +
+        'in the same table; it has no record of its own to carry a cache bound or a signer rule',
+    },
   ],
 } as const;
 

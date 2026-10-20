@@ -1554,14 +1554,56 @@ fn unpublish_withdraws_the_pointer_and_keeps_the_blocks_another_name_needs() {
         stdout.contains("kept because another name in this view still reaches them"),
         "the shared block must be reported as kept, not removed: {stdout}"
     );
-    // And it says plainly what it did NOT do, at the moment it did it.
+    // And it says plainly what it did NOT do, at the moment it did it. Article 19.6 requires the
+    // limits to be stated plainly EVERYWHERE, and the unpublishing moment is the one where a
+    // reader is most likely to be told something false.
     assert!(
-        stdout.contains("Peers keep every copy they already fetched"),
+        stdout.contains("What unpublishing cannot do, and says so (Article 19.6)"),
+        "the limits must be stated now, not in documentation: {stdout}"
+    );
+    assert!(
+        stdout.contains(
+            "no protocol mechanism can compel a third party to delete bytes they \
+                        already hold"
+        ),
         "the limits must be stated now, not in documentation: {stdout}"
     );
     assert!(
         stdout.contains("Publication is permanent in effect"),
         "{stdout}"
+    );
+
+    // **The tombstone must not be claimed as done.** The charter grants it (Article 19.2), and
+    // REGISTRY.md's own operation table records TOMBSTONE as absent, so no conformant peer would
+    // honour one. A command that listed it under "What this did" would be claiming a capability
+    // the protocol does not have — and the sentence would be true about the charter, which is
+    // what makes such a claim so easy to ship by accident.
+    assert!(
+        stdout.contains("Not performed, because the protocol cannot express it"),
+        "{stdout}"
+    );
+    let done_section = stdout
+        .split("What this did:")
+        .nth(1)
+        .and_then(|s| s.split("What unpublishing cannot do").next())
+        .expect("the section naming what was done");
+    assert!(
+        !done_section.to_lowercase().contains("tombstone"),
+        "the tombstone was not performed and must not be listed as done: {done_section}"
+    );
+    let not_expressible = stdout
+        .split("Not performed, because the protocol cannot express it")
+        .nth(1)
+        .and_then(|s| s.split("Also not done by this command").next())
+        .expect("the section naming what could not be performed");
+    assert!(
+        not_expressible.contains("signed tombstone")
+            && not_expressible.contains(
+                "UPDATE carrying \
+                                no entries"
+            ),
+        "the act that cannot be expressed must be named, with the substitute used: \
+         {not_expressible}"
     );
 
     // The name no longer points at content, and says so in the inventory.
@@ -1598,6 +1640,136 @@ fn unpublish_withdraws_the_pointer_and_keeps_the_blocks_another_name_needs() {
     let (status, _head, body) = server.get("/shared.txt");
     assert_eq!(status, 200, "the shared block must have survived");
     assert_eq!(body, b"the same bytes in both sites");
+}
+
+#[test]
+fn pins_reports_availability_without_claiming_more_than_it_knows() {
+    // The report a user reads about whether their site will still load. Three things it must
+    // never do: call silence absence, call a self-pin redundancy, or print a figure the
+    // protocol forbids (Article 23).
+    let work = TempDir::new("pins-availability");
+    let site = work.path().join("site");
+    work.file(
+        "site/index.html",
+        "<!doctype html><title>avail</title><p>hi",
+    );
+    let store = work.path().join("store");
+    let view = work.path().join("view");
+    let seed_path = work.path().join("seed.hex");
+    std::fs::write(
+        &seed_path,
+        "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a",
+    )
+    .expect("writes");
+    let now = 1_800_000_000u64;
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "publish",
+            site.to_str().expect("utf8"),
+            "--name",
+            "avail.vayu",
+            "--store",
+            store.to_str().expect("utf8"),
+            "--view",
+            view.to_str().expect("utf8"),
+            "--key-file",
+            seed_path.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "pins",
+            store.to_str().expect("utf8"),
+            "--view",
+            view.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // The name it holds is named, and the sentence says the consequence rather than
+    // reassuring: "pinned here" alone reads as fine, and it is not.
+    assert!(stdout.contains("avail.vayu"), "{stdout}");
+    assert!(
+        stdout.contains("if this node goes offline the site stops loading"),
+        "the only-holder case must say what happens when this node stops: {stdout}"
+    );
+    assert!(
+        stdout.contains("no peer has been asked"),
+        "the report must say it asked nobody: {stdout}"
+    );
+    // And the self-pin is not dressed up as redundancy.
+    assert!(
+        !stdout.to_lowercase().contains("redundan"),
+        "a self-pin is not redundancy: {stdout}"
+    );
+    // No figure the constitution forbids.
+    for word in ["percentage", "uptime", "durable"] {
+        assert!(
+            !stdout.to_lowercase().contains(word),
+            "Article 23 forbids a {word}: {stdout}"
+        );
+    }
+
+    // The machine-readable form carries the same facts and the same absence.
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "pins",
+            store.to_str().expect("utf8"),
+            "--view",
+            view.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+            "--json",
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(0));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("json");
+    let reports = parsed["availability"].as_array().expect("an array");
+    assert_eq!(reports.len(), 1, "{parsed}");
+    let report = &reports[0];
+    assert_eq!(report["name"], "avail.vayu", "{parsed}");
+    assert_eq!(report["asked"], 0, "{parsed}");
+    assert_eq!(report["selfPinned"], true, "{parsed}");
+    assert_eq!(report["peersHolding"], 0, "{parsed}");
+    assert_eq!(report["servicesHolding"], 0, "{parsed}");
+    assert_eq!(report["availabilityUnguaranteed"], true, "{parsed}");
+    assert_eq!(report["onlyThisNodeHoldsIt"], true, "{parsed}");
+    assert_eq!(report["observedAt"], now, "{parsed}");
+    assert!(
+        report["summary"]
+            .as_str()
+            .expect("a summary")
+            .contains("if this node goes offline the site stops loading"),
+        "{parsed}"
+    );
+    // No field a figure could be written into.
+    let keys: Vec<String> = report
+        .as_object()
+        .expect("an object")
+        .keys()
+        .map(|k| k.to_lowercase())
+        .collect();
+    for forbidden in ["percentage", "uptime", "total", "durable"] {
+        assert!(
+            !keys.contains(&forbidden.to_string()),
+            "the report carries a {forbidden} field: {parsed}"
+        );
+    }
 }
 
 #[test]

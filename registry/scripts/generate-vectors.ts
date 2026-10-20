@@ -21,6 +21,7 @@ import {
   buildPowVectors,
   buildBlockExchangeVectors,
   buildReleaseVectors,
+  buildPinsVectors,
   VECTOR_NOW,
   VECTOR_OWNER_KEY,
   VECTOR_OTHER_KEY,
@@ -37,6 +38,7 @@ const equivocation = buildEquivocationVectors();
 const pow = buildPowVectors();
 const blockExchange = buildBlockExchangeVectors();
 const release = buildReleaseVectors();
+const pins = buildPinsVectors();
 
 const artifact = {
   $comment:
@@ -56,6 +58,7 @@ const artifact = {
     'docs/spec/REPLICATION.md',
     'docs/spec/PROOF-OF-WORK.md',
     'docs/spec/VWIP-0005.md',
+    'docs/spec/HOSTING.md',
   ],
   notes: {
     clock:
@@ -90,13 +93,28 @@ const artifact = {
       'available is the only part of this that peers see.',
     suites:
       'The suites, by their key in this file. `vectors` pins what a verifier accepts. ' +
-      '`convergence`, `resolution`, `replication`, `equivocation`, `pow` and `release` pin ' +
-      'what implementations must AGREE about after that, which is ' +
+      '`convergence`, `resolution`, `replication`, `equivocation`, `pow`, `release` and `pins` ' +
+      'pin what implementations must AGREE about after that, which is ' +
       'where a fork lives — every consensus-critical defect found in this project so far was ' +
       'invisible to record verification and visible only to the question "what would a second ' +
       'implementation do". blockExchange is the wire format of VWIP-0005, which is a DRAFT: ' +
       'these vectors are generated so that the proposal carries executed encodings rather than ' +
-      'transcribed ones, and they are not stable until it leaves Draft.',
+      'transcribed ones, and they are not stable until it leaves Draft. `pins` is the honest ' +
+      'availability report of HOSTING.md: how many peers were asked, how many answered, and the ' +
+      'one sentence a client may show — because a report that renders silence as absence, or a ' +
+      'self-pin as redundancy, is worse than no report.',
+    availability:
+      'A `pins` vector is a CID, how many peers were asked, the observations that were made, how ' +
+      'long an observation counts for, and the instant to read the report at. `expect.answered` is ' +
+      'the number of DISTINCT holders seen, `expect.peersHolding` counts peers alone, ' +
+      '`expect.servicesHolding` counts paid services alone, `expect.selfPinned` says whether this ' +
+      'node holds it, and `expect.observedAt` is the newest sighting or null. `expect.summary` is ' +
+      'the sentence a client may show a person, transcribed in full: two implementations that ' +
+      'counted the same holders but worded them differently have still shipped two user ' +
+      'experiences. `expect.onlyThisNodeHoldsIt` is the case the summary has to warn about — the ' +
+      'site loads only while this node is up. There is deliberately no field for a percentage, a ' +
+      'total or an uptime: Constitution Article 23 forbids the figure, so a runner must not ' +
+      'compute one.',
     construct:
       'A vector carries EITHER a `message` in hex OR a `construct` recipe, never neither. A ' +
       'recipe is used where publishing the bytes would publish no information: the one case ' +
@@ -115,6 +133,7 @@ const artifact = {
   pow,
   blockExchange,
   release,
+  pins,
 };
 
 mkdirSync(dirname(OUT), { recursive: true });
@@ -122,6 +141,6 @@ writeFileSync(OUT, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8');
 process.stdout.write(
   `wrote ${vectors.length} record, ${convergence.length} convergence, ${resolution.length} ` +
     `resolution, ${replication.length} replication, ${equivocation.length} equivocation, ` +
-    `${pow.length} proof-of-work, ${blockExchange.length} block-exchange and ${release.length} ` +
-    `release vectors to ${OUT}\n`,
+    `${pow.length} proof-of-work, ${blockExchange.length} block-exchange, ${release.length} ` +
+    `release and ${pins.length} availability vectors to ${OUT}\n`,
 );

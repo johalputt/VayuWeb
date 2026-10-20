@@ -20,6 +20,7 @@ pub mod domain;
 pub mod identity;
 pub mod names;
 pub mod namespace_generated;
+pub mod pins;
 pub mod pow;
 pub mod publish;
 pub mod publish_flow;

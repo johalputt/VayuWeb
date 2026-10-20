@@ -121,8 +121,12 @@ USAGE:
         Already-held items skip without re-judgment; refusals print per element.
         Verdicts are data, not tool failures: only broken input or IO exits non-zero.
 
-    vayu pins <store-dir>
-        List every block the store holds, classified, with totals.
+    vayu pins <store-dir> [--view <dir>] [--json]
+        List every block the store holds, classified, with totals, and then say honestly what
+        this node may claim about the trees it holds: how many peers were asked (none — this
+        client has no transport), how many answered, and the one sentence a person may read.
+        Silence is not absence, a self-pin is not redundancy, and a snapshot is not a forecast:
+        no percentage, no uptime, no total (Article 23).
 
     vayu transfer <label>.<tld> --store <dir> --key-file <f> --recipient-seed <f> [options]
         Hand the name to another key: both parties co-sign here (the record carries
@@ -1477,12 +1481,35 @@ fn cmd_unpublish(argv: &[String]) -> i32 {
              this view still reaches them"
         );
     }
+    // Article 19 requires the limits to be stated plainly AT THE MOMENT of unpublishing, and the
+    // specification holds them as lists rather than as prose — so the lists are rendered here
+    // rather than a paragraph of our own, and every line says who did it. A paragraph that
+    // paraphrased the charter would drift from it; a list that names what THIS RUN performed
+    // cannot.
+    println!("\nWhat this did:");
+    for act in [
+        "stop serving the content from your own infrastructure",
+        "unpin it locally",
+        "break the name-to-content binding",
+    ] {
+        println!("  · {act}");
+    }
+    println!("\nWhat unpublishing cannot do, and says so (Article 19.6):");
+    for limit in vayuweb_client::pins::UNPUBLISH_EFFECTS_NOT_GUARANTEED {
+        println!("  · {limit}");
+    }
+    println!("\nNot performed, because the protocol cannot express it:");
+    for entry in &vayuweb_client::pins::UNPUBLISH_EFFECTS_NOT_EXPRESSIBLE {
+        println!("  · {}", entry.act);
+        println!("      why: {}", entry.why);
+        println!("      used instead: {}", entry.substitute);
+    }
+    println!("\nAlso not done by this command, and available separately:");
+    println!("  · relinquish the name — `vayu relinquish`");
+    println!("  · destroy the ownership key — delete the key file yourself; nothing here can");
     println!(
-        "\nThis is LOCAL and it is the whole of what an owner can do. Peers keep every copy they \
-         already fetched or pinned, and the CID stays in the registry log forever, because the log \
-         is append-only and its history is what makes it verifiable. Publication is permanent in \
-         effect: treat every publish as irreversible, and rotate a published secret rather than \
-         relying on unpublishing to contain it."
+        "\nPublication is permanent in effect: treat every publish as irreversible, and rotate a \
+         published secret rather than relying on unpublishing to contain it."
     );
     0
 }
@@ -1576,14 +1603,29 @@ fn print_verdict(verdict: &vayuweb_client::verify::Verdict) -> i32 {
 // ---------------------------------------------------------------------------
 
 fn cmd_pins(argv: &[String]) -> i32 {
-    let Some(store_dir) = argv.first().filter(|a| !a.starts_with("--")) else {
+    let mut positional = Vec::new();
+    for arg in argv {
+        if !arg.starts_with("--") {
+            positional.push(arg.clone());
+        }
+    }
+    let Some(store_dir) = positional.first() else {
         eprintln!("vayu pins needs a store directory");
         return 2;
     };
-    if argv.len() > 1 {
-        eprintln!("unexpected argument after <store-dir>: {:?}", argv[1]);
-        return 2;
-    }
+    let flag_args: &[String] = if argv.first().is_some_and(|a| !a.starts_with("--")) {
+        &argv[1..]
+    } else {
+        argv
+    };
+    let flags = match Flags::parse(flag_args, &["view", "now"]) {
+        Ok(flags) => flags,
+        Err(detail) => {
+            eprintln!("vayu pins: {detail}");
+            return 2;
+        }
+    };
+    let as_json = flags.has("json");
     let store = match BlockStore::open(std::path::Path::new(store_dir)) {
         Ok(store) => store,
         Err(e) => {
@@ -1623,12 +1665,114 @@ fn cmd_pins(argv: &[String]) -> i32 {
         rows.push((name, size, kind));
     }
     rows.sort();
+
+    // What this node may honestly say about the trees it holds. The report asks no peer
+    // anything: this client has no transport yet, and a report that pretended to have asked
+    // would be inventing the one fact a reader cannot check.
+    let now = match resolve_now(&flags, "pins") {
+        Ok(now) => now,
+        Err(code) => return code,
+    };
+    let view_dir = flags
+        .get("view")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(store_dir).join("view"));
+    let mut availability: Vec<(String, String, vayuweb_client::pins::AvailabilityReport)> =
+        Vec::new();
+    if let Ok(view) = vayuweb_client::view::View::open(&view_dir) {
+        if let Ok(names) = view.all_names() {
+            for (label, tld, _tip) in names {
+                let Ok(root) = view.resolved_root(&label, &tld) else {
+                    continue; // A name with no content pointer holds no tree.
+                };
+                let root_text = root.to_text();
+                let held = store.has(&root);
+                let observations = if held {
+                    vec![vayuweb_client::pins::Observation {
+                        holder: vayuweb_client::pins::Holder::ThisNode,
+                        observed_at: now,
+                    }]
+                } else {
+                    Vec::new()
+                };
+                let Ok(report) = vayuweb_client::pins::report(
+                    &root_text,
+                    0,
+                    &observations,
+                    vayuweb_client::pins::DEFAULT_STALE_AFTER_SECONDS,
+                    now,
+                ) else {
+                    continue;
+                };
+                availability.push((format!("{label}.{tld}"), root_text, report));
+            }
+        }
+    }
+
+    if as_json {
+        let blocks: Vec<String> = rows
+            .iter()
+            .map(|(name, size, kind)| {
+                format!("{{\"cid\": \"{name}\", \"bytes\": {size}, \"kind\": \"{kind}\"}}")
+            })
+            .collect();
+        let reports: Vec<String> = availability
+            .iter()
+            .map(|(name, cid, report)| {
+                let summary = vayuweb_client::pins::summarise(report);
+                let observed = match report.observed_at {
+                    Some(at) => at.to_string(),
+                    None => "null".to_string(),
+                };
+                format!(
+                    "{{\"name\": \"{name}\", \"cid\": \"{cid}\", \"asked\": {}, \"answered\": {}, \
+                     \"peersHolding\": {}, \"servicesHolding\": {}, \"selfPinned\": {}, \
+                     \"observedAt\": {observed}, \"availabilityUnguaranteed\": {}, \
+                     \"onlyThisNodeHoldsIt\": {}, \"summary\": \"{summary}\"}}",
+                    report.asked,
+                    report.answered,
+                    report.peers_holding,
+                    report.services_holding,
+                    report.self_pinned,
+                    report.availability_unguaranteed,
+                    vayuweb_client::pins::only_this_node_holds_it(report),
+                )
+            })
+            .collect();
+        // No percentage, no total, no uptime: Article 23 forbids the figure, so the document
+        // carries no place to put one.
+        println!(
+            "{{\"blocks\": [{}], \"availability\": [{}]}}",
+            blocks.join(", "),
+            reports.join(", ")
+        );
+        return 0;
+    }
+
     for (name, size, kind) in &rows {
         println!("{name}  {size:>9} B  {kind}");
     }
     println!(
         "\n{} block(s), {total_bytes} B held in {store_dir}",
         rows.len()
+    );
+    if availability.is_empty() {
+        println!(
+            "\nNo published tree is known to this view, so there is nothing to report about. \
+             Availability is never guaranteed (Article 23): a report says what was observed, not \
+             what is assured."
+        );
+        return 0;
+    }
+    println!("\nWhat this node may honestly say about what it holds:");
+    for (name, cid, report) in &availability {
+        println!("{name} → {cid}");
+        println!("  {}", vayuweb_client::pins::summarise(report));
+    }
+    println!(
+        "\nAvailability is never guaranteed (Article 23): a report says what was observed, not \
+         what is assured. This client has no transport yet, so it has asked no peer anything — and \
+         silence is not absence."
     );
     0
 }

@@ -50,6 +50,7 @@ import { GRACE_SECONDS } from './lifecycle.ts';
 import { RESERVED_LABELS } from './names.ts';
 import { CID_PARAMETERS, cidBytes, sha256 } from './content.ts';
 import { BLOCK_EXCHANGE_VERSION, BX_LIMITS, encodeBlockMessage } from './blockx.ts';
+import type { Holder, Observation } from './pins.ts';
 
 /**
  * Fixed keys. Not secret, never to be used for anything real, and constant so that the vector
@@ -2076,4 +2077,264 @@ export function buildReleaseVectors(): ReleaseVector[] {
     at,
     expectFullyReleased,
   }));
+}
+
+/* -------------------------------------------------------------------------- */
+/* Availability: what this node may honestly say about a pin                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Who was seen holding the content.
+ *
+ * The three kinds are not interchangeable: a service is a different dependency from a peer, and
+ * this node's own pin is not redundancy at all.
+ *
+ * **Not a redefinition.** The shape is imported from `pins.ts` rather than restated here, so a
+ * change to the module that decides what a holder is cannot leave this file describing a
+ * different thing — which is how a vector suite ends up pinning a shape no implementation has.
+ */
+export type PinsHolder = Holder;
+
+/** One sighting, at an instant. Never a claim about now. */
+export type PinsObservation = Observation;
+
+export interface PinsVector {
+  readonly name: string;
+  readonly rule: string;
+  readonly cid: string;
+  /** Peers this node asked. Without it, `answered` is a number with no denominator. */
+  readonly asked: number;
+  readonly observations: readonly PinsObservation[];
+  /** How long an observation counts for. */
+  readonly staleAfter: number;
+  readonly now: number;
+  readonly expect: {
+    readonly answered: number;
+    readonly peersHolding: number;
+    readonly servicesHolding: number;
+    readonly selfPinned: boolean;
+    readonly observedAt: number | null;
+    readonly onlyThisNodeHoldsIt: boolean;
+    /**
+     * The one sentence a client may show.
+     *
+     * Pinned as a literal, because the sentence IS the contract: two implementations that count
+     * the same holders differently but word it differently have still shipped two user
+     * experiences, and the difference between "no peer answered" and "nobody has it" is the whole
+     * point of the module.
+     */
+    readonly summary: string;
+  };
+}
+
+/**
+ * The availability suite.
+ *
+ * **Every expectation here is a literal, not a call into `pins.ts`.** The pow suite learned that
+ * lesson the hard way — an expectation computed by the function under test survives every mutation
+ * of that function, which is a suite that passes while the code it covers is wrong. So the counts
+ * and the sentences below are written out, and the reference implementation is checked against
+ * them rather than the other way round.
+ *
+ * The cases are the ways a correct count lies: silence rendered as absence, a self-pin counted as
+ * redundancy, one peer answering twice counted as two copies, a stale sighting counted as a
+ * current one, and a service folded into the peer count.
+ */
+export function buildPinsVectors(): PinsVector[] {
+  const CID = 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e';
+  const STALE = 300;
+  const self = (observedAt: number): PinsObservation => ({ holder: { kind: 'self' }, observedAt });
+  const peer = (id: string, observedAt: number): PinsObservation => ({
+    holder: { kind: 'peer', id },
+    observedAt,
+  });
+  const service = (name: string, observedAt: number): PinsObservation => ({
+    holder: { kind: 'service', name },
+    observedAt,
+  });
+
+  return [
+    {
+      name: 'pins/no-peers-were-asked',
+      rule:
+        'HOSTING.md Availability: silence is not absence — a node that asked nobody knows nothing ' +
+        'about who holds the content',
+      cid: CID,
+      asked: 0,
+      observations: [],
+      staleAfter: STALE,
+      now: VECTOR_NOW,
+      expect: {
+        answered: 0,
+        peersHolding: 0,
+        servicesHolding: 0,
+        selfPinned: false,
+        observedAt: null,
+        onlyThisNodeHoldsIt: false,
+        summary: 'No peers were asked. Nothing is known about who holds this.',
+      },
+    },
+    {
+      name: 'pins/silence-is-not-absence',
+      rule:
+        'HOSTING.md Availability: a peer that did not answer is not a peer that lacks the content',
+      cid: CID,
+      asked: 3,
+      observations: [],
+      staleAfter: STALE,
+      now: VECTOR_NOW,
+      expect: {
+        answered: 0,
+        peersHolding: 0,
+        servicesHolding: 0,
+        selfPinned: false,
+        observedAt: null,
+        onlyThisNodeHoldsIt: false,
+        summary: 'No peer answered out of 3 asked. That is not the same as nobody holding it.',
+      },
+    },
+    {
+      name: 'pins/self-only-and-nobody-asked',
+      rule:
+        'HOSTING.md Availability: one always-on node is the difference between a site that loads ' +
+        'and a site that does not',
+      cid: CID,
+      asked: 0,
+      observations: [self(VECTOR_NOW)],
+      staleAfter: STALE,
+      now: VECTOR_NOW,
+      expect: {
+        answered: 1,
+        peersHolding: 0,
+        servicesHolding: 0,
+        selfPinned: true,
+        observedAt: VECTOR_NOW,
+        onlyThisNodeHoldsIt: true,
+        summary:
+          'pinned here, and no peer has been asked. Nothing is known about who else holds it — if ' +
+          'this node goes offline the site stops loading.',
+      },
+    },
+    {
+      name: 'pins/self-only-and-every-peer-silent',
+      rule:
+        'HOSTING.md Availability: the self-only case says the consequence, and it did not',
+      cid: CID,
+      asked: 3,
+      observations: [self(VECTOR_NOW)],
+      staleAfter: STALE,
+      now: VECTOR_NOW,
+      expect: {
+        answered: 1,
+        peersHolding: 0,
+        servicesHolding: 0,
+        selfPinned: true,
+        observedAt: VECTOR_NOW,
+        onlyThisNodeHoldsIt: true,
+        summary:
+          'pinned here, and none of the 3 peers asked answered for it — if this node goes offline ' +
+          'the site stops loading. Observed, not guaranteed.',
+      },
+    },
+    {
+      name: 'pins/one-peer-answering',
+      rule: 'HOSTING.md Availability: a peer that answered is one observed holder',
+      cid: CID,
+      asked: 3,
+      observations: [self(VECTOR_NOW), peer('peer-one', VECTOR_NOW)],
+      staleAfter: STALE,
+      now: VECTOR_NOW,
+      expect: {
+        answered: 2,
+        peersHolding: 1,
+        servicesHolding: 0,
+        selfPinned: true,
+        observedAt: VECTOR_NOW,
+        onlyThisNodeHoldsIt: false,
+        summary: 'pinned here, 1 other peer answered. Observed, not guaranteed.',
+      },
+    },
+    {
+      name: 'pins/the-same-peer-twice-is-one-holder',
+      rule:
+        'HOSTING.md Availability: two observations of one peer are one holder — otherwise a peer ' +
+        'answering repeatedly reads as two independent copies',
+      cid: CID,
+      asked: 2,
+      observations: [peer('peer-one', VECTOR_NOW - 10), peer('peer-one', VECTOR_NOW)],
+      staleAfter: STALE,
+      now: VECTOR_NOW,
+      expect: {
+        answered: 1,
+        peersHolding: 1,
+        servicesHolding: 0,
+        selfPinned: false,
+        observedAt: VECTOR_NOW,
+        onlyThisNodeHoldsIt: false,
+        summary: '1 other peer answered. Observed, not guaranteed.',
+      },
+    },
+    {
+      name: 'pins/a-service-is-counted-apart',
+      rule:
+        'HOSTING.md Availability: a paid service is a legitimate holder and a different dependency ' +
+        'from a peer',
+      cid: CID,
+      asked: 2,
+      observations: [service('pin-service', VECTOR_NOW)],
+      staleAfter: STALE,
+      now: VECTOR_NOW,
+      expect: {
+        answered: 1,
+        peersHolding: 0,
+        servicesHolding: 1,
+        selfPinned: false,
+        observedAt: VECTOR_NOW,
+        onlyThisNodeHoldsIt: false,
+        summary: '1 pinning service. Observed, not guaranteed.',
+      },
+    },
+    {
+      name: 'pins/a-stale-observation-no-longer-counts',
+      rule:
+        'HOSTING.md Availability: an observation is a statement about a moment, and how long a ' +
+        'moment stays interesting is a policy question',
+      cid: CID,
+      asked: 2,
+      observations: [peer('peer-one', VECTOR_NOW - STALE - 1)],
+      staleAfter: STALE,
+      now: VECTOR_NOW,
+      expect: {
+        answered: 0,
+        peersHolding: 0,
+        servicesHolding: 0,
+        selfPinned: false,
+        observedAt: null,
+        onlyThisNodeHoldsIt: false,
+        summary: 'No peer answered out of 2 asked. That is not the same as nobody holding it.',
+      },
+    },
+    {
+      name: 'pins/the-newest-observation-stamps-the-report',
+      rule: 'HOSTING.md Availability: a report is about a past moment, and names which one',
+      cid: CID,
+      asked: 3,
+      observations: [
+        peer('peer-one', VECTOR_NOW - 120),
+        peer('peer-two', VECTOR_NOW - 30),
+        self(VECTOR_NOW - 60),
+      ],
+      staleAfter: STALE,
+      now: VECTOR_NOW,
+      expect: {
+        answered: 3,
+        peersHolding: 2,
+        servicesHolding: 0,
+        selfPinned: true,
+        observedAt: VECTOR_NOW - 30,
+        onlyThisNodeHoldsIt: false,
+        summary: 'pinned here, 2 other peers answered. Observed, not guaranteed.',
+      },
+    },
+  ];
 }

@@ -91,10 +91,23 @@ conforming peer can hold. It is unit-tested against a constructed predecessor, a
 activates a second suite must add the wire vector. A test also fails if an exempted code
 acquires a vector, so the excuse cannot outlive the reason for it.
 
-The file carries eight suites: `vectors` holds 91 record-verification vectors, and `convergence`,
-`resolution`, `replication`, `equivocation`, `pow`, `blockExchange` and `release` hold their own.
-Those seven pin what implementations must *agree* about rather than what one of them accepts, which
-is where a fork lives.
+The file carries nine suites: `vectors` holds 91 record-verification vectors, and `convergence`,
+`resolution`, `replication`, `equivocation`, `pow`, `blockExchange`, `release` and `pins` hold
+their own. Those eight pin what implementations must *agree* about rather than what one of them
+accepts, which is where a fork lives.
+
+**`pins` pins the sentence, not only the count.** The other suites decide whether two
+implementations *hold* the same thing; this one decides whether they *say* the same thing about
+it, which is a different and more dangerous fork — a user reads the sentence and believes it.
+A vector states how many peers were asked, what came back, how long an observation counts for,
+and the report that must follow: how many distinct holders, whether this node is the only one,
+and the one sentence a client may show. The expectations are transcribed literals rather than
+computed, because an expectation calculated by the function under test survives every mutation of
+it. The suite exists because the ways a correct count lies are all easy: silence rendered as
+absence, a self-pin counted as redundancy, one peer answering twice counted as two copies, a
+stale sighting counted as a current one, and a paid service folded into the peer count. It also
+carries no field for a percentage, a total or an uptime — Constitution Article 23 forbids the
+figure, so the artifact holds no place to put one.
 
 **`release` answers the one question the record suite cannot ask.** `state.fullyReleased` is an
 *input* to every vector in `vectors`: the suite hands the verifier the answer and checks what it

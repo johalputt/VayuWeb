@@ -10,6 +10,46 @@ it.
 
 ## [Unreleased]
 
+### Added — an honest availability report, and the sentence that goes with it
+
+`vayu pins` listed the blocks this node holds and said nothing else. Now it also
+says what this node may honestly claim about them, in the words
+`registry/src/pins.ts` already defined: how many peers were asked, how many
+answered, whether this node is the only observed holder, and the one sentence a
+person may read. The client has no transport yet, so it has asked nobody — and
+the report says so rather than implying an absence it cannot know about. Silence
+is not absence, a self-pin is not redundancy, and a snapshot is not a forecast:
+there is no percentage, no uptime and no total anywhere in the output, because
+Constitution Article 23 forbids the figure and a field is where a figure grows.
+
+### Added — the `pins` conformance suite, so the sentence is a contract too
+
+The other eight suites decide whether two implementations *hold* the same thing.
+This one decides whether they *say* the same thing about it, which is the more
+dangerous fork: a user reads the sentence and believes it. Nine vectors cover
+the ways a correct count lies — silence rendered as absence, a self-pin counted
+as redundancy, one peer answering twice counted as two copies, a stale sighting
+counted as a current one, and a paid service folded into the peer count — and
+each pins the report AND the sentence. The expectations are transcribed
+literals, not computed by the function under test: an expectation calculated by
+the code it checks survives every mutation of that code, which is a suite that
+passes while the code it covers is wrong. Both implementations now produce
+byte-identical sentences.
+
+### Fixed — the client no longer claims a tombstone it cannot publish
+
+Article 19.2 grants six acts to an owner who unpublishes, one of which is
+"publish a signed TOMBSTONE record". REGISTRY.md's own operation table records
+`TOMBSTONE` as **Absent**, and Article 29.4 requires a record of an unrecognised
+type to be refused — so no conformant peer would honour one, and the act is not
+something an implementation can perform. The registry module listed it anyway,
+among the acts a client can always do, where it read as reassurance about
+software while being a statement about a document. It is now named separately,
+as an act the protocol cannot express, with the substitute the specification
+itself names (an UPDATE carrying no entries), and `vayu unpublish` prints the
+charter's list marked by what the run actually performed, what it cannot do,
+and which acts are separate commands.
+
 ### Fixed — a renewal or a transfer no longer takes the name down
 
 `records` is replaced wholesale, so an empty array DELETES the entries rather

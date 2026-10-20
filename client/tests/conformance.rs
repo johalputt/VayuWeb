@@ -635,3 +635,159 @@ fn every_replication_vector_decodes_as_the_wire_contract_requires() {
         failures.join("\n")
     );
 }
+
+#[test]
+fn every_availability_vector_produces_the_report_and_the_sentence_the_rule_requires() {
+    // The counts AND the sentence, because the sentence is the contract a person reads. Two
+    // implementations that counted the same holders but worded them differently have shipped two
+    // user experiences, and the difference between "no peer answered" and "nobody has it" is the
+    // whole point of the module.
+    let raw = std::fs::read_to_string(VECTORS_PATH).expect("vectors.json exists");
+    let doc: Value = serde_json::from_str(&raw).expect("vectors.json parses");
+    let vectors = doc
+        .get("pins")
+        .and_then(Value::as_array)
+        .expect("a pins section")
+        .clone();
+
+    let mut failures: Vec<String> = Vec::new();
+    for vector in &vectors {
+        let name = vector.get("name").and_then(Value::as_str).unwrap_or("?");
+        let cid = vector.get("cid").and_then(Value::as_str).unwrap_or("");
+        let asked = vector.get("asked").and_then(Value::as_u64).unwrap_or(0);
+        let stale_after = vector
+            .get("staleAfter")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let now = vector.get("now").and_then(Value::as_u64).unwrap_or(0);
+        let mut observations = Vec::new();
+        for observation in vector
+            .get("observations")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            let holder_value = observation.get("holder").cloned().unwrap_or(Value::Null);
+            let observed_at = observation
+                .get("observedAt")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let holder = match holder_value.get("kind").and_then(Value::as_str) {
+                Some("self") => vayuweb_client::pins::Holder::ThisNode,
+                Some("peer") => vayuweb_client::pins::Holder::Peer(
+                    holder_value
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                ),
+                Some("service") => vayuweb_client::pins::Holder::Service(
+                    holder_value
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                ),
+                other => {
+                    failures.push(format!("{name}: unknown holder kind {other:?}"));
+                    continue;
+                }
+            };
+            observations.push(vayuweb_client::pins::Observation {
+                holder,
+                observed_at,
+            });
+        }
+        let expect = vector.get("expect").cloned().unwrap_or(Value::Null);
+        let report = match vayuweb_client::pins::report(cid, asked, &observations, stale_after, now)
+        {
+            Ok(report) => report,
+            Err(e) => {
+                failures.push(format!("{name}: refused: {e}"));
+                continue;
+            }
+        };
+        let actual = vayuweb_client::pins::summarise(&report);
+        let want_summary = expect
+            .get("summary")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        if actual != want_summary {
+            failures.push(format!(
+                "{name}: summarised as\n  {actual}\nvector names\n  {want_summary}"
+            ));
+        }
+        let mut compare = |field: &str, got: Option<Value>, want: Option<Value>| {
+            let got = got.unwrap_or(Value::Null);
+            let want = want.unwrap_or(Value::Null);
+            if got != want {
+                failures.push(format!("{name}: {field} is {got}, vector names {want}"));
+            }
+        };
+        compare(
+            "answered",
+            Some(Value::from(report.answered)),
+            expect.get("answered").cloned(),
+        );
+        compare(
+            "peersHolding",
+            Some(Value::from(report.peers_holding)),
+            expect.get("peersHolding").cloned(),
+        );
+        compare(
+            "servicesHolding",
+            Some(Value::from(report.services_holding)),
+            expect.get("servicesHolding").cloned(),
+        );
+        compare(
+            "selfPinned",
+            Some(Value::from(report.self_pinned)),
+            expect.get("selfPinned").cloned(),
+        );
+        compare(
+            "observedAt",
+            report.observed_at.map(Value::from),
+            expect.get("observedAt").cloned(),
+        );
+        compare(
+            "onlyThisNodeHoldsIt",
+            Some(Value::from(vayuweb_client::pins::only_this_node_holds_it(
+                &report,
+            ))),
+            expect.get("onlyThisNodeHoldsIt").cloned(),
+        );
+    }
+    assert!(
+        failures.is_empty(),
+        "{} availability vector(s) disagree:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn the_availability_suite_carries_no_figure_article_23_forbids() {
+    // A percentage, a total or an uptime is a place for a caller to render a guarantee the
+    // protocol does not make, and Article 23 forbids the figure. The artifact must not even
+    // carry a field to put one in.
+    let raw = std::fs::read_to_string(VECTORS_PATH).expect("vectors.json exists");
+    let doc: Value = serde_json::from_str(&raw).expect("vectors.json parses");
+    let vectors = doc
+        .get("pins")
+        .and_then(Value::as_array)
+        .expect("a pins section");
+    for vector in vectors {
+        let name = vector.get("name").and_then(Value::as_str).unwrap_or("?");
+        let expect = vector.get("expect").cloned().unwrap_or(Value::Null);
+        if let Some(map) = expect.as_object() {
+            for key in map.keys() {
+                let lowered = key.to_lowercase();
+                assert!(
+                    !["percentage", "uptime", "total", "durable"].contains(&lowered.as_str()),
+                    "{name} carries a {key} field"
+                );
+            }
+        }
+    }
+}
