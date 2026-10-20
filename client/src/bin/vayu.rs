@@ -625,10 +625,9 @@ fn record_evidence(
     ledger: &mut vayuweb_client::evidence::EvidenceLedger,
     a: &[u8],
     b: &[u8],
+    origin: vayuweb_client::evidence::EvidenceOrigin,
 ) -> Result<vayuweb_client::evidence::RecordOutcome, String> {
-    ledger
-        .record(a, b, vayuweb_client::evidence::EvidenceOrigin::Detected)
-        .map_err(|e| e.to_string())
+    ledger.record(a, b, origin).map_err(|e| e.to_string())
 }
 
 fn cmd_import(argv: &[String]) -> i32 {
@@ -735,7 +734,16 @@ fn cmd_import(argv: &[String]) -> i32 {
                 continue;
             };
             if vayuweb_client::verify::is_equivocation_evidence(a_bytes, b_bytes) {
-                match record_evidence(&mut ledger, a_bytes, b_bytes) {
+                // A bundle carrying both halves is a report that ARRIVED: somebody else saw
+                // the fork and sent it. The reference ledger keeps the two apart because the
+                // origins spend different budgets — a report from a peer costs an attacker two
+                // signatures and is bounded by nothing, so it gets the smaller one.
+                match record_evidence(
+                    &mut ledger,
+                    a_bytes,
+                    b_bytes,
+                    vayuweb_client::evidence::EvidenceOrigin::Received,
+                ) {
                     Ok(vayuweb_client::evidence::RecordOutcome::Recorded) => {
                         evidence += 1;
                         println!(
@@ -786,7 +794,12 @@ fn cmd_import(argv: &[String]) -> i32 {
                             &entry.bytes,
                             record_bytes,
                         ) {
-                            match record_evidence(&mut ledger, &entry.bytes, record_bytes) {
+                            match record_evidence(
+                                &mut ledger,
+                                &entry.bytes,
+                                record_bytes,
+                                vayuweb_client::evidence::EvidenceOrigin::Detected,
+                            ) {
                                 Ok(vayuweb_client::evidence::RecordOutcome::Recorded) => {
                                     evidence += 1;
                                     println!(
@@ -1686,39 +1699,55 @@ fn cmd_evidence(argv: &[String]) -> i32 {
     }
 
     if entries.is_empty() {
-        println!("no equivocation recorded in {}", ledger.path().display());
-    } else {
+        println!("no equivocation recorded for {}", view_dir.display());
         println!(
-            "{} equivocation(s) in {}",
-            entries.len(),
-            ledger.path().display()
+            "  ledger: {} ({})",
+            ledger.path().display(),
+            if ledger.path().exists() {
+                "present and empty"
+            } else {
+                "not created yet"
+            }
         );
+    } else {
+        println!("{} report(s) in {}", entries.len(), ledger.path().display());
         for entry in entries {
             // The identity of the FACT, not of the pair: two records at one seq by one owner are
-            // one fact, and the fact is what a reader wants to know about.
-            println!("  {}", entry.key);
+            // one fact, and the fact is what a reader wants to know about. The shape is the
+            // reference implementation's, so the two read alike. Every entry listed here has
+            // already been re-verified from its own two encodings: the ledger drops the ones
+            // that do not verify when it opens, and counts them.
+            let mut parts = entry.key.split(' ');
+            let owner = parts.next().unwrap_or_default();
+            let tld = parts.next().unwrap_or_default();
+            let name = parts.next().unwrap_or_default();
+            let seq = parts.next().unwrap_or_default();
             println!(
-                "    origin: {} · verifies from its own bytes: {}",
-                entry.origin.as_str(),
-                if vayuweb_client::verify::is_equivocation_evidence(&entry.a, &entry.b) {
-                    "yes"
-                } else {
-                    "NO"
-                }
+                "  {name}.{tld}  seq {seq}  owner {}…  ({})",
+                &owner[..owner.len().min(16)],
+                entry.origin.as_str()
             );
         }
-    }
-    if refusals.unreadable > 0 || refusals.unverified > 0 || refusals.full > 0 {
+        println!();
         println!(
-            "\n{} entr(y/ies) dropped as unreadable · {} refused as unverified · {} refused \
-             because the budget was full",
-            refusals.unreadable, refusals.unverified, refusals.full
+            "  detected here: {}   received from peers: {}",
+            ledger.count(vayuweb_client::evidence::EvidenceOrigin::Detected),
+            ledger.count(vayuweb_client::evidence::EvidenceOrigin::Received)
         );
     }
+
+    // Printed always, including at zero, because "nothing was refused" and "nothing was looked
+    // at" are different states and a counter shown only when it is non-zero cannot tell them
+    // apart.
     println!(
-        "\nThis protocol does not punish equivocation (REPLICATION.md 6.4). Nothing here is a \
-         blocklist, a score or an input to any decision: no name is lost and no key is excluded. \
-         It is a legible record, and what a reader does with it is not the protocol's business."
+        "  refused: {} unverified, {} over budget, {} unreadable",
+        refusals.unverified, refusals.full, refusals.unreadable
+    );
+    println!();
+    println!(
+        "Nothing is penalised by this list. The protocol has no exclusion, no blacklist and no \
+         loss of a name — see REPLICATION.md 6.4. It is a record, and what to do with it is \
+         yours."
     );
     0
 }

@@ -47,7 +47,6 @@
 //! does with it is not the protocol's business. A mechanism able to act on evidence is a mechanism
 //! able to act on manufactured evidence, so this one acts on nothing.
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::verify::{equivocation_key, is_equivocation_evidence};
@@ -239,42 +238,36 @@ impl EvidenceLedger {
             received: limits.received.min(RECEIVED_LIMIT),
         };
         let path = dir.join("ledger.jsonl");
-        let mut entries: Vec<LedgerEntry> = Vec::new();
-        let mut refusals = Refusals::default();
-        let mut seen: HashSet<String> = HashSet::new();
-        if path.exists() {
-            let text = std::fs::read_to_string(&path)
-                .map_err(|e| EvidenceError::Io(format!("cannot read {}: {e}", path.display())))?;
+        let mut ledger = Self {
+            path,
+            entries: Vec::new(),
+            refusals: Refusals::default(),
+            limits,
+        };
+        if ledger.path.exists() {
+            let text = std::fs::read_to_string(&ledger.path).map_err(|e| {
+                EvidenceError::Io(format!("cannot read {}: {e}", ledger.path.display()))
+            })?;
             for line in text.lines() {
                 let line = line.trim();
                 if line.is_empty() {
                     continue;
                 }
-                match parse_entry(line) {
-                    Some(entry) => {
-                        // Re-verify on load: a file an attacker can append to is not a file whose
-                        // contents are known-good.
-                        if !is_equivocation_evidence(&entry.a, &entry.b) {
-                            refusals.unreadable += 1;
-                            continue;
-                        }
-                        if !seen.insert(entry.key.clone()) {
-                            // The same fact twice on disk. One entry, one forward.
-                            refusals.unreadable += 1;
-                            continue;
-                        }
-                        entries.push(entry);
-                    }
-                    None => refusals.unreadable += 1,
+                let Some(entry) = parse_entry(line) else {
+                    // A line that does not parse is not a report at all.
+                    ledger.refusals.unreadable += 1;
+                    continue;
+                };
+                // **Through the same door a wire report comes in by, budgets and all.** A file is
+                // not a privileged source; it is a source whose author had write access to a
+                // path. So an entry on disk is verified, deduplicated and charged to a budget
+                // exactly as a report from a peer would be, and the outcome is counted.
+                let outcome = ledger.admit(&entry.a, &entry.b, entry.origin, false)?;
+                if outcome != RecordOutcome::Recorded {
+                    ledger.refusals.unreadable += 1;
                 }
             }
         }
-        let ledger = Self {
-            path,
-            entries,
-            refusals,
-            limits,
-        };
         // The repair is durable: a hand-edited ledger cannot outlive an open, because the open
         // that noticed writes back what actually verified.
         if ledger.refusals.unreadable > 0 {
@@ -300,12 +293,11 @@ impl EvidenceLedger {
 
     /// Is there nothing to be gained by looking for the other half of this fact?
     ///
-    /// True when the fact is already recorded, or when the budget it would go in is full. It
-    /// exists so a caller can answer in a map lookup rather than by scanning the ledger.
+    /// True when the fact is already recorded — under EITHER origin, because one fact is one
+    /// fact and it is recorded once — or when the budget it would go in is full. It exists so a
+    /// caller can answer in a map lookup rather than by scanning the ledger.
     pub fn settled(&self, key: &str, origin: EvidenceOrigin) -> bool {
-        self.entries
-            .iter()
-            .any(|entry| entry.key == key && entry.origin == origin)
+        self.entries.iter().any(|entry| entry.key == key)
             || self.count(origin) >= self.limits.get(origin)
     }
 
@@ -327,6 +319,22 @@ impl EvidenceLedger {
         b: &[u8],
         origin: EvidenceOrigin,
     ) -> Result<RecordOutcome, EvidenceError> {
+        self.admit(a, b, origin, true)
+    }
+
+    /// The one door every report comes through — from a peer, or from this ledger's own file.
+    ///
+    /// Verification first, because everything after it — the identity used for deduplication, the
+    /// budget it is charged to, the bytes written to disk — is derived from a pair that has been
+    /// checked. A ledger that deduplicated before verifying could be taught to reject a genuine
+    /// report by being shown a forged one with the same identity first.
+    fn admit(
+        &mut self,
+        a: &[u8],
+        b: &[u8],
+        origin: EvidenceOrigin,
+        persist: bool,
+    ) -> Result<RecordOutcome, EvidenceError> {
         if !is_equivocation_evidence(a, b) {
             self.refusals.unverified += 1;
             return Ok(RecordOutcome::Unverified);
@@ -336,14 +344,15 @@ impl EvidenceLedger {
                 "the pair verified but its identity could not be read".to_string(),
             )
         })?;
-        if self.settled(&key, origin) {
-            // Either the fact is already here, or the budget is spent. The two are told apart
-            // because an operator has to know which one happened.
-            if self.count(origin) >= self.limits.get(origin) {
-                self.refusals.full += 1;
-                return Ok(RecordOutcome::Full);
-            }
+        // And a duplicate is a duplicate even when the budget is also spent: the fact is
+        // already recorded, and saying "full" instead would report a disk condition where the
+        // truth is that this report was never going to be stored.
+        if self.entries.iter().any(|entry| entry.key == key) {
             return Ok(RecordOutcome::Duplicate);
+        }
+        if self.count(origin) >= self.limits.get(origin) {
+            self.refusals.full += 1;
+            return Ok(RecordOutcome::Full);
         }
         let entry = LedgerEntry {
             origin,
@@ -351,7 +360,9 @@ impl EvidenceLedger {
             a: a.to_vec(),
             b: b.to_vec(),
         };
-        self.append(&entry)?;
+        if persist {
+            self.append(&entry)?;
+        }
         self.entries.push(entry);
         Ok(RecordOutcome::Recorded)
     }
@@ -496,6 +507,37 @@ mod tests {
         )
         .expect("registers");
         (left, right)
+    }
+
+    #[test]
+    fn a_fact_is_one_entry_whichever_origin_reports_it() {
+        // **The origin selects the BUDGET, not the identity.** The same fork can reach a node two
+        // ways — a bundle carrying both halves (it arrived) and a refusal against a record the
+        // node already holds (it was detected here) — and it is ONE fact. Storing it twice would
+        // mean forwarding it twice and counting it twice, and the two entries would disagree
+        // about which budget the fact was charged to.
+        let dir = std::env::temp_dir().join(format!("vayu-evidence-origin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut ledger = EvidenceLedger::open(&dir).expect("opens");
+        let (left, right) = fork(1_800_000_000);
+        assert_eq!(
+            ledger
+                .record(&left, &right, EvidenceOrigin::Received)
+                .expect("records"),
+            RecordOutcome::Recorded
+        );
+        // The same fact, from the other door.
+        assert_eq!(
+            ledger
+                .record(&left, &right, EvidenceOrigin::Detected)
+                .expect("records"),
+            RecordOutcome::Duplicate
+        );
+        assert_eq!(ledger.entries().len(), 1);
+        // And the entry is charged to the budget it arrived under.
+        assert_eq!(ledger.count(EvidenceOrigin::Received), 1);
+        assert_eq!(ledger.count(EvidenceOrigin::Detected), 0);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -44,6 +44,14 @@ budget is spent rather than evicting, and re-verifies every entry when the
 ledger is opened, so a pair appended to the file by hand is dropped and counted
 rather than believed.
 
+The origin selects the BUDGET and not the identity, which is the reference's
+rule and the one the first version of this got wrong: a fork can reach a node
+two ways — a bundle carrying both halves, and a refusal against a record the
+node already holds — and it is one fact, recorded once. The ledger also loads
+through the same door a wire report comes in by, budgets and all, because a
+file is not a privileged source: it is a source whose author had write access
+to a path.
+
 ### Added — an honest availability report, and the sentence that goes with it
 
 `vayu pins` listed the blocks this node holds and said nothing else. Now it also

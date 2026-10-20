@@ -1420,7 +1420,10 @@ fn an_import_detects_and_records_a_forked_bundle_as_evidence() {
     assert_eq!(files.len(), 1, "one ledger, got {files:?}");
     assert_eq!(files[0].file_name().expect("name"), "ledger.jsonl");
     let saved = std::fs::read_to_string(&files[0]).expect("reads");
-    assert!(saved.contains("\"origin\": \"detected\""), "{saved}");
+    // A bundle carrying both halves is a report that ARRIVED — somebody else saw the fork and
+    // sent it — so it spends the smaller budget, the one an attacker can fill with two
+    // signatures a time.
+    assert!(saved.contains("\"origin\": \"received\""), "{saved}");
     // The ledger names the IDENTITY of the fact, not the encodings: the same fact recorded
     // under two different encodings is one entry. The key is (ownerKey, tld, name, seq) — the
     // same string the reference implementation builds.
@@ -1500,8 +1503,8 @@ fn evidence_is_listed_readable_and_forwardable() {
         .expect("runs");
     assert_eq!(output.status.code(), Some(0));
 
-    // The listing names the fact, says the pair still verifies, and says what the ledger is
-    // NOT: a record, not a punishment.
+    // The listing names the fact, says where the report came from, and says what the ledger
+    // is NOT: a record, not a punishment.
     let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
         .args(["evidence", view_dir.to_str().expect("utf8")])
         .output()
@@ -1509,16 +1512,22 @@ fn evidence_is_listed_readable_and_forwardable() {
     assert_eq!(output.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("vayu split 0"),
+        stdout.contains("split.vayu  seq 0"),
         "the fact must be named: {stdout}"
     );
     assert!(
-        stdout.contains("verifies from its own bytes: yes"),
-        "the pair must be re-verified before it is shown: {stdout}"
+        stdout.contains("received from peers: 1"),
+        "where the report came from must be shown: {stdout}"
     );
     assert!(
-        stdout.contains("does not punish equivocation"),
+        stdout.contains("Nothing is penalised by this list"),
         "6.4 must be stated where the evidence is read: {stdout}"
+    );
+    // The counters are shown even at zero, because "nothing was refused" and "nothing was
+    // looked at" are different states.
+    assert!(
+        stdout.contains("refused: 0 unverified, 0 over budget, 0 unreadable"),
+        "{stdout}"
     );
 
     // The machine-readable form carries the same facts.
@@ -1530,7 +1539,7 @@ fn evidence_is_listed_readable_and_forwardable() {
         serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("json");
     let entries = parsed["entries"].as_array().expect("an array");
     assert_eq!(entries.len(), 1, "{parsed}");
-    assert_eq!(entries[0]["origin"], "detected", "{parsed}");
+    assert_eq!(entries[0]["origin"], "received", "{parsed}");
     assert_eq!(entries[0]["verifies"], true, "{parsed}");
 
     // And it forwards: the export is a bundle the far side can import, which is how the
@@ -1574,7 +1583,7 @@ fn evidence_is_listed_readable_and_forwardable() {
         .expect("runs");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("vayu split 0"),
+        stdout.contains("split.vayu  seq 0"),
         "the far side must hold the same fact: {stdout}"
     );
 }
@@ -1605,7 +1614,7 @@ fn a_ledger_somebody_edited_by_hand_is_repaired_rather_than_believed() {
         "a pair that does not verify is not evidence: {stdout}"
     );
     assert!(
-        stdout.contains("dropped as unreadable"),
+        stdout.contains("1 unreadable"),
         "and the drop is counted, because a silent drop is a silent lie: {stdout}"
     );
 }

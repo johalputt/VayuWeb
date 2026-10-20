@@ -488,6 +488,16 @@ than evicting, because eviction would let an attacker flush a genuine report by 
 after it; and it re-verifies every entry when it is opened, so a pair appended to the file by hand
 is dropped and counted rather than believed.
 
+**The first version of that ledger got the identity wrong, and the reference's own rule is what
+caught it.** The origin of a report — detected here, or received from a peer — selects the BUDGET
+it is charged to, not whether it is a fact already recorded. A fork reaches a node two ways: a
+bundle carrying both halves, and a refusal against a record the node already holds. Keyed on the
+fact AND the origin, the same fork was stored twice, forwarded twice, and counted against two
+different budgets; keyed on the fact alone, it is one entry, charged to the budget it arrived
+under. The ledger also loads through the same door a wire report comes in by, budgets and all,
+because a file is not a privileged source — it is a source whose author had write access to a
+path.
+
 **What remains.** The session and the transport binding; a real exchange with a stranger who
 declines to send a block or sends a different one; the end-to-end acceptance test, which needs two
 machines and which this repository cannot honestly claim from a sandbox; and pin-set management
