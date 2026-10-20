@@ -1408,21 +1408,23 @@ fn an_import_detects_and_records_a_forked_bundle_as_evidence() {
         stdout.contains("EQUIVOCATION EVIDENCE"),
         "the bundle must be named as a fork: {stdout}"
     );
-    assert!(stdout.contains("recorded under"), "{stdout}");
+    assert!(stdout.contains("recorded in the ledger"), "{stdout}");
 
-    // Exactly one evidence file, canonical regardless of arrival order, carrying both
-    // halves as hex for anyone to re-verify without trusting this peer.
+    // Exactly one ledger, carrying both halves as hex for anyone to re-verify without
+    // trusting this peer, and the ledger is the only thing in the evidence directory.
     let evidence_dir = view_dir.join("evidence");
     let files: Vec<_> = std::fs::read_dir(&evidence_dir)
         .expect("evidence dir exists")
         .map(|e| e.expect("entry").path())
         .collect();
-    assert_eq!(files.len(), 1, "one canonical pair file, got {files:?}");
+    assert_eq!(files.len(), 1, "one ledger, got {files:?}");
+    assert_eq!(files[0].file_name().expect("name"), "ledger.jsonl");
     let saved = std::fs::read_to_string(&files[0]).expect("reads");
-    assert!(
-        saved.contains("\"rule\": \"REPLICATION.md 6.1\""),
-        "{saved}"
-    );
+    assert!(saved.contains("\"origin\": \"detected\""), "{saved}");
+    // The ledger names the IDENTITY of the fact, not the encodings: the same fact recorded
+    // under two different encodings is one entry. The key is (ownerKey, tld, name, seq) — the
+    // same string the reference implementation builds.
+    assert!(saved.contains("vayu split 0"), "{saved}");
 
     // Re-importing the same fork records nothing new: idempotent on evidence too.
     let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
@@ -1441,6 +1443,170 @@ fn an_import_detects_and_records_a_forked_bundle_as_evidence() {
     assert!(
         !stdout.contains("EQUIVOCATION EVIDENCE"),
         "already-recorded evidence must not re-report: {stdout}"
+    );
+    // And it says so, rather than printing nothing at all: "the ledger grew by nothing" and
+    // "the ledger grew and you did not notice" are different states.
+    assert!(
+        stdout.contains("already recorded as the same fact"),
+        "a duplicate must be reported as a duplicate: {stdout}"
+    );
+}
+
+#[test]
+fn evidence_is_listed_readable_and_forwardable() {
+    // REPLICATION.md 6.3: a peer detecting equivocation MUST record it and SHOULD forward the
+    // evidence. Recording it into a file nobody can read is not recording it, and not being able
+    // to forward it is the other half of the same failure.
+    let work = TempDir::new("evidence");
+    let view_dir = work.path().join("view");
+    let now = 1_800_000_000u64;
+
+    // Two registrations of one name by one key at different instants: equivocation, and
+    // verifiable from the two encodings alone.
+    let id =
+        vayuweb_client::identity::Identity::from_seed(&mut vec![0x62; 32]).expect("an identity");
+    let left =
+        vayuweb_client::record::build_register(&id, "split", "vayu", now, &[], 0, None, 10_000_000)
+            .expect("registers");
+    let right = vayuweb_client::record::build_register(
+        &id,
+        "split",
+        "vayu",
+        now + 1_000,
+        &[],
+        0,
+        None,
+        10_000_000,
+    )
+    .expect("registers");
+    let bundle = vayuweb_client::cbor::encode(&vayuweb_client::cbor::Value::Array(vec![
+        vayuweb_client::cbor::Value::Bytes(left.clone()),
+        vayuweb_client::cbor::Value::Bytes(right.clone()),
+    ]))
+    .expect("encodes");
+    let bundle_path = work.path().join("fork.cbor");
+    std::fs::write(&bundle_path, &bundle).expect("writes");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "import",
+            bundle_path.to_str().expect("utf8"),
+            "--view",
+            view_dir.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(0));
+
+    // The listing names the fact, says the pair still verifies, and says what the ledger is
+    // NOT: a record, not a punishment.
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args(["evidence", view_dir.to_str().expect("utf8")])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("vayu split 0"),
+        "the fact must be named: {stdout}"
+    );
+    assert!(
+        stdout.contains("verifies from its own bytes: yes"),
+        "the pair must be re-verified before it is shown: {stdout}"
+    );
+    assert!(
+        stdout.contains("does not punish equivocation"),
+        "6.4 must be stated where the evidence is read: {stdout}"
+    );
+
+    // The machine-readable form carries the same facts.
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args(["evidence", view_dir.to_str().expect("utf8"), "--json"])
+        .output()
+        .expect("runs");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("json");
+    let entries = parsed["entries"].as_array().expect("an array");
+    assert_eq!(entries.len(), 1, "{parsed}");
+    assert_eq!(entries[0]["origin"], "detected", "{parsed}");
+    assert_eq!(entries[0]["verifies"], true, "{parsed}");
+
+    // And it forwards: the export is a bundle the far side can import, which is how the
+    // evidence travels to a peer that never saw the fork happen.
+    let export_path = work.path().join("forwarded.cbor");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "evidence",
+            view_dir.to_str().expect("utf8"),
+            "--export",
+            export_path.to_str().expect("utf8"),
+        ])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(0));
+    assert!(export_path.exists(), "the export must be written");
+
+    // The far side imports it and records the evidence in ITS OWN ledger — verified there,
+    // from the bytes, without trusting this peer.
+    let far_view = work.path().join("far-view");
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "import",
+            export_path.to_str().expect("utf8"),
+            "--view",
+            far_view.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("EQUIVOCATION EVIDENCE"),
+        "the far side must find the fork in the forwarded bundle: {stdout}"
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args(["evidence", far_view.to_str().expect("utf8")])
+        .output()
+        .expect("runs");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("vayu split 0"),
+        "the far side must hold the same fact: {stdout}"
+    );
+}
+
+#[test]
+fn a_ledger_somebody_edited_by_hand_is_repaired_rather_than_believed() {
+    // A file an attacker can append to is not a file whose contents are known-good. Every entry
+    // is re-verified when the ledger is opened, so a fabricated pair is dropped and counted.
+    let work = TempDir::new("evidence-tamper");
+    let view_dir = work.path().join("view");
+    let evidence_dir = view_dir.join("evidence");
+    std::fs::create_dir_all(&evidence_dir).expect("creates");
+    let ledger_path = evidence_dir.join("ledger.jsonl");
+    std::fs::write(
+        &ledger_path,
+        "{\"origin\": \"detected\", \"key\": \"aa vayu split 0\", \"a\": \"00\", \"b\": \"01\"}\n",
+    )
+    .expect("writes");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args(["evidence", view_dir.to_str().expect("utf8")])
+        .output()
+        .expect("runs");
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("no equivocation recorded"),
+        "a pair that does not verify is not evidence: {stdout}"
+    );
+    assert!(
+        stdout.contains("dropped as unreadable"),
+        "and the drop is counted, because a silent drop is a silent lie: {stdout}"
     );
 }
 

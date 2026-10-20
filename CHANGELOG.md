@@ -10,6 +10,40 @@ it.
 
 ## [Unreleased]
 
+### Added — `vayu evidence`: the fork evidence a node holds, in a form a person can read
+
+The client could DETECT a fork — `vayu import` judges every pair of records in a
+bundle before it judges anything singly, because two records at one `seq` by one
+owner are equivocation evidence whatever the verifier would later say about
+either half's validity. It could not do either of the two things that make a
+record worth having: nobody could read it, and nobody could forward it.
+REPLICATION.md 6.3 is a MUST and a SHOULD — a peer detecting equivocation MUST
+record it and SHOULD forward the evidence — and a ledger nobody can read is not
+one.
+
+`vayu evidence <view-dir>` now lists what this node holds, re-verifies every
+pair from its own two encodings before showing it, and says what the ledger is
+NOT: REPLICATION.md 6.4 — this protocol does not punish equivocation, nothing
+here is a blocklist or a score, no name is lost and no key is excluded. It is a
+legible record, and what a reader does with it is not the protocol's business.
+`--export` writes the pairs as a bundle the far side can import, which is how
+the evidence travels to a peer that never saw the fork happen; the far side
+verifies it there, from the bytes, without trusting this one.
+
+### Fixed — the evidence ledger is bounded, and deduplicates on the fact
+
+The old store kept one file per PAIR, named by the hash of the two encodings.
+That is the unbounded stream the reference implementation's own header names:
+two records at one `seq` for one name by one owner are one FACT, and an
+attacker who varies a field the evidence does not even mention can mint
+unlimited distinct pairs about it. The ledger now keys on the identity of the
+fact — `(ownerKey, tld, name, seq)`, the same string the reference builds — so
+a re-report of the same fact is a duplicate and not a new entry. It also has the
+two budgets the reference sets (1,024 detected, 256 received), refuses when a
+budget is spent rather than evicting, and re-verifies every entry when the
+ledger is opened, so a pair appended to the file by hand is dropped and counted
+rather than believed.
+
 ### Added — an honest availability report, and the sentence that goes with it
 
 `vayu pins` listed the blocks this node holds and said nothing else. Now it also

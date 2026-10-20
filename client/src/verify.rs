@@ -494,6 +494,30 @@ pub fn is_equivocation_evidence(a: &[u8], b: &[u8]) -> bool {
     attributable(&left) && attributable(&right)
 }
 
+/// The identity of the fact one record asserts: `(ownerKey, tld, name, seq)`.
+///
+/// **Identity, not bytes, is the deduplication key.** Two records at one `seq` for one name by
+/// one owner are one fact, however differently they are encoded. Keying a ledger on the encodings
+/// instead would let anyone mint unlimited distinct reports about the same fact by varying a
+/// field the evidence does not even mention — the same fact, counted and stored and forwarded
+/// forever.
+///
+/// The same string the reference implementation builds, so the two agree on what one fact is:
+/// `hex(ownerKey) tld name seq`.
+pub fn equivocation_key(bytes: &[u8]) -> Option<String> {
+    let decoded = decode_record(bytes).ok()?;
+    let record = parse_record(&decoded).ok()?;
+    let owner = record
+        .owner_key
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Some(format!(
+        "{} {} {} {}",
+        owner, record.tld, record.label, record.seq
+    ))
+}
+
 /// Verify one record's exact bytes against an optional predecessor and the clock.
 ///
 /// `window_count` is the trailing-window registration count for the name's TLD — index state

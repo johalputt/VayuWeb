@@ -165,6 +165,16 @@ USAGE:
         and when that set cannot be computed nothing is removed and the reason is
         named. Peers keep what they fetched; the CID stays in the log forever.
 
+    vayu evidence <view-dir> [--json] [--export <file>]
+        List the equivocation this node has recorded (REPLICATION.md 6.3). Every
+        pair is re-verified from its own two encodings before it is shown, and
+        each is listed by the IDENTITY of the fact it asserts — owner key, tld,
+        name, seq — because two records at one seq by one owner are one fact
+        however they are encoded. --export writes the pairs as a bundle the far
+        side can import, which is how the evidence is forwarded. The ledger
+        PUNISHES nothing (6.4): it is a legible record, and what a reader does
+        with it is not the protocol's business.
+
     vayu help
         Show this text.
 
@@ -193,6 +203,7 @@ fn run() -> i32 {
         Some("alias") => cmd_alias(&argv[1..]),
         Some("pins") => cmd_pins(&argv[1..]),
         Some("unpublish") => cmd_unpublish(&argv[1..]),
+        Some("evidence") => cmd_evidence(&argv[1..]),
         Some("help") | Some("--help") | Some("-h") => {
             print!("{USAGE}");
             0
@@ -599,41 +610,25 @@ fn block_bundle(store_dir: &std::path::Path) -> Result<(usize, Vec<u8>), String>
     Ok((count, encoded))
 }
 
-/// Canonical filename for an evidence pair: sorted by record hash, so whichever order
-/// the two halves arrive in lands on the same file and a re-report is idempotent.
-fn evidence_path(view_dir: &std::path::Path, a: &[u8], b: &[u8]) -> std::path::PathBuf {
-    let hash = |bytes: &[u8]| vayuweb_client::domain::record_hash_from_bytes(bytes);
-    let (first, second) = if hash(a) <= hash(b) { (a, b) } else { (b, a) };
-    let hex = |bytes: &[u8]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
-    view_dir
-        .join("evidence")
-        .join(format!("{}-{}.pair", hex(&hash(first)), hex(&hash(second))))
-}
-
 /// Persist one verified equivocation pair beside the log that witnessed it.
 ///
 /// REPLICATION.md 6.1 makes evidence worth forwarding BECAUSE anyone can verify it from
-/// the two encodings alone — so what gets saved is the exact bytes, in JSON with hex
-/// fields, re-verifiable by any implementation without trusting this one.
+/// the two encodings alone — so what gets saved is the exact bytes, in a ledger that
+/// re-verifies every entry when it is read back, deduplicates on the IDENTITY of the fact
+/// rather than on the bytes, and refuses when its budget is spent rather than evicting.
+///
+/// The identity matters: two records at one `seq` for one name by one owner are one fact,
+/// and an attacker who varies a field the evidence does not mention can mint unlimited
+/// distinct pairs about it. Keying on the encodings would let the ledger grow without
+/// bound; keying on the fact does not.
 fn record_evidence(
-    view_dir: &std::path::Path,
+    ledger: &mut vayuweb_client::evidence::EvidenceLedger,
     a: &[u8],
     b: &[u8],
-) -> Result<Option<std::path::PathBuf>, String> {
-    let path = evidence_path(view_dir, a, b);
-    if path.exists() {
-        return Ok(None);
-    }
-    let parent = path.parent().expect("evidence dir under view");
-    std::fs::create_dir_all(parent).map_err(|e| format!("cannot create {parent:?}: {e}"))?;
-    let hex = |bytes: &[u8]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
-    let document = format!(
-        "{{\"rule\": \"REPLICATION.md 6.1\", \"a\": \"{}\", \"b\": \"{}\"}}\n",
-        hex(a),
-        hex(b)
-    );
-    std::fs::write(&path, document).map_err(|e| format!("cannot write {path:?}: {e}"))?;
-    Ok(Some(path))
+) -> Result<vayuweb_client::evidence::RecordOutcome, String> {
+    ledger
+        .record(a, b, vayuweb_client::evidence::EvidenceOrigin::Detected)
+        .map_err(|e| e.to_string())
 }
 
 fn cmd_import(argv: &[String]) -> i32 {
@@ -711,6 +706,20 @@ fn cmd_import(argv: &[String]) -> i32 {
     let mut refused = 0usize;
     let mut deferred = 0usize;
     let mut evidence = 0usize;
+    let mut evidence_duplicates = 0usize;
+
+    // The ledger is opened once, beside the log that witnessed the detection. It re-verifies
+    // every entry it already holds when it opens, so a ledger an attacker appended to by hand
+    // is repaired rather than believed.
+    let mut ledger = match vayuweb_client::evidence::EvidenceLedger::open(
+        &std::path::Path::new(view_dir).join("evidence"),
+    ) {
+        Ok(ledger) => ledger,
+        Err(e) => {
+            eprintln!("vayu import: cannot open the evidence ledger: {e}");
+            return 1;
+        }
+    };
 
     // A bundle can carry BOTH halves of a fork. Judge every pair before anything is
     // judged singly: two records at one seq by one owner are equivocation evidence no
@@ -726,15 +735,21 @@ fn cmd_import(argv: &[String]) -> i32 {
                 continue;
             };
             if vayuweb_client::verify::is_equivocation_evidence(a_bytes, b_bytes) {
-                match record_evidence(std::path::Path::new(view_dir), a_bytes, b_bytes) {
-                    Ok(Some(path)) => {
+                match record_evidence(&mut ledger, a_bytes, b_bytes) {
+                    Ok(vayuweb_client::evidence::RecordOutcome::Recorded) => {
                         evidence += 1;
                         println!(
                             "EQUIVOCATION EVIDENCE: this bundle carries both halves of one \
-                             owner's fork; saved {path:?}"
+                             owner's fork; recorded in the ledger at {}",
+                            ledger.path().display()
                         );
                     }
-                    Ok(None) => {}
+                    Ok(vayuweb_client::evidence::RecordOutcome::Duplicate) => {
+                        evidence_duplicates += 1;
+                    }
+                    Ok(outcome) => {
+                        eprintln!("vayu import: evidence not recorded ({})", outcome.as_str());
+                    }
                     Err(e) => eprintln!("vayu import: could not record evidence: {e}"),
                 }
             }
@@ -771,20 +786,26 @@ fn cmd_import(argv: &[String]) -> i32 {
                             &entry.bytes,
                             record_bytes,
                         ) {
-                            match record_evidence(
-                                std::path::Path::new(view_dir),
-                                &entry.bytes,
-                                record_bytes,
-                            ) {
-                                Ok(Some(path)) => {
+                            match record_evidence(&mut ledger, &entry.bytes, record_bytes) {
+                                Ok(vayuweb_client::evidence::RecordOutcome::Recorded) => {
                                     evidence += 1;
                                     println!(
                                         "EQUIVOCATION EVIDENCE: refused record conflicts with \
-                                         held {} under one owner key; saved {path:?}",
-                                        entry.hash_hex
+                                         held {} under one owner key; recorded in the ledger \
+                                         at {}",
+                                        entry.hash_hex,
+                                        ledger.path().display()
                                     );
                                 }
-                                Ok(None) => {}
+                                Ok(vayuweb_client::evidence::RecordOutcome::Duplicate) => {
+                                    evidence_duplicates += 1;
+                                }
+                                Ok(outcome) => {
+                                    eprintln!(
+                                        "vayu import: evidence not recorded ({})",
+                                        outcome.as_str()
+                                    );
+                                }
                                 Err(e) => eprintln!("vayu import: could not record evidence: {e}"),
                             }
                         }
@@ -807,7 +828,18 @@ fn cmd_import(argv: &[String]) -> i32 {
          (view: {view_dir})"
     );
     if evidence > 0 {
-        println!("{evidence} equivocation pair(s) recorded under {view_dir}/evidence/");
+        println!(
+            "{evidence} equivocation pair(s) recorded in {}",
+            ledger.path().display()
+        );
+    }
+    if evidence_duplicates > 0 {
+        // Said out loud, because "the ledger grew by nothing" and "the ledger grew and you did
+        // not notice" are different states, and only one of them is visible without a count.
+        println!(
+            "{evidence_duplicates} equivocation pair(s) were already recorded as the same fact \
+             and were not added again"
+        );
     }
     // Verdicts are data-dependent outcomes, not tool failures: an exchange SHOULD be able to
     // carry records this peer will refuse. Only broken input or IO is an exit 2/1.
@@ -1574,6 +1606,120 @@ fn import_blocks(records: &[vayuweb_client::cbor::Value], store_dir: &std::path:
     );
     // Same policy as records: a corrupt block in a bundle is DATA the peer refuses, not a
     // tool failure; the rest of the bundle still lands.
+    0
+}
+
+/// `vayu evidence` — what this node has recorded about forks, and how to forward it.
+///
+/// REPLICATION.md 6.3 is a MUST and a SHOULD: a peer detecting equivocation MUST record it and
+/// SHOULD forward the evidence. The client could record it and could not do either of the two
+/// things that make a record worth having: nobody could read it, and nobody could forward it.
+fn cmd_evidence(argv: &[String]) -> i32 {
+    let Some(view_dir) = argv.first().filter(|a| !a.starts_with("--")) else {
+        eprintln!("vayu evidence needs a view directory");
+        return 2;
+    };
+    let flags = match Flags::parse(&argv[1..], &["export"]) {
+        Ok(flags) => flags,
+        Err(detail) => {
+            eprintln!("vayu evidence: {detail}");
+            return 2;
+        }
+    };
+    let view_dir = std::path::Path::new(view_dir);
+    let ledger = match vayuweb_client::evidence::EvidenceLedger::open(&view_dir.join("evidence")) {
+        Ok(ledger) => ledger,
+        Err(e) => {
+            eprintln!("vayu evidence: {e}");
+            return 1;
+        }
+    };
+    let entries = ledger.entries();
+    let refusals = ledger.refusals();
+
+    // Export first: forwarding is the point, and it should not be a second command that can be
+    // forgotten.
+    if let Some(path) = flags.get("export") {
+        let bundle = vayuweb_client::cbor::encode(&vayuweb_client::cbor::Value::Array(
+            entries
+                .iter()
+                .flat_map(|entry| {
+                    vec![
+                        vayuweb_client::cbor::Value::Bytes(entry.a.clone()),
+                        vayuweb_client::cbor::Value::Bytes(entry.b.clone()),
+                    ]
+                })
+                .collect(),
+        ))
+        .expect("an array of byte strings always encodes");
+        if let Err(e) = std::fs::write(path, bundle) {
+            eprintln!("vayu evidence: cannot write {path}: {e}");
+            return 1;
+        }
+        println!(
+            "wrote {} pair(s) to {path}; the far side imports it and records the evidence in its \
+             own ledger",
+            entries.len()
+        );
+    }
+
+    if flags.has("json") {
+        let items: Vec<String> = entries
+            .iter()
+            .map(|entry| {
+                format!(
+                    "{{\"origin\": \"{}\", \"key\": \"{}\", \"verifies\": {}}}",
+                    entry.origin.as_str(),
+                    entry.key,
+                    vayuweb_client::verify::is_equivocation_evidence(&entry.a, &entry.b)
+                )
+            })
+            .collect();
+        println!(
+            "{{\"entries\": [{}], \"unreadable\": {}, \"unverified\": {}, \"full\": {}}}",
+            items.join(", "),
+            refusals.unreadable,
+            refusals.unverified,
+            refusals.full
+        );
+        return 0;
+    }
+
+    if entries.is_empty() {
+        println!("no equivocation recorded in {}", ledger.path().display());
+    } else {
+        println!(
+            "{} equivocation(s) in {}",
+            entries.len(),
+            ledger.path().display()
+        );
+        for entry in entries {
+            // The identity of the FACT, not of the pair: two records at one seq by one owner are
+            // one fact, and the fact is what a reader wants to know about.
+            println!("  {}", entry.key);
+            println!(
+                "    origin: {} · verifies from its own bytes: {}",
+                entry.origin.as_str(),
+                if vayuweb_client::verify::is_equivocation_evidence(&entry.a, &entry.b) {
+                    "yes"
+                } else {
+                    "NO"
+                }
+            );
+        }
+    }
+    if refusals.unreadable > 0 || refusals.unverified > 0 || refusals.full > 0 {
+        println!(
+            "\n{} entr(y/ies) dropped as unreadable · {} refused as unverified · {} refused \
+             because the budget was full",
+            refusals.unreadable, refusals.unverified, refusals.full
+        );
+    }
+    println!(
+        "\nThis protocol does not punish equivocation (REPLICATION.md 6.4). Nothing here is a \
+         blocklist, a score or an input to any decision: no name is lost and no key is excluded. \
+         It is a legible record, and what a reader does with it is not the protocol's business."
+    );
     0
 }
 

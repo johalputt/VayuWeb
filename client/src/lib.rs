@@ -17,6 +17,7 @@ pub mod dagnode;
 pub mod doctor;
 pub mod doctor_fix;
 pub mod domain;
+pub mod evidence;
 pub mod identity;
 pub mod names;
 pub mod namespace_generated;

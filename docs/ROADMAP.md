@@ -461,6 +461,33 @@ implementation — but REGISTRY.md is a normative document, and the editorial pa
 such a statement holds fewer than three persons, which is the same governance gap that holds
 VWIP-0005 in Draft. It is recorded here as an open item rather than made unilaterally.
 
+**The fork evidence is now a record a person can read.** The client could DETECT a fork — `vayu
+import` judges every pair of records in a bundle before it judges anything singly, because two
+records at one `seq` by one owner are equivocation evidence whatever the verifier would later say
+about either half's validity — and could do neither of the two things that make a record worth
+having. Nobody could read it: the pairs went into one file per pair, named by the hash of the two
+encodings, and there was no command that listed them. Nobody could forward them either, which is
+the other half of REPLICATION.md 6.3: a peer detecting equivocation MUST record it and SHOULD
+forward the evidence, and a ledger nobody can read and nobody can send is not one.
+
+`vayu evidence <view-dir>` lists what the node holds, re-verifies every pair from its own two
+encodings before showing it, names each entry by the IDENTITY of the fact it asserts —
+`(ownerKey, tld, name, seq)` — and states what the ledger is not: 6.4 says this protocol does not
+punish equivocation, and a ledger that listed what it had discovered without saying that would
+read like a scoreboard. `--export` writes the pairs as a bundle the far side can import, so the
+evidence travels to a peer that never saw the fork happen and is verified there, from the bytes,
+without trusting the peer that sent it.
+
+**The old store was the unbounded stream the reference implementation's own header names.** One
+file per pair, named by the encodings, means two records at one `seq` for one name by one owner
+are one FACT but any number of pairs: an attacker who varies a field the evidence does not even
+mention mints unlimited distinct pairs about it, and the ledger grows until the disk says no. The
+ledger now keys on the fact, so a re-report is a duplicate and not an entry; it carries the two
+budgets the reference sets (1,024 detected, 256 received) and refuses when one is spent rather
+than evicting, because eviction would let an attacker flush a genuine report by minting cheap ones
+after it; and it re-verifies every entry when it is opened, so a pair appended to the file by hand
+is dropped and counted rather than believed.
+
 **What remains.** The session and the transport binding; a real exchange with a stranger who
 declines to send a block or sends a different one; the end-to-end acceptance test, which needs two
 machines and which this repository cannot honestly claim from a sandbox; and pin-set management
