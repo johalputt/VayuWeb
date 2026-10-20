@@ -234,7 +234,9 @@ test('nothing here claims erasure', () => {
   const everything = [
     ...UNPUBLISH_EFFECTS.guaranteed,
     ...UNPUBLISH_EFFECTS.notGuaranteed,
-    ...UNPUBLISH_EFFECTS.notExpressible.map((entry) => `${entry.act} ${entry.why} ${entry.substitute}`),
+    ...UNPUBLISH_EFFECTS.notExpressible.map(
+      (entry) => `${entry.act} ${entry.why} ${entry.substitute}`,
+    ),
   ]
     .join(' ')
     .toLowerCase();

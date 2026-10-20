@@ -20,11 +20,7 @@ import {
 } from './vectors.ts';
 import { resolveConflict, type Candidate } from './converge.ts';
 import { resolveName } from './resolve.ts';
-import {
-  report as availabilityReport,
-  summarise,
-  onlyThisNodeHoldsIt,
-} from './pins.ts';
+import { report as availabilityReport, summarise, onlyThisNodeHoldsIt } from './pins.ts';
 import { decodeMessage, verifyEquivocation, MESSAGE_TYPES, ReplicationError } from './replicate.ts';
 import { recordHashFromBytes } from './domain.ts';
 import { compareBytes, decode, encode, type CborMap, type CborValue } from './cbor.ts';

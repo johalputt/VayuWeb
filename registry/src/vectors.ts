@@ -50,7 +50,7 @@ import { GRACE_SECONDS } from './lifecycle.ts';
 import { RESERVED_LABELS } from './names.ts';
 import { CID_PARAMETERS, cidBytes, sha256 } from './content.ts';
 import { BLOCK_EXCHANGE_VERSION, BX_LIMITS, encodeBlockMessage } from './blockx.ts';
-import type { Holder, Observation } from './pins.ts';
+import type { Observation } from './pins.ts';
 
 /**
  * Fixed keys. Not secret, never to be used for anything real, and constant so that the vector
@@ -2093,18 +2093,13 @@ export function buildReleaseVectors(): ReleaseVector[] {
  * change to the module that decides what a holder is cannot leave this file describing a
  * different thing — which is how a vector suite ends up pinning a shape no implementation has.
  */
-export type PinsHolder = Holder;
-
-/** One sighting, at an instant. Never a claim about now. */
-export type PinsObservation = Observation;
-
 export interface PinsVector {
   readonly name: string;
   readonly rule: string;
   readonly cid: string;
   /** Peers this node asked. Without it, `answered` is a number with no denominator. */
   readonly asked: number;
-  readonly observations: readonly PinsObservation[];
+  readonly observations: readonly Observation[];
   /** How long an observation counts for. */
   readonly staleAfter: number;
   readonly now: number;
@@ -2143,12 +2138,12 @@ export interface PinsVector {
 export function buildPinsVectors(): PinsVector[] {
   const CID = 'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e';
   const STALE = 300;
-  const self = (observedAt: number): PinsObservation => ({ holder: { kind: 'self' }, observedAt });
-  const peer = (id: string, observedAt: number): PinsObservation => ({
+  const self = (observedAt: number): Observation => ({ holder: { kind: 'self' }, observedAt });
+  const peer = (id: string, observedAt: number): Observation => ({
     holder: { kind: 'peer', id },
     observedAt,
   });
-  const service = (name: string, observedAt: number): PinsObservation => ({
+  const service = (name: string, observedAt: number): Observation => ({
     holder: { kind: 'service', name },
     observedAt,
   });
@@ -2176,8 +2171,7 @@ export function buildPinsVectors(): PinsVector[] {
     },
     {
       name: 'pins/silence-is-not-absence',
-      rule:
-        'HOSTING.md Availability: a peer that did not answer is not a peer that lacks the content',
+      rule: 'HOSTING.md Availability: a peer that did not answer is not a peer that lacks the content',
       cid: CID,
       asked: 3,
       observations: [],
@@ -2217,8 +2211,7 @@ export function buildPinsVectors(): PinsVector[] {
     },
     {
       name: 'pins/self-only-and-every-peer-silent',
-      rule:
-        'HOSTING.md Availability: the self-only case says the consequence, and it did not',
+      rule: 'HOSTING.md Availability: the self-only case says the consequence, and it did not',
       cid: CID,
       asked: 3,
       observations: [self(VECTOR_NOW)],
