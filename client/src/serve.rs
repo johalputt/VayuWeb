@@ -320,16 +320,27 @@ pub fn route(
 }
 
 /// The last step before anything is served: run the publisher's own checker over the document
-/// and refuse it if it violates a rule no header can enforce. Non-HTML passes untouched — the
-/// CSP governs how the BROWSER treats those, and scanning binary blobs for HTML rules is
-/// nonsense. A refusal carries the rendered findings, because this surface serves the person
-/// who published the tree; a mystery refusal is what 3.1.6 exists to prevent.
+/// and refuse it if it violates a rule no header can enforce.
+///
+/// Two media are scanned, and the reason they are two is that the rules live in two places:
+/// the HTML rules (speculative `<link rel>`, `<meta http-equiv="refresh">`) are in the
+/// document, and the service-worker rule is in the SCRIPT that registers it — a script
+/// served unrefused would register a worker the moment the reader's page loads it, and no
+/// header can prevent that.
+///
+/// Everything else passes untouched: the CSP governs how the BROWSER treats those, and
+/// scanning binary blobs for HTML rules is nonsense. A refusal carries the rendered
+/// findings, because this surface serves the person who published the tree; a mystery
+/// refusal is what 3.1.6 exists to prevent.
 fn scan_and_answer(
     path: &str,
     content_type: &'static str,
     body: Vec<u8>,
 ) -> Result<Response, WalkError> {
-    if !content_type.starts_with("text/html") {
+    let is_html = content_type.starts_with("text/html");
+    let is_script = content_type.starts_with("text/javascript")
+        || content_type.starts_with("application/javascript");
+    if !is_html && !is_script {
         return Ok(Response {
             status: 200,
             reason: "OK",
@@ -337,6 +348,9 @@ fn scan_and_answer(
             body,
         });
     }
+    // The path is the doctor's own dispatch key: the rules are written against file
+    // extensions, and a script served under a name that hides its extension is not
+    // something the publisher's checker would have looked at either.
     let files = [SiteFile {
         path: path.to_string(),
         content: body.clone(),
@@ -360,7 +374,8 @@ fn scan_and_answer(
     }
     let mut detail = String::from(
         "this document violates rules that headers alone cannot enforce \
-         (the browser would render it half-blocked, which is worse than a clear refusal):\n\n",
+         (a page that renders half-blocked, or a script that keeps running after the \
+         reader leaves, is worse than a clear refusal):\n\n",
     );
     for finding in &refused {
         detail.push_str(&finding.render());

@@ -179,6 +179,47 @@ fn every_response_carries_the_security_headers_and_nothing_identifying() {
 }
 
 #[test]
+fn a_script_that_registers_a_service_worker_is_refused_at_read_time() {
+    // The service-worker rule is scan-enforced: no header can stop a registration, so
+    // the SERVING SURFACE must refuse the document. The rule lives in the script, not
+    // in the page, which is why the page itself is fine and the script is not.
+    let files = vec![
+        SiteFile {
+            path: "index.html".into(),
+            content: b"<!doctype html><title>home</title>".to_vec(),
+        },
+        SiteFile {
+            path: "app.js".into(),
+            content: b"navigator.serviceWorker.register('/sw.js');".to_vec(),
+        },
+        SiteFile {
+            path: "clean.js".into(),
+            content: b"document.title = 'ok';".to_vec(),
+        },
+    ];
+    let fixture = serve_tree("sw", &files);
+
+    // The page is served: the refusal is about the script, not the site.
+    let (status, _, body) = request(&fixture, "/index.html", "GET");
+    assert_eq!(status, 200);
+    assert!(!body.is_empty());
+
+    // The script that registers a worker is refused, and the refusal names the rule.
+    let (status, head, body) = request(&fixture, "/app.js", "GET");
+    assert_eq!(
+        status, 403,
+        "a service-worker script must be refused: {head}"
+    );
+    let body = String::from_utf8_lossy(&body);
+    assert!(body.contains("service-worker"), "the rule is named: {body}");
+
+    // A script that registers nothing is served untouched.
+    let (status, head, body) = request(&fixture, "/clean.js", "GET");
+    assert_eq!(status, 200, "{head}");
+    assert_eq!(body, b"document.title = 'ok';");
+}
+
+#[test]
 fn a_deep_link_miss_follows_the_manifest_routing_rule() {
     // With notFound declared: 404 status carrying that document.
     let nf = serve_tree("notfound", &not_found_files());

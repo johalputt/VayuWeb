@@ -10,6 +10,16 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a script that registers a service worker is refused at READ time, not only at publish
+
+The service-worker rule is scan-enforced: no Content-Security-Policy can prevent a
+registration, so a serving surface has to refuse the document itself. The rule lives in
+the **script**, not in the page — and the serving surface only ever scanned HTML, so a
+script that registered a worker was served untouched by a surface serving content it had
+not published. The read-time check now runs the publisher's own checker over served
+scripts as well as served pages: a page is served and the script beside it is refused,
+with the rule named in the refusal.
+
 ### Added — `vayu names --json`, a machine-readable inventory
 
 Scripts and the future GUI should not scrape prose. `names --view <dir> --json` emits

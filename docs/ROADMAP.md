@@ -391,10 +391,21 @@ reader's interests or creates a standing that can be denied.
 
 Writing it was the phase's own rule applied to itself: code written before the specification
 settles is code that will be thrown away. What exists in code is the **wire format only** —
-`registry/src/blockx.ts`, because VWIP-0000 makes test vectors mandatory for anything observable
-on the wire and a vector nobody generated is a hex string somebody typed. The `blockExchange`
-suite is generated from it. The session, the connection state and the transport binding wait for
-the proposal to leave Draft.
+`registry/src/blockx.ts` and its Rust twin `client/src/blockx.rs`, plus the replication message
+codecs beside them, because VWIP-0000 makes test vectors mandatory for anything observable on the
+wire and a vector nobody generated is a hex string somebody typed. The `blockExchange` suite is
+generated from it and now runs on **both** languages: 94 reference-authored vectors decide
+identically in TypeScript and Rust, so the octets two implementations will speak are already
+proven identical before either implementation dials anybody. The session, the connection state and
+the transport binding wait for the proposal to leave Draft.
+
+**The gate on that is governance, not a date.** VWIP-0005's own activation epoch is
+2027-08-06 — a year after creation, and strictly in the future per Article 47 — and
+VWIP-0000 7.4 suspends editorial transitions entirely while the editorial panel holds fewer than
+three persons, which it does. The proposal's minimum Draft of thirty days is long past, and every
+mandatory section is present, but a Draft-to-Review transition is an **editorial** act that one
+person may not perform on their own proposal; that is the honest reason the transport is not
+built, and it will not be honestly argued away.
 
 **What remains.** The session and the transport binding; a real exchange with a stranger who
 declines to send a block or sends a different one; and the end-to-end acceptance test, which needs
@@ -466,9 +477,17 @@ pinning structurally happen before signing, the `vayu` binary exposes `vayu doct
 `vayu publish <dir> --name label.tld` and `vayu serve <store> --root <cid>` as real commands,
 and `src/dagnode.rs` + `src/serve.rs` read a pinned tree back over loopback HTTP with the
 deep-link rule and the security headers intact. What does not exist is anything that makes a
-STRANGER a reader: no resolver resolves names across machines, read-time enforcement has not
-consumed the doctor's rule table, block exchange needs a transport that does not exist, and the
-GUI — the part Phase 5 actually asks for — remains unbuilt.
+STRANGER a reader: no resolver resolves names across machines, block exchange needs a transport
+that does not exist, and the GUI — the part Phase 5 actually asks for — remains unbuilt.
+
+**Read-time enforcement now consumes the doctor's rule table**, which is the half of 3.1.6 that
+cannot be delegated to a header. The serving surface runs the publisher's own checker over each
+document it serves and refuses what no header can stop: an HTML document carrying a speculative
+`<link rel>` or a `<meta http-equiv="refresh">`, and — the case that needed the rule table read
+rather than the page scanned — a **script** that registers a service worker. The rule lives in the
+script, not in the page, so a page is served and the script beside it is not; nothing in a
+Content-Security-Policy can prevent that registration, which is why a surface that serves content
+it did not publish has to check for it itself.
 
 What it is not: a Tauri application, or Phase 5. The build path constructs a `REGISTER`; the
 application that offers one to somebody who has never opened a terminal does not exist yet, and
