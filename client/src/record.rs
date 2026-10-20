@@ -244,6 +244,19 @@ pub struct Predecessor {
     pub hash: [u8; 32],
     /// Whether the current state came from a REVOKE, after which nothing may succeed.
     pub revoked: bool,
+    /// The predecessor's `records`, carried as the raw CBOR values they were.
+    ///
+    /// **`records` is replaced wholesale, so an empty array DELETES the entries rather
+    /// than leaving them alone.** A renewal or a transfer that carried none therefore
+    /// took the name down — the record was valid, the log was correct, the exit code
+    /// was zero, and the site stopped resolving until somebody noticed. The operations
+    /// that mean "leave the pointer alone" now say so by carrying the entries forward.
+    ///
+    /// They are carried RAW rather than parsed: an entry of a type this build does not
+    /// recognise is stored and replicated unchanged and never acted upon, and dropping
+    /// it here would undo that one operation later. Deterministic CBOR makes the
+    /// re-encoding identical to the bytes that came in.
+    pub entries: Vec<Value>,
 }
 
 /// The six operations, as carried by a record's `op` field.
@@ -285,6 +298,7 @@ impl Predecessor {
         let mut not_before = None;
         let mut not_after = None;
         let mut op = None;
+        let mut records: Vec<Value> = Vec::new();
         for (key, field) in &entries {
             let Key::Text(name) = key else { continue };
             match name.as_str() {
@@ -308,6 +322,14 @@ impl Predecessor {
                         op = Some(text.clone())
                     }
                 }
+                "records" => {
+                    // The entries a successor may have to carry forward. Kept raw so an
+                    // entry type this build does not know survives a renewal untouched.
+                    let Value::Array(list) = field else {
+                        return Err(BuildError::BadPredecessor("records is not an array"));
+                    };
+                    records = list.clone();
+                }
                 _ => {}
             }
         }
@@ -320,8 +342,50 @@ impl Predecessor {
             not_after: not_after.ok_or(BuildError::BadPredecessor("notAfter missing"))?,
             hash: record_hash_from_bytes(bytes),
             revoked: op_text == "REVOKE",
+            entries: records,
         })
     }
+}
+
+/// The `records` field of a successor that CARRIES entries forward.
+///
+/// The count and the alias rules are the same ones [`entries_field`] enforces for typed
+/// entries, because they are the same rules the verifier enforces on the wire. The values
+/// themselves are carried verbatim: they came from a record that was accepted, so their
+/// shape was already checked, and a type this build does not recognise must survive.
+fn carried_entries_field(list: &[Value]) -> Result<Value, BuildError> {
+    if list.len() > MAX_RECORD_ENTRIES {
+        return Err(BuildError::TooManyEntries { found: list.len() });
+    }
+    let mut alias_count = 0usize;
+    for entry in list {
+        let Value::Map(fields) = entry else {
+            return Err(BuildError::BadEntry("an entry is a map"));
+        };
+        let mut kind = None;
+        for (key, field) in fields {
+            let Key::Text(name) = key else { continue };
+            if name.as_str() == "type" {
+                if let Value::Text(text) = field {
+                    kind = Some(text.clone());
+                }
+            }
+        }
+        match kind.as_deref() {
+            Some("alias") => alias_count += 1,
+            Some(_) => {}
+            None => return Err(BuildError::BadEntry("an entry names no type")),
+        }
+    }
+    if alias_count > 1 {
+        return Err(BuildError::BadEntry("at most one alias per record"));
+    }
+    if alias_count == 1 && list.len() > 1 {
+        return Err(BuildError::BadEntry(
+            "an alias must not coexist with another entry",
+        ));
+    }
+    Ok(Value::Array(list.to_vec()))
 }
 
 fn entries_field(list: &[Entry]) -> Result<Value, BuildError> {
@@ -589,7 +653,11 @@ pub fn build_renew(
         prev.seq + 1,
         now,
         not_after,
-        Value::Array(Vec::new()),
+        // The entries are CARRIED FORWARD. `records` is replaced wholesale, so an empty
+        // array here would delete the name's pointer: the record would be valid, the log
+        // would be correct, the exit code zero, and the site would stop resolving
+        // because somebody extended a term. A renewal says nothing about the contents.
+        carried_entries_field(&prev.entries)?,
         Some((bits, zero_nonce)),
         &prev.hash,
     );
@@ -649,7 +717,11 @@ pub fn build_transfer(
         prev.seq + 1,
         now,
         prev.not_after,
-        Value::Array(Vec::new()),
+        // The entries are CARRIED FORWARD, for the same reason a renewal carries them:
+        // `records` is replaced wholesale, so an empty array would take the name's
+        // pointer with it — and a transfer is the one moment the new owner has no way
+        // to put it back.
+        carried_entries_field(&prev.entries)?,
         None,
         &prev.hash,
     );
@@ -744,6 +816,7 @@ mod tests {
             not_after: now + TERM_SECONDS,
             hash: [0x42u8; 32],
             revoked: false,
+            entries: Vec::new(),
         }
     }
 
@@ -902,6 +975,7 @@ mod tests {
             not_after: registered_at + TERM_SECONDS,
             hash: [0x11u8; 32],
             revoked: false,
+            entries: Vec::new(),
         };
 
         // Sixty days minus one second before expiry: the window is not open yet.
@@ -943,6 +1017,84 @@ mod tests {
     }
 
     #[test]
+    fn a_renewal_and_a_transfer_carry_the_entries_forward() {
+        // `records` is replaced wholesale, so an empty array DELETES the entries. A
+        // renewal or a transfer that carried none therefore took the name down: the
+        // record was valid, the log was correct, the exit code zero, and the site
+        // stopped resolving because somebody extended a term.
+        let owner = test_identity(0xb1);
+        let recipient = test_identity(0xb2);
+        let registered_at = T0;
+        let cid_entry = Entry {
+            value: EntryValue::Cid({
+                let mut bytes = vec![0x01, 0x55, 0x12, 0x20];
+                bytes.extend([3u8; 32]);
+                bytes
+            }),
+            ttl: Some(1_800),
+        };
+        let registered = build_register(
+            &owner,
+            "carry-forward",
+            "vayu",
+            registered_at,
+            std::slice::from_ref(&cid_entry),
+            0,
+            None,
+            10_000,
+        )
+        .expect("registers");
+        let prev = Predecessor::from_bytes(&registered).expect("predecessor");
+        assert_eq!(prev.entries.len(), 1, "the predecessor carries its entries");
+
+        // The renewal keeps the pointer.
+        let in_window = registered_at + TERM_SECONDS - 2_592_000;
+        let renewed = build_renew(&owner, &prev, "carry-forward", "vayu", in_window, 0, 10_000)
+            .expect("renews");
+        let decoded = cbor::decode(&renewed).expect("decodes");
+        let Value::Map(record) = decoded else {
+            panic!("map")
+        };
+        let Value::Array(entries) = field(&record, "records") else {
+            panic!("records is an array")
+        };
+        let Value::Map(original) = cbor::decode(&registered).expect("decodes") else {
+            panic!("map")
+        };
+        let Value::Array(original_entries) = field(&original, "records") else {
+            panic!("records is an array")
+        };
+        assert_eq!(
+            entries, original_entries,
+            "a renewal must carry the entries forward, unchanged"
+        );
+
+        // And so does a transfer, which is the moment the new owner has no way to put
+        // the pointer back.
+        let transferor = test_identity(0xb3);
+        let transferred = build_transfer(
+            &transferor,
+            &recipient,
+            &prev,
+            "carry-forward",
+            "vayu",
+            registered_at + MIN_INTERVAL_SECONDS,
+        )
+        .expect("transfers");
+        let decoded = cbor::decode(&transferred).expect("decodes");
+        let Value::Map(record) = decoded else {
+            panic!("map")
+        };
+        let Value::Array(entries) = field(&record, "records") else {
+            panic!("records is an array")
+        };
+        assert_eq!(
+            entries, original_entries,
+            "a transfer must carry the entries forward, unchanged"
+        );
+    }
+
+    #[test]
     fn a_transfer_needs_term_left_to_settle_in() {
         let transferor = test_identity(0xa5);
         let recipient = test_identity(0xa6);
@@ -955,6 +1107,7 @@ mod tests {
             not_after: now + SETTLEMENT_SECONDS - 1,
             hash: [0x21u8; 32],
             revoked: false,
+            entries: Vec::new(),
         };
         assert_eq!(
             build_transfer(
@@ -975,6 +1128,7 @@ mod tests {
             not_after: now + SETTLEMENT_SECONDS,
             hash: [0x22u8; 32],
             revoked: false,
+            entries: Vec::new(),
         };
         let transferred = build_transfer(
             &transferor,
@@ -1035,6 +1189,7 @@ mod tests {
             not_after: transfer_at + TERM_SECONDS,
             hash: [0x51u8; 32],
             revoked: false,
+            entries: Vec::new(),
         };
         // One second before the horizon: refused, and the error names when it lifts.
         let settling = build_update(
@@ -1073,6 +1228,7 @@ mod tests {
             not_after: T0 + TERM_SECONDS,
             hash: [0x31u8; 32],
             revoked: true,
+            entries: Vec::new(),
         };
         assert_eq!(
             build_update(&identity, &prev, "revoked-target", "vayu", T0 + 600, &[]),
@@ -1091,6 +1247,7 @@ mod tests {
             not_after: expired_at,
             hash: [0x41u8; 32],
             revoked: false,
+            entries: Vec::new(),
         };
 
         // Past grace, nothing succeeds: the name has left its owner's hands entirely.

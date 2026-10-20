@@ -378,6 +378,42 @@ pub fn read_dir_at(
     }
 }
 
+/// Every block a tree is made of — root first, then everything it reaches.
+///
+/// The reachability set a local unpublish reasons about. It is deliberately BLOCK-level
+/// rather than file-level: two sites that share one image share one block, and a
+/// garbage collector that removed it would break the other site too. The same bounds
+/// apply as everywhere else, so a hostile tree cannot make this walk unbounded.
+pub fn collect_blocks(
+    store: &BlockStore,
+    root: &Cid,
+    limits: &WalkLimits,
+) -> Result<Vec<Cid>, WalkError> {
+    let mut blocks: Vec<Cid> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut stack: Vec<Cid> = vec![root.clone()];
+    while let Some(cid) = stack.pop() {
+        if !seen.insert(cid.to_text()) {
+            continue; // A cycle in a hostile tree must not become an infinite walk.
+        }
+        blocks.push(cid.clone());
+        match read_node(store, &cid, limits)? {
+            Node::Directory(entries) => {
+                for entry in entries {
+                    stack.push(entry.cid);
+                }
+            }
+            Node::File { children, .. } => {
+                for child in children {
+                    stack.push(child);
+                }
+            }
+            Node::Raw(_) => {}
+        }
+    }
+    Ok(blocks)
+}
+
 /// Collect every file of a tree as [`SiteFile`]s — the shape the doctor's checker consumes.
 /// This is what lets a serving surface run the SAME checks the publisher ran, against the SAME
 /// code, without either side trusting the other's say-so. Bounds apply to depth and total

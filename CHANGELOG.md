@@ -10,6 +10,49 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a renewal or a transfer no longer takes the name down
+
+`records` is replaced wholesale, so an empty array DELETES the entries rather
+than leaving them alone. The client's RENEW and TRANSFER builders hardcoded an
+empty array, so renewing a name or handing it to somebody else emptied it: the
+record was valid, the log was correct, the exit code zero, and the site stopped
+resolving until somebody noticed and republished. The registry implementation had
+already found this and fixed it in its own command surface; the client carried
+the same defect, hidden by the resolution bug above — walking back down the chain
+for a record that still carried a source papered over it. Both are fixed now: a
+renewal and a transfer carry the predecessor's entries forward, RAW, so an entry
+of a type this build does not recognise survives the operation instead of being
+dropped one step later. The golden `client-built.json` fixtures moved with it:
+the TRANSFER and the UPDATE after it are different bytes, and the registry's own
+verifier accepts them.
+
+### Fixed — a withdrawn pointer resolves to nothing, not to the older record
+
+A name's tip is the record RESOLUTION.md step 7 asks for, and step 9 selects a
+content source from THAT record's entries. The client instead walked further down
+the chain for a record that carried a source — so an UPDATE that withdrew the
+pointer (no entries) left the older REGISTER's `cid` in force, and the name went
+on serving the site its owner had just taken down. The registry implementation
+never had this shape: it selects from one record, which answers 1421
+`NO_USABLE_RECORD`. The two languages therefore disagreed on a withdrawn pointer,
+and no vector could see it, because the vector model has a chain nowhere — the
+pin is now a client-side test that builds a real chain.
+
+### Added — `vayu unpublish`, the first half of what an owner may do about a site
+
+PUBLISHING.md section 4 says unpublishing withdraws the pointer and unpins
+locally, and that the client "MUST state this plainly at the moment of
+unpublishing rather than in documentation nobody reads". The pointer withdrawal
+is an UPDATE carrying no entries — `records` is replaced wholesale, so the `cid`
+entry goes and the name stays registered until its term ends. The unpinning is
+local, and bounded by what the view can see: a block is removed only when no
+OTHER name in the view still reaches it, because two sites that share an image
+share a block. When that set cannot be computed — another name points somewhere
+this client cannot follow — nothing is removed and the reason is named. The
+command then says what it did NOT do: peers keep every copy they fetched, the CID
+stays in the append-only log forever, and publication is permanent in effect, so
+a published secret is rotated rather than unpublished.
+
 ### Fixed — a script that registers a service worker is refused at READ time, not only at publish
 
 The service-worker rule is scan-enforced: no Content-Security-Policy can prevent a
@@ -23,11 +66,13 @@ with the rule named in the refusal.
 ### Added — `vayu names --json`, a machine-readable inventory
 
 Scripts and the future GUI should not scrape prose. `names --view <dir> --json` emits
-one JSON array — name, lifecycle state, sequence, record hash, owner key, expiry —
-sorted by name for reproducible output, and an empty view is `[]`, not a sentence. No
-string escaping is needed anywhere in the document: labels and TLDs are refused at
-registration unless they match the strict charset, states are fixed words, hashes and
-keys are hex.
+one JSON array — name, lifecycle state, sequence, record hash, owner key, expiry, and
+the `pointer` the name carries (a content address, `alias:<name>`, or `null` when the
+name points at nothing, which is what a withdrawn pointer looks like from the
+outside) — sorted by name for reproducible output, and an empty view is `[]`, not a
+sentence. No string escaping is needed anywhere in the document: labels and TLDs are
+refused at registration unless they match the strict charset, states are fixed words,
+hashes and keys are hex.
 
 ### Added — `vayu import` names a forked bundle instead of just refusing it
 

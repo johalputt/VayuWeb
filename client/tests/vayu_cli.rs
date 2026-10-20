@@ -1445,6 +1445,162 @@ fn an_import_detects_and_records_a_forked_bundle_as_evidence() {
 }
 
 #[test]
+fn unpublish_withdraws_the_pointer_and_keeps_the_blocks_another_name_needs() {
+    let work = TempDir::new("unpublish");
+    let store = work.path().join("store");
+    let seed_path = work.path().join("seed.hex");
+    std::fs::write(&seed_path, seed_hex(0x51)).expect("writes");
+    let now = 1_800_000_000u64;
+
+    // Two sites that SHARE a file: identical bytes, so identical block. A collector
+    // that removed the shared block would break the other site too.
+    for (dir, title) in [("site-a", "first"), ("site-b", "second")] {
+        work.file(
+            &format!("{dir}/index.html"),
+            &format!("<!doctype html><title>{title}</title>"),
+        );
+        work.file(&format!("{dir}/shared.txt"), "the same bytes in both sites");
+    }
+    for (dir, name) in [("site-a", "first.vayu"), ("site-b", "second.vayu")] {
+        let site = work.path().join(dir);
+        let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+            .args([
+                "publish",
+                site.to_str().expect("utf8"),
+                "--name",
+                name,
+                "--store",
+                store.to_str().expect("utf8"),
+                "--key-file",
+                seed_path.to_str().expect("utf8"),
+                "--now",
+                &now.to_string(),
+            ])
+            .output()
+            .expect("runs");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let blocks_before = std::fs::read_dir(&store)
+        .expect("store")
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| !n.contains("view"))
+                == Some(true)
+        })
+        .count();
+    assert!(blocks_before > 0);
+
+    // The first site's root, before the withdrawal.
+    let inventory = || -> serde_json::Value {
+        let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+            .args([
+                "names",
+                "--view",
+                store.join("view").to_str().expect("utf8"),
+                "--json",
+            ])
+            .output()
+            .expect("runs");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_str(String::from_utf8_lossy(&output.stdout).trim()).expect("parses")
+    };
+    let parsed = inventory();
+    let first_root = parsed
+        .as_array()
+        .expect("array")
+        .iter()
+        .find(|item| item["name"] == "first.vayu")
+        .expect("the name")["pointer"]
+        .as_str()
+        .expect("a pointer")
+        .to_string();
+    assert!(
+        store.join(&first_root).exists(),
+        "the root is pinned before"
+    );
+
+    // The unpublish withdraws the pointer. It happens 400 seconds later, because the
+    // chain rule caps churn at one record per name per five minutes -- and a
+    // withdrawal is a record like any other.
+    let later = now + 400;
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "unpublish",
+            "first.vayu",
+            "--store",
+            store.to_str().expect("utf8"),
+            "--key-file",
+            seed_path.to_str().expect("utf8"),
+            "--now",
+            &later.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("pointer withdrawn"), "{stdout}");
+    assert!(
+        stdout.contains("kept because another name in this view still reaches them"),
+        "the shared block must be reported as kept, not removed: {stdout}"
+    );
+    // And it says plainly what it did NOT do, at the moment it did it.
+    assert!(
+        stdout.contains("Peers keep every copy they already fetched"),
+        "the limits must be stated now, not in documentation: {stdout}"
+    );
+    assert!(
+        stdout.contains("Publication is permanent in effect"),
+        "{stdout}"
+    );
+
+    // The name no longer points at content, and says so in the inventory.
+    let parsed = inventory();
+    let items = parsed.as_array().expect("array");
+    let first = items
+        .iter()
+        .find(|item| item["name"] == "first.vayu")
+        .expect("the name is still registered");
+    assert_eq!(first["pointer"], serde_json::Value::Null, "{parsed}");
+    // The other name still points at its tree.
+    let second = items
+        .iter()
+        .find(|item| item["name"] == "second.vayu")
+        .expect("the other name");
+    assert!(second["pointer"].is_string(), "{parsed}");
+
+    // The withdrawn tree's own blocks are gone from the local store.
+    assert!(
+        !store.join(&first_root).exists(),
+        "the withdrawn root must be unpinned locally"
+    );
+
+    // The other site still serves, INCLUDING the shared file: the block both sites
+    // used was reachable from the other name, so the collector kept it.
+    let mut server = spawn_serve_by_name(&store, "second.vayu", &now.to_string(), None);
+    let (status, _head, body) = server.get("/");
+    assert_eq!(status, 200);
+    assert!(
+        body.starts_with(b"<!doctype html>"),
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    let (status, _head, body) = server.get("/shared.txt");
+    assert_eq!(status, 200, "the shared block must have survived");
+    assert_eq!(body, b"the same bytes in both sites");
+}
+
+#[test]
 fn names_json_is_a_parseable_inventory_scripts_can_trust() {
     let work = TempDir::new("names-json");
     let view_dir = work.path().join("view");

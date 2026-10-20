@@ -188,6 +188,22 @@ impl BlockStore {
         self.path_for(&cid.to_text()).exists()
     }
 
+    /// Remove one block from the local pin set.
+    ///
+    /// Returns whether a file was there to remove. **This is local only**: the block stays
+    /// wherever a peer already fetched or pinned it, and the CID stays in the registry log
+    /// forever, because the log is append-only and its history is what makes it verifiable.
+    /// The caller is responsible for saying so plainly at the moment it does this, not in
+    /// documentation nobody reads.
+    pub fn remove(&self, cid: &Cid) -> Result<bool, StoreError> {
+        let target = self.path_for(&cid.to_text());
+        if !target.exists() {
+            return Ok(false);
+        }
+        std::fs::remove_file(&target).map_err(io)?;
+        Ok(true)
+    }
+
     /// File every block of a built tree, returning how many were newly written.
     pub fn put_all(
         &self,

@@ -415,6 +415,7 @@ mod tests {
             not_after: now + crate::record::TERM_SECONDS,
             hash: [0x61u8; 32],
             revoked: false,
+            entries: Vec::new(),
         };
         let outcome = publish_site(
             &store,

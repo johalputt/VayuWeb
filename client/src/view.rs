@@ -412,36 +412,46 @@ impl View {
         if chain.is_empty() {
             return Err(format!("{label}.{tld} has no accepted history"));
         }
-        // The most recent record with a SELECTED source decides. A record whose
-        // selection is an ipns pointer names content this offline view cannot fetch,
-        // and a malformed cid address is content no reader can verify — both refuse
-        // CLOSED rather than quietly serving the older record beneath them, which is
-        // exactly the frozen-snapshot fork RESOLUTION.md's ordering exists to prevent.
-        for candidate in chain.iter().rev() {
-            match selected_pointer(&candidate.3.bytes) {
-                Some(Selected::Cid(bytes)) => {
-                    return match Cid::from_bytes(&bytes) {
-                        Ok(cid) => Ok(Pointer::Cid(cid)),
-                        Err(_) => Err(format!(
-                            "{label}.{tld}'s current record selects a malformed content \
-                             address; refusing it rather than serving an older record"
-                        )),
-                    };
-                }
-                Some(Selected::Alias(target)) => return Ok(Pointer::Alias(target)),
-                Some(Selected::Ipns(text)) => {
-                    return Err(format!(
-                        "{label}.{tld} currently points at an IPNS pointer ({text}); an \
-                         offline view cannot follow it and will not serve an older snapshot \
-                         in its place"
-                    ))
-                }
-                None => continue,
-            }
+        // The TIP decides, and only the tip. RESOLUTION.md step 7 asks the index for the
+        // HIGHEST-SEQ record and step 9 selects a source from THAT record's entries; a
+        // record carrying no usable entry answers 1421 NO_USABLE_RECORD rather than
+        // falling back to the record beneath it.
+        //
+        // This walk used to keep looking further down the chain for a record that had a
+        // source, which made a WITHDRAWN pointer invisible: the owner's UPDATE carried
+        // no entries, the older REGISTER still carried a cid, and the name went on
+        // serving the site the owner had just taken down. The registry implementation
+        // never had this shape — it selects from one record — so the client was the
+        // only place the two languages disagreed, and no vector could see it because
+        // the vector model has a chain nowhere.
+        //
+        // A record that selects an ipns pointer names content this offline view cannot
+        // fetch, and a malformed cid address is content no reader can verify — both
+        // refuse CLOSED rather than quietly serving the older record beneath them,
+        // which is exactly the frozen-snapshot fork RESOLUTION.md's ordering exists to
+        // prevent.
+        let tip = match chain.last() {
+            Some(tip) => tip,
+            None => return Err(format!("{label}.{tld} has no accepted history")),
+        };
+        match selected_pointer(&tip.3.bytes) {
+            Some(Selected::Cid(bytes)) => match Cid::from_bytes(&bytes) {
+                Ok(cid) => Ok(Pointer::Cid(cid)),
+                Err(_) => Err(format!(
+                    "{label}.{tld}'s current record selects a malformed content \
+                     address; refusing it rather than serving an older record"
+                )),
+            },
+            Some(Selected::Alias(target)) => Ok(Pointer::Alias(target)),
+            Some(Selected::Ipns(text)) => Err(format!(
+                "{label}.{tld} currently points at an IPNS pointer ({text}); an \
+                 offline view cannot follow it and will not serve an older snapshot \
+                 in its place"
+            )),
+            None => Err(format!(
+                "no record in {label}.{tld}'s chain carries a servable entry"
+            )),
         }
-        Err(format!(
-            "no record in {label}.{tld}'s chain carries a servable entry"
-        ))
     }
 
     /// The cid entry the chain currently points at, when that is content rather than
@@ -680,6 +690,51 @@ mod tests {
                 "the smaller digest wins whatever the insertion order"
             );
         }
+    }
+
+    #[test]
+    fn a_withdrawn_pointer_resolves_to_nothing_rather_than_to_the_older_record() {
+        use crate::record::{Entry, EntryValue};
+        let alice = identity(0xA6);
+        let mut cid_bytes = vec![0x01, 0x55, 0x12, 0x20];
+        cid_bytes.extend([9u8; 32]);
+        let register = build_register(
+            &alice,
+            "drawn",
+            "vayu",
+            NOW,
+            &[Entry {
+                value: EntryValue::Cid(cid_bytes),
+                ttl: None,
+            }],
+            0,
+            None,
+            LIMIT,
+        )
+        .expect("registers");
+        let pred = Predecessor::from_bytes(&register).expect("predecessor");
+        // The owner withdraws the pointer: an UPDATE carrying no entries. `records` is
+        // replaced wholesale, so the cid entry is gone.
+        let withdrawal =
+            build_update(&alice, &pred, "drawn", "vayu", NOW + 400, &[]).expect("updates");
+
+        let (_dir, view) = temp_view("withdrawn");
+        view.put(&register).expect("puts");
+        // Before the withdrawal the name points at the content.
+        assert!(view.resolved_pointer("drawn", "vayu").is_ok());
+        view.put(&withdrawal).expect("puts");
+
+        // After it, the name points at NOTHING. RESOLUTION.md step 7 asks for the
+        // highest-seq record and step 9 selects from that record's entries; a record
+        // with no usable entry answers NO_USABLE_RECORD. Falling back to the older
+        // record would serve the site the owner just took down.
+        assert!(
+            view.resolved_pointer("drawn", "vayu").is_err(),
+            "a withdrawn pointer must resolve to nothing, not to the older record"
+        );
+        // And the name itself is still registered: withdrawn is not released.
+        let names = view.all_names().expect("names");
+        assert_eq!(names.len(), 1, "the name survives its pointer");
     }
 
     #[test]

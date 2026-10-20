@@ -153,6 +153,14 @@ USAGE:
         refuses a cycle with ALIAS_LOOP — and every hop's target must itself be
         live and verifying, or nothing resolves.
 
+    vayu unpublish <label>.<tld> --store <dir> --key-file <f> [options]
+        Withdraw the pointer and unpin locally — all an owner may do. The pointer
+        withdrawal is an UPDATE carrying no entries, so the name stays registered
+        until its term ends and new resolutions fail. The unpinning is LOCAL: a
+        block is removed only when no other name in this view still reaches it,
+        and when that set cannot be computed nothing is removed and the reason is
+        named. Peers keep what they fetched; the CID stays in the log forever.
+
     vayu help
         Show this text.
 
@@ -180,6 +188,7 @@ fn run() -> i32 {
         Some("renew") => cmd_owner_exit(&argv[1..], OwnerOp::Renew),
         Some("alias") => cmd_alias(&argv[1..]),
         Some("pins") => cmd_pins(&argv[1..]),
+        Some("unpublish") => cmd_unpublish(&argv[1..]),
         Some("help") | Some("--help") | Some("-h") => {
             print!("{USAGE}");
             0
@@ -434,9 +443,22 @@ fn cmd_names(argv: &[String]) -> i32 {
                     .iter()
                     .map(|b| format!("{b:02x}"))
                     .collect();
+                // What this name points at, right now: a content address, an alias,
+                // or nothing at all — a name whose pointer has been withdrawn is
+                // still a name, and saying "null" is how a script can tell.
+                let pointer = match view.resolved_pointer(label, tld) {
+                    Ok(vayuweb_client::view::Pointer::Cid(cid)) => {
+                        format!("\"{}\"", cid.to_text())
+                    }
+                    Ok(vayuweb_client::view::Pointer::Alias(target)) => {
+                        format!("\"alias:{}.{}\"", target.label, target.tld)
+                    }
+                    Err(_) => "null".to_string(),
+                };
                 format!(
                     "{{\"name\": \"{label}.{tld}\", \"state\": \"{state}\", \"seq\": {}, \
-                     \"record\": \"{}\", \"owner\": \"{owner}\", \"expires\": {}}}",
+                     \"record\": \"{}\", \"owner\": \"{owner}\", \"expires\": {}, \
+                     \"pointer\": {pointer}}}",
                     tip.prev.seq, tip.entry.hash_hex, tip.prev.not_after
                 )
             })
@@ -1233,6 +1255,234 @@ fn cmd_owner_exit(argv: &[String], op: OwnerOp) -> i32 {
         "{}    seq {} appended ({label}.{tld})",
         op.verb(),
         tip.prev.seq + 1
+    );
+    0
+}
+
+/// `vayu unpublish` — withdraw the pointer, then unpin locally. All an owner may do.
+///
+/// PUBLISHING.md section 4: "Unpublish: withdraw the pointer and unpin locally. This
+/// stops VayuWeb serving it. It does not reach copies others already hold ... The client
+/// MUST state this plainly at the moment of unpublishing rather than in documentation
+/// nobody reads." HOSTING.md's limits are the same, and the last line of that section is
+/// the one people forget: publication is permanent in effect, so a published secret is
+/// rotated, not unpublished.
+///
+/// The withdrawal is an UPDATE carrying no entries: `records` is replaced wholesale, so
+/// the `cid` entry goes and the name stays registered until its term ends. That is the
+/// "withdraw the pointer" half, and it is the half that actually stops new resolutions.
+///
+/// The unpinning is LOCAL and bounded by what this view can see: a block is removed only
+/// when no OTHER name in this view still reaches it. Two sites that share an image share
+/// a block, and a collector that removed it would break the other site too. When the
+/// reachable set cannot be computed — another name in this view points somewhere this
+/// client cannot follow — nothing is removed and the reason is named, because a
+/// garbage collector that guesses is a garbage collector that eats somebody else's site.
+fn cmd_unpublish(argv: &[String]) -> i32 {
+    let mut positional = Vec::new();
+    for arg in argv {
+        if !arg.starts_with("--") {
+            positional.push(arg.clone());
+        }
+    }
+    let Some(name_value) = positional.first() else {
+        eprintln!("vayu unpublish: needs <label>.<tld>");
+        return 2;
+    };
+    let flag_args: &[String] = if argv.first().is_some_and(|a| !a.starts_with("--")) {
+        &argv[1..]
+    } else {
+        argv
+    };
+    let (label, tld) = match parse_name(name_value) {
+        Ok(parts) => parts,
+        Err(_) => {
+            eprintln!("vayu unpublish: wants <label>.<tld>, got {name_value:?}");
+            return 2;
+        }
+    };
+    let flags = match Flags::parse(flag_args, &["store", "key-file", "view", "now"]) {
+        Ok(flags) => flags,
+        Err(detail) => {
+            eprintln!("vayu unpublish: {detail}");
+            return 2;
+        }
+    };
+    let store_path = std::path::PathBuf::from(flags.get("store").unwrap_or("vayu-store"));
+    let view_dir = flags
+        .get("view")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| store_path.join("view"));
+    let Some(key_file) = flags.get("key-file") else {
+        eprintln!("vayu unpublish needs --key-file <file>");
+        return 2;
+    };
+    let identity = match read_seed_file(key_file) {
+        Ok(identity) => identity,
+        Err(code) => return code,
+    };
+    let now = match resolve_now(&flags, "unpublish") {
+        Ok(now) => now,
+        Err(code) => return code,
+    };
+
+    let view = match vayuweb_client::view::View::open(&view_dir) {
+        Ok(view) => view,
+        Err(detail) => {
+            eprintln!("vayu unpublish: {detail}");
+            return 2;
+        }
+    };
+    let tip = match view.chain_tip(&label, &tld) {
+        Ok(Some(tip)) => tip,
+        Ok(None) => {
+            eprintln!("vayu unpublish: no accepted record for {label}.{tld} in {view_dir:?}");
+            return 1;
+        }
+        Err(detail) => {
+            eprintln!("vayu unpublish: {detail}");
+            return 2;
+        }
+    };
+    if tip.prev.owner_key != *identity.public_key() {
+        eprintln!("vayu unpublish: {label}.{tld} is held in this view by another key");
+        return 1;
+    }
+    // The tree we are about to withdraw the pointer to.
+    let root = match view.resolved_root(&label, &tld) {
+        Ok(root) => root,
+        Err(detail) => {
+            eprintln!("vayu unpublish: {label}.{tld} has no content pointer to withdraw: {detail}");
+            return 1;
+        }
+    };
+    let predecessor = match Predecessor::from_bytes(&tip.entry.bytes) {
+        Ok(previous) => previous,
+        Err(e) => {
+            eprintln!("vayu unpublish: unusable incumbent: {e}");
+            return 1;
+        }
+    };
+    // No entries: the pointer is withdrawn and the name remains registered.
+    let record =
+        match vayuweb_client::record::build_update(&identity, &predecessor, &label, &tld, now, &[])
+        {
+            Ok(record) => record,
+            Err(e) => {
+                eprintln!("vayu unpublish: refused: {e}");
+                return 1;
+            }
+        };
+    match view.accept_verdict(&record, now, 0) {
+        Ok(vayuweb_client::verify::Verdict::Accept) => {}
+        Ok(other) => {
+            eprintln!("vayu unpublish: the view refuses this record: {other:?}");
+            return 1;
+        }
+        Err(detail) => {
+            eprintln!("vayu unpublish: {detail}");
+            return 2;
+        }
+    }
+    if let Err(e) = view.put(&record) {
+        eprintln!("vayu unpublish: {e}");
+        return 1;
+    }
+    println!(
+        "unpublish  {label}.{tld}: pointer withdrawn (seq {}); new resolutions will fail",
+        tip.prev.seq + 1
+    );
+
+    // The local unpin, bounded by what this view can see.
+    let store = match BlockStore::open(&store_path) {
+        Ok(store) => store,
+        Err(e) => {
+            eprintln!("vayu unpublish: cannot open block store {store_path:?}: {e}");
+            return 2;
+        }
+    };
+    let limits = WalkLimits::default();
+    let tree_blocks = match vayuweb_client::dagnode::collect_blocks(&store, &root, &limits) {
+        Ok(blocks) => blocks,
+        Err(e) => {
+            eprintln!(
+                "vayu unpublish: cannot enumerate the blocks of {}: {e}",
+                root.to_text()
+            );
+            return 1;
+        }
+    };
+    let mut retained: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut blocked_by: Option<String> = None;
+    for (other_label, other_tld, _) in match view.all_names() {
+        Ok(names) => names,
+        Err(detail) => {
+            eprintln!("vayu unpublish: {detail}");
+            return 2;
+        }
+    } {
+        if other_label == label && other_tld == tld {
+            continue;
+        }
+        match view.resolved_root(&other_label, &other_tld) {
+            Ok(other_root) => {
+                match vayuweb_client::dagnode::collect_blocks(&store, &other_root, &limits) {
+                    Ok(blocks) => {
+                        for block in blocks {
+                            retained.insert(block.to_text());
+                        }
+                    }
+                    Err(e) => {
+                        blocked_by = Some(format!(
+                            "{other_label}.{other_tld} reaches blocks this client cannot read ({e})"
+                        ));
+                        break;
+                    }
+                }
+            }
+            Err(detail) => {
+                // A name with no servable entry references no blocks: not a blocker.
+                if detail.contains("no record in") {
+                    continue;
+                }
+                blocked_by = Some(format!("{other_label}.{other_tld}: {detail}"));
+                break;
+            }
+        }
+    }
+    if let Some(reason) = blocked_by {
+        println!(
+            "unpublish  nothing was unpinned: {reason}, so the blocks another name may still \
+             need cannot be told apart from the ones this tree owns. The pointer is withdrawn; \
+             the local copy stays."
+        );
+    } else {
+        let mut removed = 0usize;
+        let mut kept = 0usize;
+        for block in &tree_blocks {
+            if retained.contains(&block.to_text()) {
+                kept += 1;
+                continue;
+            }
+            match store.remove(block) {
+                Ok(true) => removed += 1,
+                Ok(false) => {}
+                Err(e) => {
+                    eprintln!("vayu unpublish: cannot remove {}: {e}", block.to_text());
+                }
+            }
+        }
+        println!(
+            "unpublish  {removed} block(s) unpinned locally, {kept} kept because another name in \
+             this view still reaches them"
+        );
+    }
+    println!(
+        "\nThis is LOCAL and it is the whole of what an owner can do. Peers keep every copy they \
+         already fetched or pinned, and the CID stays in the registry log forever, because the log \
+         is append-only and its history is what makes it verifiable. Publication is permanent in \
+         effect: treat every publish as irreversible, and rotate a published secret rather than \
+         relying on unpublishing to contain it."
     );
     0
 }

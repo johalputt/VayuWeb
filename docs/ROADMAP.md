@@ -407,9 +407,58 @@ mandatory section is present, but a Draft-to-Review transition is an **editorial
 person may not perform on their own proposal; that is the honest reason the transport is not
 built, and it will not be honestly argued away.
 
+**Unpublishing is now a client verb, and it does only the half an owner may do.** PUBLISHING.md
+section 4 and HOSTING.md's limits say the same thing: unpublishing withdraws the pointer and unpins
+locally, and it does not reach copies others already hold. `vayu unpublish` does exactly those two
+things. The withdrawal is an UPDATE carrying no entries — `records` is replaced wholesale, so the
+`cid` entry goes while the name stays registered until its term ends. The unpinning is local and
+bounded by what the view can see: a block is removed only when no OTHER name in the view still
+reaches it, because two sites that share an image share a block and a collector that removed it
+would break the other site; and when that reachable set cannot be computed — another name points
+somewhere this client cannot follow — nothing is removed and the reason is named. Then the command
+states the limits at the moment it acts, which PUBLISHING.md requires in terms: peers keep every
+copy they already fetched, the CID stays in the append-only log forever because the log's history
+is what makes it verifiable, and publication is permanent in effect, so a published secret is
+rotated rather than unpublished.
+
+**And building it found a divergence between the two languages that no vector could see.** The
+client resolved a name by walking the chain for a record that carried a content source, so a
+withdrawn pointer left the older `cid` in force and the name went on serving the site its owner had
+just taken down. RESOLUTION.md step 7 asks the index for the highest-`seq` record and step 9 selects
+from THAT record's entries; the registry implementation selects from one record and answers 1421
+`NO_USABLE_RECORD`, so the two languages disagreed about a withdrawn pointer. The vector model has
+a chain nowhere — it carries one record per name, which is the registry's shape and not the
+client's — so no conformance vector could express the case. The fix is client-side and the pin is
+client-side too: a test that builds a real chain and asserts that the withdrawn name resolves to
+nothing.
+
+**The same bug was hiding a second one underneath it.** `records` is replaced wholesale, so an
+empty array DELETES the entries rather than leaving them alone — and the client's RENEW and
+TRANSFER builders hardcoded one. Renewing a name or handing it to somebody else therefore emptied
+it: valid record, correct log, exit code zero, and a site that stopped resolving until somebody
+noticed. The resolution walk was what hid this: it kept looking down the chain for a record that
+still had a source, so the client appeared to work while its own records said otherwise. The
+registry had found this first, in its own command surface, and fixed it there by carrying the
+entries forward on a renewal and a transfer; the client now does the same, carrying them RAW so
+that an entry type the build does not recognise survives the operation rather than being dropped
+one step later. The golden `client-built.json` fixtures moved with it — the TRANSFER and the UPDATE
+after it are different bytes, and the registry's own verifier accepts them.
+
+**One question this raises is a spec question, and it is not this repository's to answer.** The
+specification says a RENEW "MAY also change `records`", which permits carrying the entries
+forward but does not say that an empty array DELETES them, and an implementer reading only the
+UPDATE section's "replaced wholesale; there is no partial update" could reasonably conclude the
+same thing this client concluded. Stating it plainly would remove the trap for the next
+implementation — but REGISTRY.md is a normative document, and the editorial panel that may make
+such a statement holds fewer than three persons, which is the same governance gap that holds
+VWIP-0005 in Draft. It is recorded here as an open item rather than made unilaterally.
+
 **What remains.** The session and the transport binding; a real exchange with a stranger who
-declines to send a block or sends a different one; and the end-to-end acceptance test, which needs
-two machines and which this repository cannot honestly claim from a sandbox.
+declines to send a block or sends a different one; the end-to-end acceptance test, which needs two
+machines and which this repository cannot honestly claim from a sandbox; and pin-set management
+beyond inventory and unpinning — the client can say what it holds and drop what it no longer
+needs, but it cannot yet report AVAILABILITY the way `registry/src/pins.ts` does, with silence
+reported as silence and a self-pin never counted as redundancy.
 
 Starting the phase surfaced two settled-spec contradictions and one gap, all recorded in the
 changelog: the resolver preferred the frozen snapshot over the living pointer, so a conforming
