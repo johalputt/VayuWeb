@@ -36,6 +36,45 @@ The client now checks every header-enforced rule against the headers it actually
 compares its policy against the canonical block in CONTENT-SECURITY.md, which its own comment
 claimed byte-identity with and nothing had checked.
 
+### Fixed — the browsing proxy now refuses what no header can express
+
+**The proxy served documents the client's serving surface refused.** The rule table classifies
+three rules as enforced by reading the document rather than by a header — a speculative
+`<link rel>`, a `<meta http-equiv="refresh">`, and a service-worker registration — because no
+Content-Security-Policy expresses any of them: speculative DNS fires before a policy applies,
+meta refresh bypasses CSP entirely, and nothing in CSP stops a service worker registering
+itself. PUBLISHING.md 3.1.6 requires the resolver's enforcement to come from the same shared
+definition the checker uses, and it did not: the client's checker refused those documents and
+the proxy served them.
+
+That mattered because the proxy is the surface that serves content it did not publish. A peer
+could publish a name whose index page carried `<link rel="preconnect"
+href="https://tracker.example/">`, and the proxy would have handed it to a reader, and the
+reader's browser would have told the tracker who was reading — the exact sentence in the rule's
+own `why`, and the thing VayuWeb exists to prevent.
+
+The proxy now refuses such a document with the same shape as every other refusal on that
+surface: 403, an empty body, and the full security header set, because a body that explained
+itself would confirm VayuWeb is running. The publisher learns the reason from the checker they
+already run; when an operator has turned the diagnostic headers on, the resolver names the rule
+it refused.
+
+### Added — the `scan` conformance suite, and a second implementation of the scan class
+
+The rule table said which rules a header could not express; it did not say what "refuse it"
+meant, so the two serving surfaces of this project answered differently about the same
+document. `conformance/vectors.json` now carries a tenth suite: a document, the path it is
+served at, and the rules every implementation must find in it. The registry's scanner
+(TypeScript) and the client's checker (Rust) both answer it, so a difference of judgement is a
+red test rather than a difference nobody notices. The cases are the ways a scanner lies — a
+same-origin speculative link, a `rel` in the wrong case, a tag inside a comment, a mention of
+`serviceWorker` that does not register one, and a file whose extension says it is not a
+document.
+
+The registry's scanner holds its copy of the rule text to the shared definition with a test, and
+the client's own rule table still generates `conformance/rules.json`, so neither language can
+change what a rule means without the other hearing about it.
+
 ### Fixed — the client now speaks the specification's refusal vocabulary
 
 The client ran eight of the nine conformance suites and skipped the one that matters most for
@@ -64,7 +103,7 @@ carrying two defects is refused for the first of them, and two implementations t
 about the order name different reasons for refusing the same bytes. A deferral now carries its
 reason, `CLOCK_SKEW`, so a peer can tell one kind of hold from another.
 
-### Added — the client runs all nine conformance suites
+### Added — the client runs all ten conformance suites
 
 `verify::verify_against` takes the state as an argument — the predecessor, the revocation flag,
 the release flag and the proof-of-work flag — which is what a conformance vector states and what

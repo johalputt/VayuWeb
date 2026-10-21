@@ -22,6 +22,7 @@ import {
   buildBlockExchangeVectors,
   buildReleaseVectors,
   buildPinsVectors,
+  buildScanVectors,
   VECTOR_NOW,
   VECTOR_OWNER_KEY,
   VECTOR_OTHER_KEY,
@@ -39,6 +40,7 @@ const pow = buildPowVectors();
 const blockExchange = buildBlockExchangeVectors();
 const release = buildReleaseVectors();
 const pins = buildPinsVectors();
+const scan = buildScanVectors();
 
 const artifact = {
   $comment:
@@ -59,6 +61,7 @@ const artifact = {
     'docs/spec/PROOF-OF-WORK.md',
     'docs/spec/VWIP-0005.md',
     'docs/spec/HOSTING.md',
+    'docs/spec/PUBLISHING.md',
   ],
   notes: {
     clock:
@@ -102,7 +105,9 @@ const artifact = {
       'transcribed ones, and they are not stable until it leaves Draft. `pins` is the honest ' +
       'availability report of HOSTING.md: how many peers were asked, how many answered, and the ' +
       'one sentence a client may show — because a report that renders silence as absence, or a ' +
-      'self-pin as redundancy, is worse than no report.',
+      "self-pin as redundancy, is worse than no report. `scan` is the resolver's enforcement of " +
+      'the rules no header can express, and it is the suite that holds the two serving surfaces ' +
+      'of this project to the same answer about the same document.',
     availability:
       'A `pins` vector is a CID, how many peers were asked, the observations that were made, how ' +
       'long an observation counts for, and the instant to read the report at. `expect.answered` is ' +
@@ -124,6 +129,17 @@ const artifact = {
       'whose `blks` array holds `count` byte strings of `bytes` zero octets each, encoded as ' +
       'deterministic CBOR per REGISTRY.md. This list is closed; a runner meeting a kind it does ' +
       'not know must fail rather than skip, because a skipped vector reports as a passing one.',
+    scan:
+      'A `scan` vector is a document, the path it is served at, and the scan-class rules every ' +
+      'implementation must find in it. The path is part of the contract: the extension selects ' +
+      'whether the bytes are read as markup or as script, and a path with neither extension is ' +
+      'served as bytes rather than rendered. `expect` is the rules the document carries, in the ' +
+      'order the findings come, and an empty list means the document is served. The three rules ' +
+      'are the ones no Content-Security-Policy can express — a speculative <link rel>, a <meta ' +
+      'http-equiv="refresh">, and a service-worker registration — so a serving surface has to ' +
+      'refuse the document itself. This suite exists because the rule table classified those ' +
+      'three rules without saying what "refuse" means, and the two serving surfaces of this ' +
+      'project answered differently about the same document until the suite existed.',
   },
   vectors,
   convergence,
@@ -134,6 +150,7 @@ const artifact = {
   blockExchange,
   release,
   pins,
+  scan,
 };
 
 mkdirSync(dirname(OUT), { recursive: true });
@@ -142,5 +159,5 @@ process.stdout.write(
   `wrote ${vectors.length} record, ${convergence.length} convergence, ${resolution.length} ` +
     `resolution, ${replication.length} replication, ${equivocation.length} equivocation, ` +
     `${pow.length} proof-of-work, ${blockExchange.length} block-exchange, ${release.length} ` +
-    `release and ${pins.length} availability vectors to ${OUT}\n`,
+    `release, ${pins.length} availability and ${scan.length} scan vectors to ${OUT}\n`,
 );

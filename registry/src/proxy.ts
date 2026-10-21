@@ -47,6 +47,7 @@ import {
 } from './resolve.ts';
 import { cidFromBytes, encodeCid } from './content.ts';
 import { ResolutionCache } from './cache.ts';
+import { scanDocument } from './scan.ts';
 import type { CborValue } from './cbor.ts';
 
 /**
@@ -525,6 +526,34 @@ export function handleRequest(
 
       const fetched = serveStep13(options.content, addressed, pathOf(request.target), cache);
       if (fetched.ok) {
+        // **The scan class, enforced on the read path.** Three rules cannot be expressed by a
+        // header: a speculative `<link rel>`, a `<meta http-equiv="refresh">`, and a
+        // service-worker registration. The rule table says so — the enforcement column reads
+        // `scan`, not `csp` — and PUBLISHING.md 3.1.6 requires the resolver's enforcement to
+        // come from the same shared definition the checker uses. It did not: the client refused
+        // these documents and the proxy served them, and the proxy is the surface that serves
+        // content it did not publish, so it is the one that cannot rely on the publisher having
+        // run a checker first. A peer could publish a page whose speculative link told somebody
+        // else who was reading, and the proxy would have handed it over.
+        //
+        // The refusal is the same shape as every other refusal on this surface: 403, and an
+        // EMPTY body, because a body that explains itself would confirm VayuWeb is running
+        // (LOCAL-SURFACE.md 2.4). The publisher learns the reason from the checker they already
+        // run; the reader learns that the page is not available, which is all the reader needed
+        // to know and more than they had a right to.
+        const findings = scanDocument(fetched.path, fetched.bytes);
+        if (findings.length > 0) {
+          const refused = refusal('BLOCKED_BY_POLICY');
+          if (options.diagnostics === true) {
+            // The rule ids are ours, not the publisher's: a value taken from the content would be
+            // a value an attacker chose, and these headers are turned on by an operator who
+            // expects the resolver's own account of what it did.
+            const headers = new Map(refused.headers);
+            headers.set('x-vayuweb-refused', findings.map((finding) => finding.rule).join(','));
+            return { ...refused, headers };
+          }
+          return refused;
+        }
         status = fetched.status;
         headers.set('content-type', fetched.contentType);
         // Handed on unchanged. There is no encoding step here any more, which is the point: the
@@ -608,7 +637,7 @@ export function serveStep13(
   path: string,
   cache: ResolutionCache,
 ):
-  | (ContentResult & { readonly ok: true; readonly status: number })
+  | (ContentResult & { readonly ok: true; readonly status: number; readonly path: string })
   | { ok: false; error: ResolveErrorName } {
   const fetchPath = (at: string): ContentResult => content.fetch({ type: 'cid', value: cid }, at);
 
@@ -638,7 +667,7 @@ export function serveStep13(
     const declared = site()?.index ?? null;
     if (declared !== null) {
       const attempt = fetchPath(`${path}${declared}`);
-      if (attempt.ok) return { ...attempt, status: 200 };
+      if (attempt.ok) return { ...attempt, status: 200, path: `${path}${declared}` };
       // **Only a missing path is a reason to try another path.** A source that is unavailable, or
       // whose bytes failed their hash, is not going to answer a different path any better — and on
       // an integrity failure, asking again is the downgrade RESOLUTION.md forbids at the source
@@ -646,20 +675,22 @@ export function serveStep13(
       // something already known.
       if (attempt.error !== 'PATH_NOT_FOUND') return attempt;
     }
-    const fallbackIndex = fetchPath(`${path}index.html`);
-    if (fallbackIndex.ok) return { ...fallbackIndex, status: 200 };
-    if (fallbackIndex.error !== 'PATH_NOT_FOUND') return fallbackIndex;
+    const fallbackIndex = `${path}index.html`;
+    const attempt = fetchPath(fallbackIndex);
+    if (attempt.ok) return { ...attempt, status: 200, path: fallbackIndex };
+    if (attempt.error !== 'PATH_NOT_FOUND') return attempt;
     // A directory that has no index is not the same as a path that is missing, but the tree is the
     // only thing that can say so — ask for the path as given before giving up on it.
   }
 
   const direct = fetchPath(path);
-  if (direct.ok) return { ...direct, status: 200 };
+  if (direct.ok) return { ...direct, status: 200, path };
   // A directory named without its trailing slash still resolves to its index — `mapPath`'s rule,
   // applied where the tree can actually be asked.
   if (!directory && direct.error === 'PATH_NOT_FOUND') {
-    const nested = fetchPath(`${path}/index.html`);
-    if (nested.ok) return { ...nested, status: 200 };
+    const nested = `${path}/index.html`;
+    const attempt = fetchPath(nested);
+    if (attempt.ok) return { ...attempt, status: 200, path: nested };
   }
   // Only a missing PATH is a reason to look at the manifest. A source that is unavailable, a
   // pointer that will not resolve or bytes that failed their hash are not "this path is not in the
@@ -672,11 +703,11 @@ export function serveStep13(
     if (declared.notFound !== null) {
       const attempt = fetchPath(`/${declared.notFound}`);
       // Served with 404, which is the point of it being a separate field from `fallback`.
-      if (attempt.ok) return { ...attempt, status: 404 };
+      if (attempt.ok) return { ...attempt, status: 404, path: `/${declared.notFound}` };
     }
     if (declared.fallback !== null) {
       const attempt = fetchPath(`/${declared.fallback}`);
-      if (attempt.ok) return { ...attempt, status: 200 };
+      if (attempt.ok) return { ...attempt, status: 200, path: `/${declared.fallback}` };
     }
   }
   return direct;

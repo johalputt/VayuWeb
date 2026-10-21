@@ -2331,3 +2331,208 @@ export function buildPinsVectors(): PinsVector[] {
     },
   ];
 }
+
+export interface ScanVector {
+  readonly name: string;
+  readonly rule: string;
+  /**
+   * The path the document is served at.
+   *
+   * The extension is part of the contract, not decoration: it is what selects whether the bytes
+   * are read as markup or as script, exactly as the client's checker selects. A document served
+   * at a path with no extension is not one a browser renders, so it carries no scan obligation.
+   */
+  readonly path: string;
+  /** The document, as text. */
+  readonly content: string;
+  /**
+   * The scan-class rules every implementation must find in it, in the order the findings come.
+   *
+   * A literal, for the reason the pow suite learned: an expectation computed by the function
+   * under test survives every mutation of that function.
+   */
+  readonly expect: readonly string[];
+}
+
+/**
+ * The scan suite: the rules no header can express, and the documents that trip them.
+ *
+ * **The resolver's enforcement, as an executable contract.** The rule table says which rules are
+ * enforced by a header and which are not; it does not say what "not by a header" means in
+ * practice, so the three rules in the scan class were enforced by the client in Rust and by
+ * nobody in the registry, and the two serving surfaces of one project answered differently about
+ * the same document.
+ *
+ * These vectors are what make the answer the same. The client's doctor and the registry's
+ * scanner both answer them, so a difference of judgement is a red test rather than a difference
+ * nobody notices.
+ *
+ * The cases are the ways a scanner lies: a same-origin speculative link (the TAG is the
+ * violation, not the target), a `rel` in the wrong case, a tag inside a comment, a mention of
+ * `serviceWorker` that does not register one, a file whose extension says it is not a document,
+ * and a document with two violations in it.
+ */
+export function buildScanVectors(): ScanVector[] {
+  const html = (body: string): string =>
+    `<!doctype html>\n<html>\n<head>\n${body}\n</head>\n<body>\n<p>hello</p>\n</body>\n</html>\n`;
+
+  return [
+    {
+      name: 'scan/a-clean-document-trips-nothing',
+      rule:
+        'PUBLISHING.md 3.1.6: the resolver refuses documents whose violations no header can ' +
+        'express -- a document with none is served',
+      path: 'index.html',
+      content: html('    <title>clean</title>\n    <link rel="stylesheet" href="/site.css">'),
+      expect: [],
+    },
+    {
+      name: 'scan/a-speculative-link-is-a-violation-wherever-it-points',
+      rule:
+        'PUBLISHING.md 3.1.4: the speculative-loading <link rel> values must be detected -- the ' +
+        'tag is the violation, and a same-origin target is no safer',
+      path: 'index.html',
+      content: html('    <link rel="preload" href="/app.js" as="script">'),
+      expect: ['speculative-link'],
+    },
+    {
+      name: 'scan/dns-prefetch-is-a-speculation',
+      rule: 'PUBLISHING.md 3.1.4: dns-prefetch is one of the speculative-loading values',
+      path: 'index.html',
+      content: html('    <link rel="dns-prefetch" href="//elsewhere.example">'),
+      expect: ['speculative-link'],
+    },
+    {
+      name: 'scan/preconnect-is-a-speculation',
+      rule: 'PUBLISHING.md 3.1.4: preconnect is one of the speculative-loading values',
+      path: 'index.html',
+      content: html('    <link rel="preconnect" href="https://elsewhere.example">'),
+      expect: ['speculative-link'],
+    },
+    {
+      name: 'scan/prefetch-is-a-speculation',
+      rule: 'PUBLISHING.md 3.1.4: prefetch is one of the speculative-loading values',
+      path: 'index.html',
+      content: html('    <link rel="prefetch" href="/next.html">'),
+      expect: ['speculative-link'],
+    },
+    {
+      name: 'scan/prerender-is-a-speculation',
+      rule: 'PUBLISHING.md 3.1.4: prerender is one of the speculative-loading values',
+      path: 'index.html',
+      content: html('    <link rel="prerender" href="/next.html">'),
+      expect: ['speculative-link'],
+    },
+    {
+      name: 'scan/modulepreload-is-a-speculation',
+      rule: 'PUBLISHING.md 3.1.4: modulepreload is one of the speculative-loading values',
+      path: 'index.html',
+      content: html('    <link rel="modulepreload" href="/mod.mjs">'),
+      expect: ['speculative-link'],
+    },
+    {
+      name: 'scan/a-speculative-rel-in-the-wrong-case-is-still-one',
+      rule:
+        'PUBLISHING.md 3.1.4: the values are matched case-insensitively, because HTML attribute ' +
+        'values are case-insensitive and a rule that a capital letter defeats is not a rule',
+      path: 'index.html',
+      content: html('    <link rel="PRELOAD" href="/app.js">'),
+      expect: ['speculative-link'],
+    },
+    {
+      name: 'scan/an-ordinary-link-is-not-a-speculation',
+      rule:
+        'PUBLISHING.md 3.1.4: only the speculative values are listed, so a stylesheet or an icon ' +
+        'is not one of them',
+      path: 'index.html',
+      content: html(
+        '    <link rel="stylesheet" href="/site.css">\n    <link rel="icon" href="/icon.png">',
+      ),
+      expect: [],
+    },
+    {
+      name: 'scan/a-meta-refresh-is-a-violation',
+      rule: 'PUBLISHING.md 3.1.4: <meta http-equiv="refresh"> must be detected',
+      path: 'index.html',
+      content: html('    <meta http-equiv="refresh" content="0;url=https://elsewhere.example/">'),
+      expect: ['meta-refresh'],
+    },
+    {
+      name: 'scan/a-meta-refresh-in-the-wrong-case-is-still-one',
+      rule:
+        'PUBLISHING.md 3.1.4: the http-equiv value is matched case-insensitively, for the same ' +
+        'reason the rel value is',
+      path: 'index.html',
+      content: html('    <meta http-equiv="REFRESH" content="5">'),
+      expect: ['meta-refresh'],
+    },
+    {
+      name: 'scan/a-meta-referrer-is-not-a-refresh',
+      rule:
+        'PUBLISHING.md 3.1.4: <meta name="referrer"> is a different rule, and one a header ' +
+        'expresses -- the scan class must not swallow it',
+      path: 'index.html',
+      content: html('    <meta name="referrer" content="no-referrer">'),
+      expect: [],
+    },
+    {
+      name: 'scan/a-service-worker-registration-is-a-violation',
+      rule:
+        'PUBLISHING.md 3.1.4: service-worker registration must be detected -- a service worker ' +
+        'keeps running after the reader leaves',
+      path: 'app.js',
+      content: "navigator.serviceWorker.register('/sw.js');\n",
+      expect: ['service-worker'],
+    },
+    {
+      name: 'scan/a-service-worker-registration-inside-a-page-is-a-violation',
+      rule:
+        'PUBLISHING.md 3.1.4: the registration is in the page as often as in a file beside it, ' +
+        'and an inline script is read as script too',
+      path: 'index.html',
+      content: html(
+        '    <title>worker</title>\n    <script>\n      navigator.serviceWorker.register("/sw.js");\n    </script>',
+      ),
+      expect: ['service-worker'],
+    },
+    {
+      name: 'scan/a-mention-of-service-worker-is-not-a-registration',
+      rule:
+        'PUBLISHING.md 3.1.4: a feature check is not a registration, and a rule that cannot tell ' +
+        'them apart refuses every page that mentions the API',
+      path: 'app.js',
+      content:
+        "if ('serviceWorker' in navigator) {\n  // this page would use one if it had one\n}\n",
+      expect: [],
+    },
+    {
+      name: 'scan/a-file-that-is-not-a-document-is-not-scanned',
+      rule:
+        'PUBLISHING.md 3.1.4: the scan applies to documents and to script -- a path with neither ' +
+        'extension is served as bytes, and a browser renders nothing it cannot parse as a page',
+      path: 'notes.txt',
+      content: '<link rel="preload" href="/app.js">\n',
+      expect: [],
+    },
+    {
+      name: 'scan/a-tag-inside-a-comment-is-not-a-tag',
+      rule:
+        'PUBLISHING.md 3.1.4: a commented-out tag does nothing, and a scanner that reads it ' +
+        'refuses a page that is already correct',
+      path: 'index.html',
+      content: html('    <!-- <link rel="preload" href="/app.js"> -->'),
+      expect: [],
+    },
+    {
+      name: 'scan/two-violations-in-one-document-are-both-found',
+      rule:
+        'PUBLISHING.md 3.1.6: the resolver refuses the document, so it must know about every ' +
+        'violation in it rather than the first one',
+      path: 'index.html',
+      content: html(
+        '    <link rel="preload" href="/app.js">\n    <meta http-equiv="refresh" content="0">',
+      ),
+      expect: ['speculative-link', 'meta-refresh'],
+    },
+  ];
+}

@@ -892,3 +892,67 @@ fn the_availability_suite_carries_no_figure_article_23_forbids() {
         }
     }
 }
+
+#[test]
+fn every_scan_vector_finds_the_rules_the_reference_finds() {
+    // The scan class: the three rules no Content-Security-Policy can express. The rule table
+    // classifies them as `scan` rather than `csp`, and PUBLISHING.md 3.1.6 requires the
+    // resolver's enforcement to come from the same shared definition the checker uses — so the
+    // checker and the resolver must find the same things in the same document.
+    //
+    // The registry's scanner and this checker are written in different languages, and nothing
+    // but this suite holds them together: a speculative link the registry missed, or a
+    // service-worker registration it invented, would be a difference of judgement between two
+    // serving surfaces of one project, and the reader would be the one who found out.
+    use vayuweb_client::doctor::{check, Enforcement, RULES};
+    use vayuweb_client::publish::SiteFile;
+
+    let raw = std::fs::read_to_string(VECTORS_PATH).expect("vectors.json exists");
+    let doc: Value = serde_json::from_str(&raw).expect("vectors.json parses");
+    let vectors = doc
+        .get("scan")
+        .and_then(Value::as_array)
+        .expect("a scan section");
+    assert!(!vectors.is_empty(), "the scan suite is not empty");
+
+    let mut failures = Vec::new();
+    for vector in vectors {
+        let name = vector.get("name").and_then(Value::as_str).unwrap_or("?");
+        let path = vector.get("path").and_then(Value::as_str).unwrap_or("?");
+        let content = vector.get("content").and_then(Value::as_str).unwrap_or("");
+        let expect: Vec<String> = vector
+            .get("expect")
+            .and_then(Value::as_array)
+            .expect("an expect list")
+            .iter()
+            .filter_map(|value| value.as_str().map(str::to_string))
+            .collect();
+
+        // Only the scan class is compared. The checker also reports the header-enforced and
+        // publish-time rules, and the resolver has no obligation about those: the header
+        // enforces them, and the publisher's own checker refuses to publish them.
+        let files = [SiteFile {
+            path: path.to_string(),
+            content: content.as_bytes().to_vec(),
+        }];
+        let found: Vec<String> = check(&files)
+            .into_iter()
+            .filter(|finding| {
+                RULES
+                    .iter()
+                    .any(|rule| rule.id == finding.rule && rule.enforcement == Enforcement::Scan)
+            })
+            .map(|finding| finding.rule.to_string())
+            .collect();
+
+        if found != expect {
+            failures.push(format!("{name}: expected {expect:?}, found {found:?}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} scan vector(s) disagree:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}

@@ -1249,3 +1249,81 @@ test('AUDIT: a resolver with no content layer answered 200 and an empty body', (
   // 500 the catalogue reserves for one.
   assert.equal(answer.status, 500);
 });
+
+test('a document carrying a rule no header can express is refused', () => {
+  // **The proxy served what the client refused.** The rule table classifies a speculative
+  // `<link rel>`, a `<meta http-equiv="refresh">` and a service-worker registration as `scan` —
+  // enforced by reading the document, because no Content-Security-Policy expresses any of them.
+  // The client's serving surface refused all three. The proxy served them, and the proxy is the
+  // surface that serves content it did not publish: a peer could publish a page whose speculative
+  // link told somebody else who was reading, and the proxy handed it over.
+  //
+  // PUBLISHING.md 3.1.6 requires the resolver's enforcement to come from the same shared
+  // definition the checker uses. This is that requirement, enforced.
+  const site = siteWith({
+    '/index.html': '<!doctype html><link rel="preconnect" href="https://tracker.example/">',
+  });
+
+  const answer = request(site.port, '/index.html');
+  assert.equal(answer.status, 403, 'the document is refused, not served');
+  // And the refusal is the same shape as every other refusal on this surface: an empty body,
+  // because a body that explained itself would confirm VayuWeb is running (LOCAL-SURFACE.md 2.4).
+  assert.equal(answer.body.length, 0, 'a refusal carries no body');
+  assert.equal(
+    answer.headers.get('content-security-policy'),
+    DEFAULT_CSP,
+    'a refusal carries the policy too, or the header set tells a reader what refused them',
+  );
+});
+
+test('a document with no scan-class violation is served as it always was', () => {
+  const site = siteWith({
+    '/index.html': '<!doctype html><link rel="stylesheet" href="/site.css"><p>hello</p>',
+  });
+
+  const answer = request(site.port, '/index.html');
+  assert.equal(answer.status, 200);
+  assert.match(new TextDecoder().decode(answer.body), /hello/);
+});
+
+test('the refusal names the rule to an operator who asked for diagnostics', () => {
+  // The diagnostic headers are off by default and only the control API may turn them on, because
+  // a header that brands every response is disclosure rather than diagnostics. When they ARE on,
+  // the operator gets the resolver's own account of what it did — and the rule id is ours, not
+  // the publisher's, because a value taken from the content is a value an attacker chose.
+  const site = siteWith({
+    '/index.html': '<!doctype html><meta http-equiv="refresh" content="0;url=https://x.example/">',
+  });
+
+  const quiet = handleRequest(
+    get('/index.html', { host: 'atlas.vayu' }),
+    { lookup: () => live([cborEntry('cid', CID_BYTES)]), hasVerifiedHead: () => true },
+    new ResolutionCache(),
+    NOW,
+    { content: site.port },
+  );
+  assert.equal(quiet.status, 403);
+  assert.equal(quiet.headers.get('x-vayuweb-refused'), undefined, 'nothing is branded by default');
+
+  const loud = handleRequest(
+    get('/index.html', { host: 'atlas.vayu' }),
+    { lookup: () => live([cborEntry('cid', CID_BYTES)]), hasVerifiedHead: () => true },
+    new ResolutionCache(),
+    NOW,
+    { content: site.port, diagnostics: true },
+  );
+  assert.equal(loud.status, 403);
+  assert.equal(loud.headers.get('x-vayuweb-refused'), 'meta-refresh');
+});
+
+test('the scan follows the document that was served, not the path that was asked for', () => {
+  // A directory request is answered with the site's index, and the index is the document the
+  // reader receives. Scanning the REQUEST path would scan "/" — a path with no extension, which
+  // carries no obligation — and would let the commonest document of all through unscanned.
+  const site = siteWith({
+    '/index.html': '<!doctype html><link rel="preload" href="/app.js">',
+  });
+
+  const answer = request(site.port, '/');
+  assert.equal(answer.status, 403, 'the index is the document, and the index is scanned');
+});
