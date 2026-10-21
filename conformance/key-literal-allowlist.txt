@@ -11,3 +11,4 @@
 # and the reason strict verification can reject a self-certifying owner key. Not secret, and
 # not capable of becoming secret.
 registry/src/signature.ts
+client/src/verify.rs
