@@ -36,6 +36,35 @@ The client now checks every header-enforced rule against the headers it actually
 compares its policy against the canonical block in CONTENT-SECURITY.md, which its own comment
 claimed byte-identity with and nothing had checked.
 
+### Fixed — the client's preview surface now sends the whole security header set
+
+**The two serving surfaces of this project sent different response headers.** The proxy sent all
+eleven; the client's preview surface sent five — the Content-Security-Policy, the
+Permissions-Policy, `Referrer-Policy`, `X-Content-Type-Options` and
+`Cross-Origin-Opener-Policy` — while its own module header claimed "the security-header set from
+CONTENT-SECURITY.md sections 2–3 verbatim". The claim was false in six places, and a documented
+fidelity the code did not have is the kind of sentence that stops a reader from checking the
+next one.
+
+The six that were missing are not decoration:
+
+- `X-Frame-Options: DENY`, redundant beside `frame-ancestors 'none'` on modern engines and kept
+  for older ones;
+- `X-DNS-Prefetch-Control: off`, because speculative DNS is **not** covered by CSP — without it
+  `<link rel="dns-prefetch">` produces a clearnet DNS query, the exact leak this project exists
+  to prevent;
+- `Cache-Control: no-store`, which removes the HTTP disk cache and so leaves no trail on the
+  reader's disk, at the cost of the offline benefit of content addressing;
+- `Cross-Origin-Embedder-Policy: require-corp`;
+- `Cross-Origin-Resource-Policy: same-origin`, which blocks the cross-origin size and timing
+  probes that are active regardless of secure context;
+- `Origin-Agent-Cluster: ?1`.
+
+The new `headers` suite in `conformance/vectors.json` states the whole set, both ways: a header
+an implementation does not send is as much a divergence as one whose value differs. Both
+implementations answer it, and the client's end-to-end test now names all eleven rather than the
+five it used to look for.
+
 ### Fixed — a manifest with no version is not a manifest, and both surfaces now say so
 
 **The client read a manifest the proxy refused to read.** PUBLISHING.md section 2 says "Every
@@ -176,7 +205,7 @@ carrying two defects is refused for the first of them, and two implementations t
 about the order name different reasons for refusing the same bytes. A deferral now carries its
 reason, `CLOCK_SKEW`, so a peer can tell one kind of hold from another.
 
-### Added — the client runs all twelve conformance suites
+### Added — the client runs all thirteen conformance suites
 
 `verify::verify_against` takes the state as an argument — the predecessor, the revocation flag,
 the release flag and the proof-of-work flag — which is what a conformance vector states and what

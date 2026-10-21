@@ -53,12 +53,41 @@ translator=(), usb=(), web-share=(), window-management=(), xr-spatial-tracking=(
 
 /// Response headers on EVERY answer, success or refusal. Names are lower-case, matching
 /// `SECURITY_HEADERS` byte for byte.
-const SECURITY_HEADERS: [(&str, &str); 5] = [
+///
+/// **The whole set from CONTENT-SECURITY.md sections 2 and 3, and the six that were missing are
+/// not decoration.** This list carried five of the eleven: the Content-Security-Policy, the
+/// Permissions-Policy, `Referrer-Policy`, `X-Content-Type-Options` and
+/// `Cross-Origin-Opener-Policy`. The six it did not carry are
+///
+/// - `X-Frame-Options: DENY`, redundant beside `frame-ancestors 'none'` on modern engines and
+///   kept for older ones;
+/// - `X-DNS-Prefetch-Control: off`, because speculative DNS is **not** covered by CSP and
+///   `<link rel="dns-prefetch">` produces a clearnet DNS query — the exact leak this project
+///   exists to prevent;
+/// - `Cache-Control: no-store`, which removes the HTTP disk cache and so leaves no trail on the
+///   reader's disk, at the cost of the offline benefit of content addressing;
+/// - `Cross-Origin-Embedder-Policy: require-corp`;
+/// - `Cross-Origin-Resource-Policy: same-origin`, which blocks the cross-origin size and timing
+///   probes that are active regardless of secure context;
+/// - `Origin-Agent-Cluster: ?1`.
+///
+/// The module's own header claimed "the security-header set from CONTENT-SECURITY.md sections
+/// 2-3 verbatim", and the claim was false in six places: a documented fidelity the code did not
+/// have, which is the kind of sentence that stops a reader from checking the next one. The set
+/// is now the whole set, and the `headers` suite in `conformance/vectors.json` states it, so the
+/// two serving surfaces of this project cannot answer a reader's browser differently again.
+pub const SECURITY_HEADERS: [(&str, &str); 11] = [
     ("content-security-policy", DEFAULT_CSP),
     ("permissions-policy", PERMISSIONS_POLICY),
     ("referrer-policy", "no-referrer"),
     ("x-content-type-options", "nosniff"),
+    ("x-frame-options", "DENY"),
+    ("x-dns-prefetch-control", "off"),
+    ("cache-control", "no-store"),
     ("cross-origin-opener-policy", "same-origin"),
+    ("cross-origin-embedder-policy", "require-corp"),
+    ("cross-origin-resource-policy", "same-origin"),
+    ("origin-agent-cluster", "?1"),
 ];
 
 /// Bounds copied from `SERVE_LIMITS` where they apply to a request head.

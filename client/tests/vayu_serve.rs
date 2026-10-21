@@ -153,12 +153,24 @@ fn the_index_document_and_assets_are_served_with_their_types() {
 fn every_response_carries_the_security_headers_and_nothing_identifying() {
     let fixture = serve_tree("headers", &site_files());
     let (_, head, _) = request(&fixture, "/index.html", "GET");
+    // **The whole set, all eleven.** This list carried five of them, and the module header
+    // claimed the set "from CONTENT-SECURITY.md sections 2-3 verbatim" — so the reader's disk
+    // cache was left untouched, the cross-origin size and timing probes were not blocked, and
+    // speculative DNS was not switched off. The six that were missing are named here rather than
+    // left to a table, because a test that names the header it checks cannot notice a header
+    // nobody wrote a test for.
     for expected in [
         "content-security-policy:",
         "permissions-policy:",
         "referrer-policy: no-referrer",
         "x-content-type-options: nosniff",
+        "x-frame-options: DENY",
+        "x-dns-prefetch-control: off",
+        "cache-control: no-store",
         "cross-origin-opener-policy: same-origin",
+        "cross-origin-embedder-policy: require-corp",
+        "cross-origin-resource-policy: same-origin",
+        "origin-agent-cluster: ?1",
     ] {
         assert!(head.contains(expected), "missing {expected} in:\n{head}");
     }
@@ -176,6 +188,7 @@ fn every_response_carries_the_security_headers_and_nothing_identifying() {
     // And a REFUSAL carries them too.
     let (_, head, _) = request(&fixture, "/missing.html", "GET");
     assert!(head.contains("x-content-type-options: nosniff"), "{head}");
+    assert!(head.contains("cache-control: no-store"), "{head}");
 }
 
 #[test]

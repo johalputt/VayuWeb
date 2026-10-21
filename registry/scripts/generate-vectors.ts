@@ -25,6 +25,7 @@ import {
   buildScanVectors,
   buildMimeVectors,
   buildPathVectors,
+  buildHeaderVectors,
   VECTOR_NOW,
   VECTOR_OWNER_KEY,
   VECTOR_OTHER_KEY,
@@ -45,6 +46,7 @@ const pins = buildPinsVectors();
 const scan = buildScanVectors();
 const mime = buildMimeVectors();
 const paths = buildPathVectors();
+const headers = buildHeaderVectors();
 
 const artifact = {
   $comment:
@@ -116,7 +118,8 @@ const artifact = {
       'two tables: one with nine extensions and one with twenty-eight. `paths` is the routing — ' +
       'which file in a published tree answers a request path — and it exists because the two ' +
       'serving surfaces of this project mapped a path differently, and one of them contradicted ' +
-      'the specification.',
+      'the specification. `headers` is the response header set every serving surface must send, ' +
+      'and it exists because the two serving surfaces of this project sent different sets.',
     mime:
       'A `mime` vector is a path and the content type every implementation must send for it. The ' +
       'type is part of the contract rather than an implementation detail because a browser ' +
@@ -136,6 +139,14 @@ const artifact = {
       'path is one written with a trailing slash or without: the two must answer alike, and the ' +
       "manifest's index answers both. A declared file that is not in the tree is discarded rather " +
       'than reported, so the next candidate answers instead.',
+    headers:
+      'A `headers` vector is the whole set of response headers a serving surface must send, and ' +
+      'the value each must carry. The map is complete on purpose: a header an implementation does ' +
+      'not send is as much a divergence as one whose value differs, and a suite that stated only ' +
+      'the values would say nothing about a header nobody sent. `content-security-policy`, ' +
+      '`permissions-policy` and `referrer-policy` are the canonical values of CONTENT-SECURITY.md ' +
+      'sections 2 and 3; the rest are the accompanying headers of section 3. Every serving ' +
+      'surface sends every one of them on every answer, success or refusal.',
     availability:
       'A `pins` vector is a CID, how many peers were asked, the observations that were made, how ' +
       'long an observation counts for, and the instant to read the report at. `expect.answered` is ' +
@@ -181,6 +192,7 @@ const artifact = {
   scan,
   mime,
   paths,
+  headers,
 };
 
 mkdirSync(dirname(OUT), { recursive: true });
@@ -189,6 +201,6 @@ process.stdout.write(
   `wrote ${vectors.length} record, ${convergence.length} convergence, ${resolution.length} ` +
     `resolution, ${replication.length} replication, ${equivocation.length} equivocation, ` +
     `${pow.length} proof-of-work, ${blockExchange.length} block-exchange, ${release.length} ` +
-    `release, ${pins.length} availability, ${scan.length} scan, ${mime.length} mime and ` +
-    `${paths.length} paths vectors to ${OUT}\n`,
+    `release, ${pins.length} availability, ${scan.length} scan, ${mime.length} mime, ` +
+    `${paths.length} paths and ${headers.length} headers vectors to ${OUT}\n`,
 );

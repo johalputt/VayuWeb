@@ -29,6 +29,7 @@
 
 import { encode, decode, compareBytes, type CborMap, type CborValue } from './cbor.ts';
 import { DEFAULT_CONTENT_TYPE, MIME_TYPES } from './mime.ts';
+import { DEFAULT_CSP, PERMISSIONS_POLICY } from './proxy.ts';
 import { LIMITS, PROTOCOL_VERSION, encodeMessage } from './replicate.ts';
 import { signingInput, recordHashFromBytes } from './domain.ts';
 import { sign, publicKeyFrom } from './signature.ts';
@@ -2785,6 +2786,64 @@ export function buildPathVectors(): PathVector[] {
         },
       ],
       expect: { status: 200, path: 'index.html' },
+    },
+  ];
+}
+
+export interface HeaderVector {
+  readonly name: string;
+  readonly rule: string;
+  /**
+   * Every header a serving surface must send, and the value it must carry.
+   *
+   * The whole map, not a selection: a header MISSING from an implementation is as much a
+   * divergence as one whose value differs, and a suite that only stated the values would say
+   * nothing about the six headers the client's serving surface did not send at all.
+   */
+  readonly expect: Readonly<Record<string, string>>;
+}
+
+/**
+ * The headers suite: the response headers every serving surface must send.
+ *
+ * CONTENT-SECURITY.md section 3 is a table of the headers that accompany a served document, and
+ * each row says what it is for. Three of them are canonical blocks in the document itself — the
+ * Content-Security-Policy, the Permissions-Policy and the Referrer-Policy — and the rest are
+ * named values: `X-Frame-Options: DENY`, `X-DNS-Prefetch-Control: off`, `Cache-Control:
+ * no-store`, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy:
+ * require-corp`, `Cross-Origin-Resource-Policy: same-origin` and `Origin-Agent-Cluster: ?1`.
+ *
+ * **The two serving surfaces of this project sent different sets.** The proxy sent all eleven;
+ * the client's preview surface sent five — the three canonical values, `X-Content-Type-Options`
+ * and `Cross-Origin-Opener-Policy` — while its own module header claimed the set "from
+ * CONTENT-SECURITY.md sections 2-3 verbatim". So the client's surface left the reader's disk
+ * cache untouched (`Cache-Control` missing), did not block the cross-origin size and timing
+ * probes `Cross-Origin-Resource-Policy` exists to block, and did not switch off speculative
+ * DNS.
+ *
+ * The values are literals, for the reason the pow suite learned: an expectation computed by the
+ * function under test survives every mutation of that function.
+ */
+export function buildHeaderVectors(): HeaderVector[] {
+  return [
+    {
+      name: 'headers/every-response-carries-the-whole-set',
+      rule:
+        'CONTENT-SECURITY.md sections 2 and 3: the canonical policy values, and the accompanying ' +
+        'response headers, on every answer',
+      expect: {
+        'content-security-policy': DEFAULT_CSP,
+        'permissions-policy': PERMISSIONS_POLICY,
+        'referrer-policy': 'no-referrer',
+        'x-content-type-options': 'nosniff',
+        'x-frame-options': 'DENY',
+        'x-dns-prefetch-control': 'off',
+        'cache-control': 'no-store',
+        'cross-origin-opener-policy': 'same-origin',
+        'cross-origin-embedder-policy': 'require-corp',
+        'cross-origin-resource-policy': 'same-origin',
+        'origin-agent-cluster': '?1',
+      },
     },
   ];
 }

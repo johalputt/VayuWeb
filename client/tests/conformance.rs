@@ -681,6 +681,62 @@ fn every_path_vector_answers_with_the_file_it_names() {
 }
 
 #[test]
+fn every_header_vector_is_answered_by_exactly_the_header_set_it_names() {
+    // CONTENT-SECURITY.md section 3 is a table of the headers that accompany a served document.
+    // The proxy sent all eleven; this surface sent five, and its own module header claimed the
+    // set "from CONTENT-SECURITY.md sections 2-3 verbatim". So the reader's disk cache was left
+    // untouched, the cross-origin size and timing probes were not blocked, and speculative DNS was
+    // not switched off — on one of the two serving surfaces of this project.
+    //
+    // The suite states the whole set, both ways: a header this implementation sends and the suite
+    // does not name is as much a divergence as one it does not send.
+    let raw = std::fs::read_to_string(VECTORS_PATH).expect("vectors.json exists");
+    let doc: Value = serde_json::from_str(&raw).expect("vectors.json parses");
+    let vectors = doc
+        .get("headers")
+        .and_then(Value::as_array)
+        .expect("a headers section")
+        .clone();
+    assert!(!vectors.is_empty(), "the headers suite is not empty");
+
+    let mut failures: Vec<String> = Vec::new();
+    for vector in &vectors {
+        let name = vector.get("name").and_then(Value::as_str).unwrap_or("?");
+        let expect = vector
+            .get("expect")
+            .and_then(Value::as_object)
+            .expect("an expectation");
+        let sent: std::collections::BTreeMap<&str, &str> = vayuweb_client::serve::SECURITY_HEADERS
+            .iter()
+            .map(|(header, value)| (*header, *value))
+            .collect();
+        for (header, value) in expect {
+            let wanted = value.as_str().unwrap_or("");
+            match sent.get(header.as_str()) {
+                Some(found) if *found == wanted => {}
+                Some(found) => failures.push(format!(
+                    "{name}: {header} is {found:?}, and the suite says {wanted:?}"
+                )),
+                None => failures.push(format!("{name}: {header} is not sent at all")),
+            }
+        }
+        for header in sent.keys() {
+            if !expect.contains_key(*header) {
+                failures.push(format!(
+                    "{name}: {header} is sent, and the suite does not name it"
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} header vector(s) disagree:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+#[test]
 fn every_block_exchange_vector_decodes_as_the_wire_contract_requires() {
     let raw = std::fs::read_to_string(VECTORS_PATH).expect("vectors.json exists");
     let doc: Value = serde_json::from_str(&raw).expect("vectors.json parses");

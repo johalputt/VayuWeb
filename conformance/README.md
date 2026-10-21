@@ -91,10 +91,10 @@ conforming peer can hold. It is unit-tested against a constructed predecessor, a
 activates a second suite must add the wire vector. A test also fails if an exempted code
 acquires a vector, so the excuse cannot outlive the reason for it.
 
-The file carries twelve suites: `vectors` holds 91 record-verification vectors, and `convergence`,
+The file carries thirteen suites: `vectors` holds 91 record-verification vectors, and `convergence`,
 `resolution`, `replication`, `equivocation`, `pow`, `blockExchange`, `release`, `pins`, `scan`,
-`mime` and `paths` hold their own. Those eleven pin what implementations must *agree* about rather
-than what one of them accepts, which is where a fork lives.
+`mime`, `paths` and `headers` hold their own. Those twelve pin what implementations must *agree*
+about rather than what one of them accepts, which is where a fork lives.
 
 **`scan` is the resolver's enforcement, as an executable contract.** The rule table in
 `rules.json` classifies three rules as enforced by reading the document rather than by a header
@@ -117,7 +117,16 @@ the same second, two answers, and which one a reader got depended on which surfa
 to be using. The suite is a published tree, a request path, and the file that must answer it, and
 both languages answer it.
 
-**Both languages now run all twelve.** The client used to run the eight and skip `vectors` — the
+**`headers` is the response header set, as an executable contract.** CONTENT-SECURITY.md section 3
+is a table of the headers that accompany a served document, and each row says what it is for. The
+proxy sent all eleven; the client's preview surface sent five, while its own module header
+claimed the set "from CONTENT-SECURITY.md sections 2-3 verbatim" — so the reader's disk cache was
+left untouched, the cross-origin size and timing probes were not blocked, and speculative DNS was
+not switched off, on one of the two serving surfaces of this project. The suite is the whole map,
+both ways: a header an implementation does not send is as much a divergence as one whose value
+differs.
+
+**Both languages now run all thirteen.** The client used to run the eight and skip `vectors` — the
 record suite, the largest and the one that pins the refusal vocabulary. It was skipped because
 the client's verifier is structured around a store it holds rather than a state it is handed, so
 it could not be pointed at a synthetic state at all. That was the wrong reason to skip it: the

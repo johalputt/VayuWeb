@@ -367,7 +367,7 @@ support desk. Lose the key and the name is gone until it expires.
 
 VayuWeb is at the specification and charter stage. A reference implementation of the parts
 buildable on one machine exists in `registry/src` — the registry, replication, resolution, the
-browsing proxy and the content encoders — with twelve conformance vector suites stating what a
+browsing proxy and the content encoders — with thirteen conformance vector suites stating what a
 second implementation must agree with. There is no running network, no registered name, no
 user, and no release to download. Every number in this
 paper — the 1-year term, the 60-day renewal window, the 30-day grace period followed by
