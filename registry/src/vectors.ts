@@ -28,6 +28,7 @@
  */
 
 import { encode, decode, compareBytes, type CborMap, type CborValue } from './cbor.ts';
+import { DEFAULT_CONTENT_TYPE, MIME_TYPES } from './mime.ts';
 import { LIMITS, PROTOCOL_VERSION, encodeMessage } from './replicate.ts';
 import { signingInput, recordHashFromBytes } from './domain.ts';
 import { sign, publicKeyFrom } from './signature.ts';
@@ -2535,4 +2536,68 @@ export function buildScanVectors(): ScanVector[] {
       expect: ['speculative-link', 'meta-refresh'],
     },
   ];
+}
+
+export interface MimeVector {
+  readonly name: string;
+  readonly rule: string;
+  /** The path the file is served at. */
+  readonly path: string;
+  /**
+   * The content type every implementation must send for it.
+   *
+   * A literal, for the reason the pow suite learned: an expectation computed by the function
+   * under test survives every mutation of that function.
+   */
+  readonly expect: string;
+}
+
+/**
+ * The mime suite: the content type of a served file, one extension at a time.
+ *
+ * RESOLUTION.md step 14 says a resolver emits "a `Content-Type` from the file extension" and
+ * stops there, so the table is an implementation choice — and the choice is wire-visible on every
+ * request, because a browser refuses a stylesheet, a font or a module script whose type it does
+ * not recognise, and `x-content-type-options: nosniff` means it does not guess.
+ *
+ * **The browsing proxy's table had nine extensions and the client's serving surface had
+ * twenty-eight.** A webfont, a `.mjs` module, an icon and a video were therefore served by the
+ * proxy as `application/octet-stream`, and a site published with any of them rendered with none
+ * of them — while the Phase 3 acceptance test passed, because it exercised exactly the three
+ * types the nine covered.
+ *
+ * This suite states the table, so the two implementations of it cannot drift again: an
+ * extension added to one and not the other is a site that renders in the preview and not in the
+ * proxy.
+ */
+export function buildMimeVectors(): MimeVector[] {
+  const vectors: MimeVector[] = [];
+  for (const [extension, type] of Object.entries(MIME_TYPES)) {
+    vectors.push({
+      name: `mime/${extension}`,
+      rule:
+        'RESOLUTION.md step 14: the response carries a Content-Type from the file extension, and ' +
+        'the two serving surfaces of this project must answer the same way',
+      path: `/assets/file.${extension}`,
+      expect: type,
+    });
+  }
+  // The two answers that are not a table lookup, and the ones a table forgets to state.
+  vectors.push({
+    name: 'mime/an-unknown-extension-is-bytes',
+    rule:
+      'RESOLUTION.md step 14: a closed list, because sniffing a type from bytes is how a resolver ' +
+      'serves attacker-chosen content as script',
+    path: '/assets/file.unknownext',
+    expect: DEFAULT_CONTENT_TYPE,
+  });
+  vectors.push({
+    name: 'mime/a-file-with-no-extension-is-bytes',
+    rule:
+      'RESOLUTION.md step 14: a path with no extension has no type, and a resolver that guesses ' +
+      'one is guessing',
+    path: '/assets/LICENSE',
+    expect: DEFAULT_CONTENT_TYPE,
+  });
+  return vectors;
 }

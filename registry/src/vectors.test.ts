@@ -14,6 +14,7 @@ import {
   buildReleaseVectors,
   buildPinsVectors,
   buildScanVectors,
+  buildMimeVectors,
   fromHex,
   toHex,
   type Vector,
@@ -601,7 +602,7 @@ test('AUDIT: BDONE has no field that could vary with what a peer holds', () => {
   assert.equal(decodeBlockMessage(fromHex(held.message)).t, 'BDONE');
 });
 
-test('the committed artifact carries all ten suites', () => {
+test('the committed artifact carries all eleven suites', () => {
   // A suite that exists in code and not in the artifact is a suite no second implementation can
   // run, which makes it a test of this implementation rather than a contract between two.
   const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')) as Record<string, unknown>;
@@ -616,6 +617,7 @@ test('the committed artifact carries all ten suites', () => {
     'release',
     'pins',
     'scan',
+    'mime',
   ]) {
     assert.ok(Array.isArray(artifact[suite]), `${suite} must be an array in the artifact`);
     assert.ok((artifact[suite] as unknown[]).length > 0, `${suite} must not be empty`);
@@ -632,6 +634,7 @@ test('the committed artifact carries all ten suites', () => {
   assert.deepEqual(artifact['blockExchange'], buildBlockExchangeVectors());
   assert.deepEqual(artifact['pins'], buildPinsVectors());
   assert.deepEqual(artifact['scan'], buildScanVectors());
+  assert.deepEqual(artifact['mime'], buildMimeVectors());
 });
 
 /** Build a convergence candidate from a record's hex, as a second implementation would. */
@@ -679,10 +682,10 @@ test('AUDIT: every field a runner must act on is explained inside the artifact',
       v.length > 0 &&
       v.every((e) => typeof e === 'object' && e !== null && 'name' in e),
   ) as [string, Record<string, unknown>[]][];
-  // Ten since `scan` was added. The number is asserted rather than counted from the artifact
+  // Eleven since `mime` was added. The number is asserted rather than counted from the artifact
   // for the reason this whole test exists: a suite that appears without anyone declaring it is a
   // suite nobody wrote an explanation for.
-  assert.equal(suites.length, 10, 'the artifact carries exactly its ten vector suites');
+  assert.equal(suites.length, 11, 'the artifact carries exactly its eleven vector suites');
 
   // **And each is named in the index, which the count alone never checked.** Adding a suite with
   // no note passed this test the moment the count was updated to match. The first fix for that

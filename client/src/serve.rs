@@ -189,7 +189,15 @@ pub struct Response {
     pub body: Vec<u8>,
 }
 
-fn mime_of(path: &str) -> &'static str {
+/// The content type of a served file, from its extension.
+///
+/// **The same table the registry's proxy uses, extension for extension and type for type.** The
+/// proxy's table had nine extensions where this one had twenty-eight, so a webfont, a module
+/// script, an icon and a video were served by the proxy as `application/octet-stream` — which a
+/// browser under `nosniff` refuses, so a site published with any of them rendered with none of
+/// them. The `mime` suite in `conformance/vectors.json` states the table, and both
+/// implementations are checked against it.
+pub fn mime_of(path: &str) -> &'static str {
     let extension = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     match extension.as_str() {
         "html" | "htm" => "text/html; charset=utf-8",

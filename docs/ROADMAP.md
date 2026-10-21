@@ -31,7 +31,7 @@ meet for itself, the reason is stated there rather than hidden behind a percenta
 
 | Phase | Built | Acceptance test |
 |---|---|---|
-| **0** Charter and specification | Every document drafted; the improvement process, the threat model and the namespace annex are settled. Ten conformance suites cover the wire-visible rules. Thirteen mechanical checkers refuse the drift classes that produced most past defects | **Not met, and not meetable here.** Article 44.6 wants a competent implementer reading the specifications alone. The party that wrote them cannot be that reader |
+| **0** Charter and specification | Every document drafted; the improvement process, the threat model and the namespace annex are settled. Eleven conformance suites cover the wire-visible rules. Thirteen mechanical checkers refuse the drift classes that produced most past defects | **Not met, and not meetable here.** Article 44.6 wants a competent implementer reading the specifications alone. The party that wrote them cannot be that reader |
 | **1** Registry core | **Effectively complete.** The log, the record schema, deterministic CBOR, Ed25519, Argon2id, all six operations with their validation ordering, and the lifecycle state machine including grace and quarantine. Sixteen commands drive it | Half met: the tool does everything the row asks. The second tool written from the specification does not exist |
 | **2** Peer replication | **Mostly done.** Transport-agnostic state machine, the reference binding, discovery topic and framing, and a `sync` verb. Two OS processes over a real socket converge, partition and heal. Equivocation is detected on both sides of a real fork and now *reported to the operator* rather than only written to a file | Partly met. "Independent peers" — two processes are that. Two machines, two network stacks and two genuinely independent clocks are not yet exercised |
 | **3** Resolution proxy | **Complete on one machine.** The browsing proxy, the fifteen-endpoint control API on a 0600 Unix socket, the resolution cache with bounded and now *ceilinged* sizes, the manifest path mapping, and the security header profile. Thirty-seven live checks plus an executable browser criterion | **Met on one machine** — the first acceptance test here to pass at all |
@@ -64,7 +64,7 @@ well enough that the second implementer in Phase 1 and the strangers in Phase 6 
 | Threat model | Complete (draft) |
 | Whitepaper, architecture, governance guide, glossary, FAQ | Complete (draft) |
 | Independent adversarial review of the above | **Findings all dispositioned; the review itself is not finished.** The 2026-08-04 audit raised 66 surviving findings and every one now carries an outcome in [AUDIT-FINDINGS.md](AUDIT-FINDINGS.md) — fixed, escalated to an amendment, or verified stale. That is one audit, by seven agents, on one corpus. It is not the *independent* review this row asks for, and it cannot be: Article 44.6's standard is a competent implementer reading the specifications alone, and the same party that wrote them cannot supply that reader |
-| Test vectors for every wire-visible rule | **Ten suites**, in [`conformance/vectors.json`](../conformance/vectors.json): record verification (a vector for every rejection code), convergence, resolution, replication, equivocation, proof-of-work derivation, block exchange, release — the instant a name returns to the pool, which every other vector was handed as an input rather than asked to derive — availability, the report a node gives about whether a pin is being kept alive, and scan, the resolver's enforcement of the rules no header can express. All but the first pin what implementations must *agree* about rather than what one accepts — which is where a fork lives, and where every consensus-critical defect found here so far has been. The availability suite is the one that pins a *sentence* rather than a verdict, because a user reads the sentence and believes it: two implementations that count the same holders and word them differently have shipped two user experiences. The scan suite pins the other thing a user never sees: the client's checker and the registry's proxy both refused, or both served, the same document. `blockExchange` is the one that is not yet stable: VWIP-0005 is a Draft, and its vectors move with it |
+| Test vectors for every wire-visible rule | **Eleven suites**, in [`conformance/vectors.json`](../conformance/vectors.json): record verification (a vector for every rejection code), convergence, resolution, replication, equivocation, proof-of-work derivation, block exchange, release — the instant a name returns to the pool, which every other vector was handed as an input rather than asked to derive — availability, the report a node gives about whether a pin is being kept alive, scan, the resolver's enforcement of the rules no header can express, and mime, the content type of a served file. All but the first pin what implementations must *agree* about rather than what one accepts — which is where a fork lives, and where every consensus-critical defect found here so far has been. The availability suite is the one that pins a *sentence* rather than a verdict, because a user reads the sentence and believes it: two implementations that count the same holders and word them differently have shipped two user experiences. The scan suite pins the other thing a user never sees: the client's checker and the registry's proxy both refused, or both served, the same document. The mime suite pins what a browser refuses without: a stylesheet, a font or a module script served as bytes is a page that renders half-dressed. `blockExchange` is the one that is not yet stable: VWIP-0005 is a Draft, and its vectors move with it |
 
 **Done when:** a competent implementer can read the specifications alone — without access to any
 source code and without asking a question — and produce a client that would interoperate. That
@@ -309,6 +309,14 @@ told somebody else who was reading, and the proxy would have handed it over. The
 refuses such a document the way it refuses everything else (403, an empty body, the full header
 set), and the `scan` suite in `conformance/vectors.json` holds the registry's TypeScript scanner
 and the client's Rust checker to the same answer about the same document.
+
+**And the proxy's content-type table was nine extensions where the client's was twenty-eight.**
+A webfont, a `.mjs` module, an icon and a video were served as `application/octet-stream`, and
+every response carries `nosniff`, so a browser refuses a font or a module script whose type it
+does not recognise: the site rendered with neither. The acceptance test passed because it used
+`.html`, `.css` and `.png` — the three types the nine covered. The table now matches the
+client's, and the `mime` suite states it, so the two serving surfaces cannot answer a browser's
+question differently again.
 
 The two surfaces are deliberately of different kinds. The proxy is TCP because a browser must
 reach it; the control API is a Unix domain socket because a browser must never reach it, and
@@ -706,7 +714,7 @@ is a defect against Constitution Article 4.
 This section said "not with code — there is no code to write against yet" for as long as that was
 true, and it stopped being true without anybody editing it. There is now a registry, a
 replication state machine, a resolver, a browsing proxy, a control API, the content-addressing
-and UnixFS encoders, and ten conformance suites. A contributor reading the old sentence would
+and UnixFS encoders, and eleven conformance suites. A contributor reading the old sentence would
 have been told the opposite of the situation, which is the same defect as any other stale claim
 in this corpus — it just happened to be in the paragraph telling people what to do about it.
 

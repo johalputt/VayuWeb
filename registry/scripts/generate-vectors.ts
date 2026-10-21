@@ -23,6 +23,7 @@ import {
   buildReleaseVectors,
   buildPinsVectors,
   buildScanVectors,
+  buildMimeVectors,
   VECTOR_NOW,
   VECTOR_OWNER_KEY,
   VECTOR_OTHER_KEY,
@@ -41,6 +42,7 @@ const blockExchange = buildBlockExchangeVectors();
 const release = buildReleaseVectors();
 const pins = buildPinsVectors();
 const scan = buildScanVectors();
+const mime = buildMimeVectors();
 
 const artifact = {
   $comment:
@@ -107,7 +109,17 @@ const artifact = {
       'one sentence a client may show — because a report that renders silence as absence, or a ' +
       "self-pin as redundancy, is worse than no report. `scan` is the resolver's enforcement of " +
       'the rules no header can express, and it is the suite that holds the two serving surfaces ' +
-      'of this project to the same answer about the same document.',
+      'of this project to the same answer about the same document. `mime` is the content type ' +
+      'of a served file, and it exists because the two serving surfaces of this project had ' +
+      'two tables: one with nine extensions and one with twenty-eight.',
+    mime:
+      'A `mime` vector is a path and the content type every implementation must send for it. The ' +
+      'type is part of the contract rather than an implementation detail because a browser ' +
+      'REFUSES a stylesheet, a font or a module script whose type it does not recognise, and ' +
+      '`x-content-type-options: nosniff` means it does not guess. The list is closed: a path with ' +
+      'an extension the table does not carry, and a path with no extension at all, are both served ' +
+      'as `application/octet-stream`, because sniffing a type from bytes is how a resolver serves ' +
+      'attacker-chosen content as script.',
     availability:
       'A `pins` vector is a CID, how many peers were asked, the observations that were made, how ' +
       'long an observation counts for, and the instant to read the report at. `expect.answered` is ' +
@@ -151,6 +163,7 @@ const artifact = {
   release,
   pins,
   scan,
+  mime,
 };
 
 mkdirSync(dirname(OUT), { recursive: true });
@@ -159,5 +172,6 @@ process.stdout.write(
   `wrote ${vectors.length} record, ${convergence.length} convergence, ${resolution.length} ` +
     `resolution, ${replication.length} replication, ${equivocation.length} equivocation, ` +
     `${pow.length} proof-of-work, ${blockExchange.length} block-exchange, ${release.length} ` +
-    `release, ${pins.length} availability and ${scan.length} scan vectors to ${OUT}\n`,
+    `release, ${pins.length} availability, ${scan.length} scan and ${mime.length} mime vectors ` +
+    `to ${OUT}\n`,
 );

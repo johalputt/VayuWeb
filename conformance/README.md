@@ -91,10 +91,10 @@ conforming peer can hold. It is unit-tested against a constructed predecessor, a
 activates a second suite must add the wire vector. A test also fails if an exempted code
 acquires a vector, so the excuse cannot outlive the reason for it.
 
-The file carries ten suites: `vectors` holds 91 record-verification vectors, and `convergence`,
-`resolution`, `replication`, `equivocation`, `pow`, `blockExchange`, `release`, `pins` and `scan`
-hold their own. Those nine pin what implementations must *agree* about rather than what one of
-them accepts, which is where a fork lives.
+The file carries eleven suites: `vectors` holds 91 record-verification vectors, and `convergence`,
+`resolution`, `replication`, `equivocation`, `pow`, `blockExchange`, `release`, `pins`, `scan` and
+`mime` hold their own. Those ten pin what implementations must *agree* about rather than what one
+of them accepts, which is where a fork lives.
 
 **`scan` is the resolver's enforcement, as an executable contract.** The rule table in
 `rules.json` classifies three rules as enforced by reading the document rather than by a header
@@ -107,7 +107,7 @@ publisher having run a checker first. The suite is a document and the rules ever
 implementation must find in it, and both languages answer it: the registry's scanner in
 TypeScript, the client's checker in Rust, and the `scan` suite is what makes them one answer.
 
-**Both languages now run all ten.** The client used to run the eight and skip `vectors` — the
+**Both languages now run all eleven.** The client used to run the eight and skip `vectors` — the
 record suite, the largest and the one that pins the refusal vocabulary. It was skipped because
 the client's verifier is structured around a store it holds rather than a state it is handed, so
 it could not be pointed at a synthetic state at all. That was the wrong reason to skip it: the

@@ -868,6 +868,42 @@ fn every_availability_vector_produces_the_report_and_the_sentence_the_rule_requi
 }
 
 #[test]
+fn every_mime_vector_answers_with_the_type_it_names() {
+    // RESOLUTION.md step 14 says a resolver emits "a `Content-Type` from the file extension". The
+    // table that says which extension is which type is an implementation choice, and it is
+    // wire-visible: a browser refuses a stylesheet, a font or a module script whose type it does
+    // not recognise, and `x-content-type-options: nosniff` means it does not guess.
+    //
+    // The registry's proxy and this client each had a table, and they were not the same table —
+    // nine extensions against twenty-eight — so a site rendered in the preview and not in the
+    // proxy. The suite states the table, and both implementations answer it.
+    let raw = std::fs::read_to_string(VECTORS_PATH).expect("vectors.json exists");
+    let doc: Value = serde_json::from_str(&raw).expect("vectors.json parses");
+    let vectors = doc
+        .get("mime")
+        .and_then(Value::as_array)
+        .expect("a mime section");
+    assert!(!vectors.is_empty(), "the mime suite is not empty");
+
+    let mut failures = Vec::new();
+    for vector in vectors {
+        let name = vector.get("name").and_then(Value::as_str).unwrap_or("?");
+        let path = vector.get("path").and_then(Value::as_str).unwrap_or("?");
+        let expect = vector.get("expect").and_then(Value::as_str).unwrap_or("");
+        let found = vayuweb_client::serve::mime_of(path);
+        if found != expect {
+            failures.push(format!("{name}: expected {expect:?}, found {found:?}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} mime vector(s) disagree:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+#[test]
 fn the_availability_suite_carries_no_figure_article_23_forbids() {
     // A percentage, a total or an uptime is a place for a caller to render a guarantee the
     // protocol does not make, and Article 23 forbids the figure. The artifact must not even

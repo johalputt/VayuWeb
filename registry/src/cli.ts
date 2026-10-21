@@ -44,6 +44,7 @@ import { memorySource } from './blockstore.ts';
 import { fetchPath, FetchError } from './fetch.ts';
 import { proveInclusion, treeOf, type Proof, type Root } from './merkle.ts';
 import { greatestCorroboratedLength, verifyNameInclusion } from './checkpoint.ts';
+import { contentTypeOf as mimeContentTypeOf } from './mime.ts';
 import { TOKEN_BYTES } from './control.ts';
 import { EquivocationLedger, ledgerPathFor, type LedgerEntry } from './equivocation.ts';
 import { CheckpointLedger } from './checkpoint.ts';
@@ -1558,22 +1559,16 @@ export function pointerFor(declared: string | undefined, root: string | null): I
  * Closed on purpose. Sniffing a type from bytes is how a resolver serves attacker-chosen content
  * as script, and `x-content-type-options: nosniff` is already on every response -- guessing here
  * would undo it from the other side.
+ *
+ * **The list itself moved to `mime.ts`, and it grew from nine extensions to thirty-four.** It
+ * was nine, and a webfont, a module script, an icon and a video were all served as
+ * `application/octet-stream` -- which a browser under `nosniff` refuses, so a site published
+ * with a typeface and a `.mjs` module rendered with neither, and the acceptance test passed
+ * because it used exactly the three types the nine covered. The table now matches the client's
+ * serving surface extension for extension, and the `mime` suite in `conformance/vectors.json`
+ * states it, so the two cannot drift apart again.
  */
-function contentTypeOf(path: string): string {
-  const known: Record<string, string> = {
-    html: 'text/html; charset=utf-8',
-    css: 'text/css; charset=utf-8',
-    js: 'text/javascript; charset=utf-8',
-    json: 'application/json',
-    svg: 'image/svg+xml',
-    png: 'image/png',
-    jpg: 'image/jpeg',
-    webp: 'image/webp',
-    txt: 'text/plain; charset=utf-8',
-  };
-  const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
-  return known[ext] ?? 'application/octet-stream';
-}
+const contentTypeOf = mimeContentTypeOf;
 
 /**
  * Replicate with one peer over TCP, until interrupted.

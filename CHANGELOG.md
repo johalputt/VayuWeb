@@ -36,6 +36,24 @@ The client now checks every header-enforced rule against the headers it actually
 compares its policy against the canonical block in CONTENT-SECURITY.md, which its own comment
 claimed byte-identity with and nothing had checked.
 
+### Fixed — the browsing proxy serves a site's fonts, modules and video as what they are
+
+**The proxy had nine content types and the client's serving surface had twenty-eight.** A
+webfont, a `.mjs` module, an icon, a video and a `.htm` page were therefore served by the proxy
+as `application/octet-stream` — and every response carries `x-content-type-options: nosniff`, so
+a browser does not guess: it refuses a stylesheet, a font or a module script whose type it does
+not recognise. A site published with a typeface and a module script rendered with neither, in the
+surface a reader actually uses.
+
+The Phase 3 acceptance test passed anyway, because it exercised exactly the three types the nine
+covered: `.html`, `.css` and `.png`. A criterion that renders one page and checks the text has
+not tested a site.
+
+The table now matches the client's, extension for extension and type for type, and it lives in
+`registry/src/mime.ts` rather than inside the CLI. The `mime` suite in `conformance/vectors.json`
+states it — one vector per extension, plus the two answers that are not a table lookup (an
+unknown extension and a path with none) — so the two serving surfaces cannot drift apart again.
+
 ### Fixed — the browsing proxy now refuses what no header can express
 
 **The proxy served documents the client's serving surface refused.** The rule table classifies
@@ -103,7 +121,7 @@ carrying two defects is refused for the first of them, and two implementations t
 about the order name different reasons for refusing the same bytes. A deferral now carries its
 reason, `CLOCK_SKEW`, so a peer can tell one kind of hold from another.
 
-### Added — the client runs all ten conformance suites
+### Added — the client runs all eleven conformance suites
 
 `verify::verify_against` takes the state as an argument — the predecessor, the revocation flag,
 the release flag and the proof-of-work flag — which is what a conformance vector states and what
