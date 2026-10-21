@@ -2601,3 +2601,161 @@ export function buildMimeVectors(): MimeVector[] {
   });
   return vectors;
 }
+
+export interface PathVector {
+  readonly name: string;
+  readonly rule: string;
+  /** The request path, as it arrives. */
+  readonly request: string;
+  /** The published tree the request is made against. */
+  readonly files: readonly { readonly path: string; readonly content: string }[];
+  /**
+   * The status the answer carries, and the tree-relative path of the file that answered.
+   *
+   * `path` is null when no file answered: a miss is a miss, and saying so is what keeps a
+   * resolver from answering a missing path with a file the publisher never declared.
+   */
+  readonly expect: { readonly status: number; readonly path: string | null };
+}
+
+/**
+ * The paths suite: which file in a published tree answers a request path.
+ *
+ * RESOLUTION.md step 13 is the rule, and it is the rule a reader feels: the path they asked for
+ * is the page they get, or the site's own 404 page, or its own router's shell.
+ *
+ * **The two serving surfaces of this project mapped a path differently, and one of them
+ * contradicted the specification.** The client's serving surface used the manifest's declared
+ * `index` for a directory path; the registry's proxy used it only for the paths written with a
+ * trailing slash and asked the tree for the literal `index.html` for the others. A site that
+ * declared `"index": "home.html"` and published a `/docs/` directory therefore served `/docs/` and
+ * 404'd `/docs` — the same site, the same second, two answers, and the answer a reader got
+ * depended on which surface they happened to be using.
+ *
+ * The suite states the mapping, tree by tree and path by path, and both implementations answer
+ * it. It is a suite about a tree rather than about a record because that is what step 13 is
+ * about: a request path and a directory, and the rules for which file in one answers the other.
+ */
+export function buildPathVectors(): PathVector[] {
+  // `version` is the one required field of a manifest (PUBLISHING.md 2), and a manifest without it
+  // is not a manifest a resolver may read: the two serving surfaces of this project disagreed
+  // about that too, and the suite does not pretend otherwise — it states the shape a manifest
+  // must have for its routing to mean anything.
+  const declared = JSON.stringify({ version: 1, index: 'home.html' });
+  const notFound = JSON.stringify({ version: 1, notFound: '404.html' });
+  const fallback = JSON.stringify({ version: 1, fallback: 'app.html' });
+  const both = JSON.stringify({ version: 1, notFound: '404.html', fallback: 'app.html' });
+  const manifest = (body: string): { path: string; content: string } => ({
+    path: '.vayu/manifest.json',
+    content: body,
+  });
+  return [
+    {
+      name: 'paths/the-root-serves-the-declared-index',
+      rule: "RESOLUTION.md step 13: `/` resolves to the manifest's index when one is declared",
+      request: '/',
+      files: [
+        { path: 'home.html', content: 'ROOT-HOME' },
+        { path: 'index.html', content: 'ROOT-INDEX' },
+        manifest(declared),
+      ],
+      expect: { status: 200, path: 'home.html' },
+    },
+    {
+      name: 'paths/a-directory-without-a-trailing-slash-serves-the-declared-index',
+      rule:
+        "RESOLUTION.md step 13: a DIRECTORY path resolves to the manifest's index — the trailing " +
+        'slash is not part of the rule',
+      request: '/docs',
+      files: [
+        { path: 'home.html', content: 'ROOT-HOME' },
+        { path: 'docs/home.html', content: 'DOCS-HOME' },
+        manifest(declared),
+      ],
+      expect: { status: 200, path: 'docs/home.html' },
+    },
+    {
+      name: 'paths/a-directory-with-a-trailing-slash-serves-the-declared-index',
+      rule:
+        'RESOLUTION.md step 13: the same rule as the path without the trailing slash, and the two ' +
+        'must answer alike',
+      request: '/docs/',
+      files: [
+        { path: 'home.html', content: 'ROOT-HOME' },
+        { path: 'docs/home.html', content: 'DOCS-HOME' },
+        manifest(declared),
+      ],
+      expect: { status: 200, path: 'docs/home.html' },
+    },
+    {
+      name: 'paths/a-directory-without-a-declared-index-serves-index-html',
+      rule: 'RESOLUTION.md step 13: and to `index.html` otherwise',
+      request: '/docs',
+      files: [
+        { path: 'index.html', content: 'ROOT-INDEX' },
+        { path: 'docs/index.html', content: 'DOCS-INDEX' },
+      ],
+      expect: { status: 200, path: 'docs/index.html' },
+    },
+    {
+      name: 'paths/an-exact-file-wins-over-the-directory-index',
+      rule:
+        'RESOLUTION.md step 13: the path is mapped onto the tree, and a file that IS the path is ' +
+        'the answer',
+      request: '/docs/home.html',
+      files: [
+        { path: 'docs/home.html', content: 'DOCS-HOME' },
+        { path: 'docs/index.html', content: 'DOCS-INDEX' },
+        manifest(declared),
+      ],
+      expect: { status: 200, path: 'docs/home.html' },
+    },
+    {
+      name: 'paths/a-miss-serves-the-declared-not-found-page-with-404',
+      rule: 'RESOLUTION.md step 13: serve `notFound` with 404 if declared',
+      request: '/missing',
+      files: [{ path: '404.html', content: 'NOT-FOUND' }, manifest(notFound)],
+      expect: { status: 404, path: '404.html' },
+    },
+    {
+      name: 'paths/a-miss-serves-the-declared-fallback-with-200',
+      rule:
+        "RESOLUTION.md step 13: else serve `fallback` with 200 if declared, so the site's own " +
+        'router can handle the path',
+      request: '/deep/link',
+      files: [{ path: 'app.html', content: 'FALLBACK' }, manifest(fallback)],
+      expect: { status: 200, path: 'app.html' },
+    },
+    {
+      name: 'paths/the-not-found-page-wins-over-the-fallback',
+      rule:
+        'RESOLUTION.md step 13: `notFound` first — a page that says the path is missing is more ' +
+        'honest than a router that says nothing',
+      request: '/missing',
+      files: [
+        { path: '404.html', content: 'NOT-FOUND' },
+        { path: 'app.html', content: 'FALLBACK' },
+        manifest(both),
+      ],
+      expect: { status: 404, path: '404.html' },
+    },
+    {
+      name: 'paths/a-miss-with-neither-declared-is-a-miss',
+      rule:
+        "RESOLUTION.md step 13: else return 1414 PATH_NOT_FOUND — an ordinary 404, the site's " +
+        "problem rather than the network's",
+      request: '/missing',
+      files: [{ path: 'index.html', content: 'ROOT-INDEX' }],
+      expect: { status: 404, path: null },
+    },
+    {
+      name: 'paths/a-declared-index-that-is-not-in-the-tree-is-discarded',
+      rule:
+        'RESOLUTION.md step 13: a declared file that is not present in the verified tree is ' +
+        'discarded rather than reported, so `index.html` answers instead',
+      request: '/',
+      files: [{ path: 'index.html', content: 'ROOT-INDEX' }, manifest(declared)],
+      expect: { status: 200, path: 'index.html' },
+    },
+  ];
+}

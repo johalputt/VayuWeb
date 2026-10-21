@@ -581,6 +581,106 @@ fn every_equivocation_vector_judges_the_evidence_alike() {
 }
 
 #[test]
+fn every_path_vector_answers_with_the_file_it_names() {
+    // RESOLUTION.md step 13 is the rule a reader feels: the path they asked for is the page they
+    // get, or the site's own 404 page, or its own router's shell.
+    //
+    // The two serving surfaces of this project mapped a path differently, and one of them
+    // contradicted the specification: this one used the manifest's declared `index` for a
+    // directory path, and the registry's proxy used it only for the paths written with a
+    // trailing slash and asked the tree for the literal `index.html` for the others. A site that
+    // declared `"index": "home.html"` and published a `/docs/` directory served `/docs/` and 404'd
+    // `/docs` — the same site, the same second, two answers.
+    //
+    // The suite states the mapping, tree by tree, and both implementations answer it.
+    let raw = std::fs::read_to_string(VECTORS_PATH).expect("vectors.json exists");
+    let doc: Value = serde_json::from_str(&raw).expect("vectors.json parses");
+    let vectors = doc
+        .get("paths")
+        .and_then(Value::as_array)
+        .expect("a paths section")
+        .clone();
+    assert!(!vectors.is_empty(), "the paths suite is not empty");
+
+    let mut failures: Vec<String> = Vec::new();
+    for vector in &vectors {
+        let name = vector.get("name").and_then(Value::as_str).unwrap_or("?");
+        let request_path = vector.get("request").and_then(Value::as_str).unwrap_or("/");
+        let files = vector
+            .get("files")
+            .and_then(Value::as_array)
+            .expect("a tree");
+        let site: Vec<vayuweb_client::publish::SiteFile> = files
+            .iter()
+            .map(|file| vayuweb_client::publish::SiteFile {
+                path: file
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                content: file
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .as_bytes()
+                    .to_vec(),
+            })
+            .collect();
+        let (blocks, root) = vayuweb_client::publish::import_site(&site).expect("imports");
+        // A store of its own per vector: the trees are small, and a store shared between them
+        // would let one vector's answer come from another vector's blocks.
+        let store_path =
+            std::env::temp_dir().join(format!("vayu-paths-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&store_path);
+        let store = vayuweb_client::store::BlockStore::open(&store_path).expect("opens");
+        store
+            .put_all(blocks.into_iter().map(|b| (b.cid.clone(), b.bytes)))
+            .expect("pins");
+
+        // The request path, split the way `parse_request` splits it: empty segments dropped, so
+        // `/docs` and `/docs/` are the same request and `/` is the root.
+        let segments: Vec<String> = request_path
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+            .map(str::to_string)
+            .collect();
+        let request = vayuweb_client::serve::Request {
+            is_head: false,
+            segments,
+        };
+        let limits = vayuweb_client::dagnode::WalkLimits::default();
+        let response = vayuweb_client::serve::route(&store, &root, &request, &limits)
+            .expect("the route answers");
+
+        let expect = vector.get("expect").expect("an expectation");
+        let expect_status = expect.get("status").and_then(Value::as_u64).unwrap_or(0) as u16;
+        let expect_path = expect
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        if response.status != expect_status {
+            failures.push(format!(
+                "{name}: expected status {expect_status}, found {}",
+                response.status
+            ));
+            continue;
+        }
+        if response.path != expect_path {
+            failures.push(format!(
+                "{name}: expected {:?}, found {:?}",
+                expect_path, response.path
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} path vector(s) disagree:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+#[test]
 fn every_block_exchange_vector_decodes_as_the_wire_contract_requires() {
     let raw = std::fs::read_to_string(VECTORS_PATH).expect("vectors.json exists");
     let doc: Value = serde_json::from_str(&raw).expect("vectors.json parses");

@@ -187,6 +187,15 @@ pub struct Response {
     pub reason: &'static str,
     pub content_type: &'static str,
     pub body: Vec<u8>,
+    /// The tree-relative path of the file that answered, or `None` when no file did.
+    ///
+    /// **Which file answered is a fact about the routing, and the routing is what two
+    /// implementations of this project have to agree about.** The `paths` suite in
+    /// `conformance/vectors.json` states it: a request path, a published tree, and the file that
+    /// must answer. Without this field a reader of the response could not tell which file it
+    /// was, and the suite could only compare bytes — which is to say, it could not tell a
+    /// directory's index from a file that happened to hold the same bytes.
+    pub path: Option<String>,
 }
 
 /// The content type of a served file, from its extension.
@@ -282,18 +291,44 @@ pub fn route(
     }
 
     // Not an exact file. If it is a directory, its index document answers instead.
-    let index_name = manifest
-        .as_ref()
-        .and_then(|m| m.index.clone())
-        .unwrap_or_else(|| "index.html".to_string());
-    let directory_index: Vec<String> = {
-        let mut segments = request.segments.clone();
-        segments.push(index_name.clone());
-        segments
+    //
+    // **The manifest's `index`, for every directory path and not only for the ones written with
+    // a trailing slash.** RESOLUTION.md step 13 says "resolving `/` and directory paths to the
+    // manifest's `index` when one is declared and to `index.html` otherwise" — a directory path is
+    // a directory path whether or not the writer ended it with a slash, and the registry's proxy
+    // used to read the trailing slash as the whole of the rule: it asked the tree for
+    // `index.html` and never for the declared `home.html`, so a site with a declared index and a
+    // subdirectory served its subdirectory on this surface and 404'd on that one.
+    //
+    // **A declared index that is not in the tree is discarded, and `index.html` answers
+    // instead** — the same treatment step 13 gives every other declared file ("a declared file
+    // that is not present in the verified tree is discarded rather than reported"), and the same
+    // treatment the proxy gives it. The two surfaces used to disagree here as well: this one
+    // looked for the declared index and stopped, and the other looked for the declared index and
+    // then for `index.html`. The specification's wording admits a second reading, in which the
+    // manifest's index is the only file a directory path may answer; the `paths` suite in
+    // `conformance/vectors.json` states the reading implemented here, and the editorial panel
+    // may change the suite and the code together.
+    let index_candidates: Vec<String> = {
+        let mut candidates: Vec<String> = Vec::new();
+        if let Some(declared) = manifest.as_ref().and_then(|m| m.index.clone()) {
+            candidates.push(declared);
+        }
+        if !candidates.iter().any(|name| name == "index.html") {
+            candidates.push("index.html".to_string());
+        }
+        candidates
     };
-    if let Some(body) = try_file(&directory_index) {
-        let index_mime = mime_of(index_name.as_str());
-        return scan_and_answer(&directory_index.join("/"), index_mime, body);
+    for index_name in index_candidates {
+        let directory_index: Vec<String> = {
+            let mut segments = request.segments.clone();
+            segments.push(index_name.clone());
+            segments
+        };
+        if let Some(body) = try_file(&directory_index) {
+            let index_mime = mime_of(index_name.as_str());
+            return scan_and_answer(&directory_index.join("/"), index_mime, body);
+        }
     }
 
     // Deep-link miss: notFound with 404, else fallback with 200, else bare 404.
@@ -305,6 +340,7 @@ pub fn route(
                 reason: "Not Found",
                 content_type: mime_of(segments[0].as_str()),
                 body,
+                path: Some(segments[0].clone()),
             });
         }
     }
@@ -316,6 +352,7 @@ pub fn route(
                 reason: "OK",
                 content_type: mime_of(segments[0].as_str()),
                 body,
+                path: Some(segments[0].clone()),
             });
         }
     }
@@ -324,6 +361,8 @@ pub fn route(
         reason: "Not Found",
         content_type: "text/plain; charset=utf-8",
         body: b"not found in this tree\n".to_vec(),
+        // No file answered, and the suite asks which one did.
+        path: None,
     })
 }
 
@@ -354,6 +393,7 @@ fn scan_and_answer(
             reason: "OK",
             content_type,
             body,
+            path: Some(path.to_string()),
         });
     }
     // The path is the doctor's own dispatch key: the rules are written against file
@@ -378,6 +418,7 @@ fn scan_and_answer(
             reason: "OK",
             content_type,
             body,
+            path: Some(path.to_string()),
         });
     }
     let mut detail = String::from(
@@ -394,6 +435,7 @@ fn scan_and_answer(
         reason: "Forbidden",
         content_type: "text/plain; charset=utf-8",
         body: detail.into_bytes(),
+        path: Some(path.to_string()),
     })
 }
 
@@ -530,6 +572,7 @@ pub fn serve_until(
                             reason: "Internal Error",
                             content_type: "text/plain; charset=utf-8",
                             body: body.into_bytes(),
+                            path: None,
                         },
                         true,
                     );

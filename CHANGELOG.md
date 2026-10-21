@@ -36,6 +36,36 @@ The client now checks every header-enforced rule against the headers it actually
 compares its policy against the canonical block in CONTENT-SECURITY.md, which its own comment
 claimed byte-identity with and nothing had checked.
 
+### Fixed — a directory path answers with the site's declared index, whichever way it is written
+
+**The two serving surfaces of this project mapped a request path onto a published tree
+differently, and the registry's proxy contradicted the specification.** The client's serving
+surface used the manifest's declared `index` for a directory path. The proxy used it only for
+the paths written with a trailing slash, and asked the tree for the literal `index.html` for the
+others — so a site that declared `"index": "home.html"` and published a `/docs/` directory
+served `/docs/` and 404'd `/docs`. The same site, the same second, two answers, and which one a
+reader got depended on which surface they happened to be using.
+
+RESOLUTION.md step 13 says "resolving `/` and directory paths to the manifest's `index` when one
+is declared and to `index.html` otherwise". A directory path is one whether or not its writer
+ended it with a slash, and both surfaces now say so.
+
+A second difference went with it: a declared index that is **not** in the tree is discarded —
+"a declared file that is not present in the verified tree is discarded rather than reported",
+which is the treatment step 13 gives every other declared file. The client looked for the
+declared index and stopped; the proxy looked for the declared index and then for `index.html`.
+Both now discard the declaration and take the next candidate. The specification's wording admits
+a second reading here, in which the manifest's index is the only file a directory path may
+answer; the `paths` suite states the reading implemented, and the editorial panel may change the
+suite and the code together.
+
+The new `paths` suite in `conformance/vectors.json` is a published tree, a request path, and the
+file that must answer it: the declared index, the default index, an exact file, the `notFound`
+page with 404, the `fallback` with 200, and a miss. Both implementations answer it — the
+proxy's `serveStep13` in TypeScript, the client's `route` in Rust — and the client's response
+now carries the path that answered, because "which file answered" is the fact the suite is
+about.
+
 ### Fixed — the browsing proxy serves a site's fonts, modules and video as what they are
 
 **The proxy had nine content types and the client's serving surface had twenty-eight.** A
@@ -121,7 +151,7 @@ carrying two defects is refused for the first of them, and two implementations t
 about the order name different reasons for refusing the same bytes. A deferral now carries its
 reason, `CLOCK_SKEW`, so a peer can tell one kind of hold from another.
 
-### Added — the client runs all eleven conformance suites
+### Added — the client runs all twelve conformance suites
 
 `verify::verify_against` takes the state as an argument — the predecessor, the revocation flag,
 the release flag and the proof-of-work flag — which is what a conformance vector states and what

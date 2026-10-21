@@ -662,12 +662,32 @@ export function serveStep13(
   // implemented in two places — a resolver that knew about `mapPath` and a port that knew about
   // `index.html` — and the manifest, which belongs to neither, ended up in nothing. A port that is
   // asked for an exact path cannot lose half a rule it was never given.
+  //
+  // **The declared index answers a directory path whether or not the path was written with a
+  // trailing slash.** It used to answer only the ones that were, and the other kind went looking
+  // for the literal `index.html`: a site that declared `"index": "home.html"` and had a
+  // `/docs/` directory served `/docs/` and 404'd `/docs`, on this surface, while the client's
+  // serving surface served both. "Directory paths" is what the specification says, and a path
+  // that names a directory is one whether or not its writer ended it with a slash.
+  //
+  // **A declared index that is not in the tree is discarded, and `index.html` answers
+  // instead.** That is the same sentence step 13 uses for every other declared file — "a
+  // declared file that is not present in the verified tree is discarded rather than reported" —
+  // and discarding a declaration means carrying on as though it had not been made. The
+  // specification's wording admits a second reading here, in which the manifest's index is the
+  // only file a directory path may answer and a site whose declared index is missing is a site
+  // with no index at all; the `paths` suite in `conformance/vectors.json` states the reading
+  // implemented here, and the editorial panel may change the suite and the code together.
+  const indexCandidates = (): string[] => {
+    const declared = site()?.index ?? null;
+    if (declared === null || declared === 'index.html') return ['index.html'];
+    return [declared, 'index.html'];
+  };
   const directory = path === '/' || path.endsWith('/');
   if (directory) {
-    const declared = site()?.index ?? null;
-    if (declared !== null) {
-      const attempt = fetchPath(`${path}${declared}`);
-      if (attempt.ok) return { ...attempt, status: 200, path: `${path}${declared}` };
+    for (const index of indexCandidates()) {
+      const attempt = fetchPath(`${path}${index}`);
+      if (attempt.ok) return { ...attempt, status: 200, path: `${path}${index}` };
       // **Only a missing path is a reason to try another path.** A source that is unavailable, or
       // whose bytes failed their hash, is not going to answer a different path any better — and on
       // an integrity failure, asking again is the downgrade RESOLUTION.md forbids at the source
@@ -675,22 +695,21 @@ export function serveStep13(
       // something already known.
       if (attempt.error !== 'PATH_NOT_FOUND') return attempt;
     }
-    const fallbackIndex = `${path}index.html`;
-    const attempt = fetchPath(fallbackIndex);
-    if (attempt.ok) return { ...attempt, status: 200, path: fallbackIndex };
-    if (attempt.error !== 'PATH_NOT_FOUND') return attempt;
     // A directory that has no index is not the same as a path that is missing, but the tree is the
     // only thing that can say so — ask for the path as given before giving up on it.
   }
 
   const direct = fetchPath(path);
   if (direct.ok) return { ...direct, status: 200, path };
-  // A directory named without its trailing slash still resolves to its index — `mapPath`'s rule,
-  // applied where the tree can actually be asked.
+  // A directory named without its trailing slash still resolves to its index — the same rule the
+  // trailing-slash form follows, and the same index: the manifest's when one is declared.
   if (!directory && direct.error === 'PATH_NOT_FOUND') {
-    const nested = `${path}/index.html`;
-    const attempt = fetchPath(nested);
-    if (attempt.ok) return { ...attempt, status: 200, path: nested };
+    for (const index of indexCandidates()) {
+      const nested = `${path}/${index}`;
+      const attempt = fetchPath(nested);
+      if (attempt.ok) return { ...attempt, status: 200, path: nested };
+      if (attempt.error !== 'PATH_NOT_FOUND') return attempt;
+    }
   }
   // Only a missing PATH is a reason to look at the manifest. A source that is unavailable, a
   // pointer that will not resolve or bytes that failed their hash are not "this path is not in the

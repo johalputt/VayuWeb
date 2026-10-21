@@ -24,6 +24,7 @@ import {
   buildPinsVectors,
   buildScanVectors,
   buildMimeVectors,
+  buildPathVectors,
   VECTOR_NOW,
   VECTOR_OWNER_KEY,
   VECTOR_OTHER_KEY,
@@ -43,6 +44,7 @@ const release = buildReleaseVectors();
 const pins = buildPinsVectors();
 const scan = buildScanVectors();
 const mime = buildMimeVectors();
+const paths = buildPathVectors();
 
 const artifact = {
   $comment:
@@ -111,7 +113,10 @@ const artifact = {
       'the rules no header can express, and it is the suite that holds the two serving surfaces ' +
       'of this project to the same answer about the same document. `mime` is the content type ' +
       'of a served file, and it exists because the two serving surfaces of this project had ' +
-      'two tables: one with nine extensions and one with twenty-eight.',
+      'two tables: one with nine extensions and one with twenty-eight. `paths` is the routing — ' +
+      'which file in a published tree answers a request path — and it exists because the two ' +
+      'serving surfaces of this project mapped a path differently, and one of them contradicted ' +
+      'the specification.',
     mime:
       'A `mime` vector is a path and the content type every implementation must send for it. The ' +
       'type is part of the contract rather than an implementation detail because a browser ' +
@@ -120,6 +125,17 @@ const artifact = {
       'an extension the table does not carry, and a path with no extension at all, are both served ' +
       'as `application/octet-stream`, because sniffing a type from bytes is how a resolver serves ' +
       'attacker-chosen content as script.',
+    paths:
+      'A `paths` vector is a published tree, a request path, and the file that must answer it. ' +
+      '`files` is the tree: each entry is a path and its content, and a manifest is a file like ' +
+      'any other, at `.vayu/manifest.json`. `expect.status` is the status the answer carries and ' +
+      '`expect.path` is the tree-relative path of the file that answered, or null when no file ' +
+      "did. The order a resolver tries is: the path itself if it is a file; then the manifest's " +
+      "`index` if one is declared and it is in the tree, then `index.html`; then the manifest's " +
+      '`notFound` with 404, then its `fallback` with 200, and otherwise a plain 404. A directory ' +
+      'path is one written with a trailing slash or without: the two must answer alike, and the ' +
+      "manifest's index answers both. A declared file that is not in the tree is discarded rather " +
+      'than reported, so the next candidate answers instead.',
     availability:
       'A `pins` vector is a CID, how many peers were asked, the observations that were made, how ' +
       'long an observation counts for, and the instant to read the report at. `expect.answered` is ' +
@@ -164,6 +180,7 @@ const artifact = {
   pins,
   scan,
   mime,
+  paths,
 };
 
 mkdirSync(dirname(OUT), { recursive: true });
@@ -172,6 +189,6 @@ process.stdout.write(
   `wrote ${vectors.length} record, ${convergence.length} convergence, ${resolution.length} ` +
     `resolution, ${replication.length} replication, ${equivocation.length} equivocation, ` +
     `${pow.length} proof-of-work, ${blockExchange.length} block-exchange, ${release.length} ` +
-    `release, ${pins.length} availability, ${scan.length} scan and ${mime.length} mime vectors ` +
-    `to ${OUT}\n`,
+    `release, ${pins.length} availability, ${scan.length} scan, ${mime.length} mime and ` +
+    `${paths.length} paths vectors to ${OUT}\n`,
 );
