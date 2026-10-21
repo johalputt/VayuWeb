@@ -73,6 +73,31 @@ mode-setting is now skipped where there is no mode, the directory handling with 
 startup banner stops claiming "mode 0600" of a pipe that has no mode. The token check is what
 actually keeps the control API closed, and it does not depend on a filesystem mode.
 
+### Added — a check that decides COST.md's no-payment rule instead of trusting it
+
+**"No code path in any implementation accepts, records, transfers or requires a payment" is
+COST.md section 7 item 1, and Article 7 of the charter says the same thing — "No Token, No
+Treasury, No Protocol Fee." Both were prose.** Nothing decided them, so a payment integration
+could have been added to either implementation in a commit that changed no rule and broke no
+test, and the corpus would still have said the project takes no money. A guarantee nobody checks
+is a preference.
+
+The new checker decides the two things a payment cannot arrive without: **a package**, which is
+how every provider ships, scanned in the dependency set of both implementations including the
+lock files where a transitive arrival is written down; and **a provider's API**, scanned in the
+source of both.
+
+The vocabulary is deliberately narrow, because a greedy one would fail on the project's own
+words. This repository says "payment" and "price" constantly and legitimately — the
+proof-of-work's over-payment is a payment in *computation*, which is exactly what Article 7.3
+requires — and the namespace annex contains TLDs called `paddle`, `checkout`, `invoice` and
+`treasury`. So the scan matches providers and provider APIs, the things that cannot be innocent,
+and not the vocabulary of the subject.
+
+The check says what it does not decide: a determined author writes their own payment code and
+calls it something else. It catches drift and accident, which is the honest failure mode, and
+the workflow that runs it says so in its own output.
+
 ### Added — the client reports the actual storage overhead of a published site
 
 **COST.md section 7 item 3 asks for it and nothing did it: "The client reports the actual storage

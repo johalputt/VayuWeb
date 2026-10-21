@@ -158,6 +158,25 @@ jobs:
         # by editing one side, which would be an implementer deciding what Article 9 reserves.
         run: python3 scripts/check-charter-consistency.py
 
+  # Article 7: "No Token, No Treasury, No Protocol Fee." COST.md section 7 item 1 says the same
+  # thing of the code: "No code path in any implementation accepts, records, transfers or requires
+  # a payment." Both were prose, and nothing decided them -- a payment integration could have
+  # arrived in a commit that changed no rule and broke no test, with the corpus still saying the
+  # project takes no money.
+  #
+  # The check decides what a payment cannot arrive without: a package, or a provider's API. It
+  # cannot decide the absence of a payment written from scratch under another name, and it says
+  # so in its own output.
+  no-payment:
+    name: no payment
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - name: No implementation accepts, records, transfers or requires a payment
+        run: python3 scripts/check-no-payment.py
+
   # Article 35.1 incorporates the Namespace Annex by reference and Article 2.31 forbids fetching
   # the valid set at run time, so every implementation carries a copy — and a copy can drift. A
   # copy wrong by one entry accepts names other implementations reject, which is a namespace fork
@@ -181,7 +200,7 @@ jobs:
     # One required status check instead of one per job. Branch protection points here, so
     # adding or renaming a job above does not mean editing repository settings — and a
     # skipped or cancelled dependency cannot pass for success.
-    needs: [no-privileged-writer, licensing, citations, self-consistency, namespace-annex]
+    needs: [no-privileged-writer, licensing, citations, self-consistency, no-payment, namespace-annex]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
