@@ -26,7 +26,13 @@ composition is specified rather than left to the reader.
 The key words MUST, MUST NOT, SHALL, SHALL NOT, SHOULD, SHOULD NOT and MAY are to be interpreted
 as described in RFC 2119.
 
-**Status:** Draft — not yet implemented. Proposed formally by [VWIP-0001](VWIP-0001.md).
+**Status:** Draft, partially implemented. Section 3.1's single choke point is implemented in
+`registry/src/egress.ts` and pinned by `scripts/check-single-choke-point.py`; section 3.2's
+destination refusal is in the browsing proxy; section 7's no-secrets-in-errors test is in both
+implementations' test suites; section 8's prohibition on telemetry is met by the absence of any.
+**Section 3.3's fail-closed behaviour is not implemented**, because the anonymising transport it
+depends on does not exist yet — it is Phase 4, and the guard refuses rather than pretending.
+Proposed formally by [VWIP-0001](VWIP-0001.md).
 
 ## 1. The adversary
 
@@ -332,7 +338,11 @@ an implementation puts into an error rather than of what it sends.
    boundaries where the implementation holds them. Both forms a secret can take are searched, as
    text and as bytes.
 6. **The single-choke-point test.** A build-time check that no code outside `egress` constructs a
-   socket.
+   socket. `scripts/check-single-choke-point.py` is that check, and it is in the Quality
+   workflow's `choke-point` job. It also requires the choke point to exist: a check that only
+   forbade sockets would be satisfied by a tree that opened none, which is a different claim.
+   The client has no outbound socket at all yet — the transport is Phase 4 — so its half of the
+   rule is the place one will have to be written, not a place that has one.
 7. **The no-logging test.** Grep the built binary's write paths; assert no resolution data reaches
    durable storage under any verbosity setting.
 

@@ -36,7 +36,8 @@ import { MANIFEST_PATH, RESOLVE_ERRORS, resolveName, type ResolverPorts } from '
 import { ResolutionCache } from './cache.ts';
 import { serveControl, serveProxy } from './serve.ts';
 import { drivePeer, SWARM_LIMITS, type PeerOutcome } from './swarm.ts';
-import { createConnection, createServer, type Server, type Socket } from 'node:net';
+import { createServer, type Server, type Socket } from 'node:net';
+import { dial as egressDial, type Mode } from './egress.ts';
 import { contentCacheKey, sourceValueOf, type ContentPort, type IpnsPort } from './proxy.ts';
 import { importSite, storageOverhead, type SiteFile } from './unixfs.ts';
 import { cidBytes, decodeCid } from './content.ts';
@@ -57,6 +58,17 @@ import {
   report,
   summarise,
 } from './pins.ts';
+
+/**
+ * The mode this resolver runs in.
+ *
+ * `clearnet`, because Private Mode needs the anonymising transport, and the transport is Phase 4.
+ * It is a named constant rather than a literal in each place that needs it, so that the control
+ * API's `status` and the egress guard cannot disagree about which mode this process is in — a
+ * resolver that reported one mode and dialled under another would be the exact failure the
+ * guard exists to prevent.
+ */
+const RESOLVER_MODE: Mode = 'clearnet';
 
 const toHex = (bytes: Uint8Array): string =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
@@ -1709,11 +1721,11 @@ async function cmdSync(args: Args): Promise<number> {
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       throw new UsageError(`--connect ${target} is not host:port`);
     }
-    const socket = await new Promise<Socket>((resolve, reject) => {
-      const dialled = createConnection({ host, port });
-      dialled.once('connect', () => resolve(dialled));
-      dialled.once('error', reject);
-    });
+    // The one place in this implementation that opens an outbound socket. PRIVACY.md 3.1: every
+    // outbound byte passes through one guarded transport constructor, so a later author cannot
+    // open a socket without meeting the guard. `scripts/check-single-choke-point.py` fails the
+    // build if anything else tries.
+    const socket = await egressDial('peer', { host, port }, RESOLVER_MODE);
     out(`connected to ${host}:${port} — interrupt to stop`);
     drive(socket, 'peer');
   }
@@ -1831,7 +1843,7 @@ async function cmdServe(args: Args): Promise<number> {
     token: token.current,
     ports: {
       status: () => ({
-        mode: 'clearnet',
+        mode: RESOLVER_MODE,
         uptime: Math.floor(Date.now() / 1000) - started,
         // Only what is actually bound. Reporting a proxy address for a proxy that was not
         // bound would be the same overstatement one field over.

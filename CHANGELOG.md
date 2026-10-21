@@ -73,6 +73,42 @@ mode-setting is now skipped where there is no mode, the directory handling with 
 startup banner stops claiming "mode 0600" of a pipe that has no mode. The token check is what
 actually keeps the control API closed, and it does not depend on a filesystem mode.
 
+### Added — the one place a socket is opened, and the check that says there is one
+
+**PRIVACY.md section 3.1 requires every outbound byte to pass through one guarded transport
+constructor, and section 10 item 6 asks for the build-time check that says so. Neither half
+existed.** There was no `egress` module in either implementation, and the registry's one outbound
+socket — the `sync --connect` peer connection — was opened inline in the command that needed it,
+which is exactly the shape the specification is written against.
+
+`registry/src/egress.ts` is now that place. The guard is the mode: in Private Mode it refuses,
+because PRIVACY.md 3.3 forbids a fallback, a queue, a prompt and a degradation, and the
+anonymising transport does not exist yet — it is Phase 4. A build with no transport refuses every
+outbound byte rather than opening a socket and hoping nobody was relying on it. The mode is a
+parameter of the function rather than a constant read from a global, and it is now the one
+constant the control API's `status` reports too, so the resolver cannot report one mode and dial
+under another.
+
+The refusal is observable rather than promised: the test counts the connections a listener
+accepted and asserts it accepted none, because a refusal that opened the socket and then closed
+it would reject the promise and leak the connection anyway.
+
+`scripts/check-single-choke-point.py` is the check. It requires the choke point to exist and to
+be where the socket is opened — a check that only forbade sockets would be satisfied by a tree
+that opened none — and it fails on any other call site in the shipping source of either
+implementation. It is accident and drift detection, not an enforcement of intent: an author who
+aliases `createConnection` to something else and dials through the alias is not caught, and the
+script says so in its own words. What it does stop is the failure PRIVACY.md 3.1 names: a new
+call site, written by someone who did not know the guard existed, that a check turns into a build
+failure.
+
+The rules are exact call forms, and the two that needed care are stated in the script. A method
+named `fetch` on a collaborator and a function called `prefetch` are not the global `fetch`, and
+the first version of this idea would have failed on both.
+
+The check was proved able to fail twice: a new `createConnection` call injected into the command
+that needed it turned it red, and so did removing the choke point itself.
+
 ### Fixed — the test that said no error carries a secret never had a secret in it
 
 **PRIVACY.md section 7 ends with a requirement, not a wish: "The implementation MUST carry a test

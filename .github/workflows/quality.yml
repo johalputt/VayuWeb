@@ -83,6 +83,22 @@ jobs:
           python3 scripts/check-deadcode.py --self-test
           python3 scripts/check-deadcode.py
 
+  choke-point:
+    name: one choke point for sockets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with: { persist-credentials: false }
+      - name: Nothing opens a socket except the guarded transport constructor
+        # PRIVACY.md 3.1 requires every outbound byte to pass through one guarded constructor,
+        # and section 10 item 6 asks for the build-time check that says so. The self-test runs
+        # first: a scanner with no test of its own is trusted rather than tested, and this one
+        # has to tell a method named `fetch` from the global function.
+        run: |
+          python3 scripts/check-single-choke-point.py --self-test
+          python3 scripts/check-single-choke-point.py
+
   reproducible-build:
     name: reproducible build
     runs-on: ubuntu-latest
@@ -121,7 +137,7 @@ jobs:
 
   quality-pass:
     name: quality-pass
-    needs: [format, hygiene, deadcode, reproducible-build]
+    needs: [format, hygiene, deadcode, choke-point, reproducible-build]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
