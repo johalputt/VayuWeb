@@ -73,6 +73,42 @@ mode-setting is now skipped where there is no mode, the directory handling with 
 startup banner stops claiming "mode 0600" of a pipe that has no mode. The token check is what
 actually keeps the control API closed, and it does not depend on a filesystem mode.
 
+### Fixed — the test that said no error carries a secret never had a secret in it
+
+**PRIVACY.md section 7 ends with a requirement, not a wish: "The implementation MUST carry a test
+that formats every error type with secret material present and asserts none of it appears in the
+output."** The client carried a test named `an error never carries the secret` — and it could not
+fail. It built two error values out of harmless strings and asserted that those strings were
+present in the messages. No secret was ever in scope, so the test said nothing about the property
+it was named for, and it was the only evidence the crate offered for PRIVACY.md 7.3's "never
+placed in ... an error message". A test that cannot fail is a check that reports nothing.
+
+**The secret is in scope now, in both implementations.** The client's boundaries are the identity
+seed, the platform keystore and the key pair that holds the seed; the registry's are the control
+API's token and the content cache's key. Each test hands the secret to the code that holds it,
+drives the failure, and searches the rendered error for it.
+
+**The search covers both forms a secret can take.** A leak of raw bytes does not print as text —
+`{:?}` on a byte slice prints a list of numbers — and the first version of the client's test
+searched only for the text. It would have missed the likelier leak of all: a mutation that made
+the key pair print its seed passed it, and the same mutation in the form the test now searches
+for fails it.
+
+Every one of these was proved able to fail. The control API was mutated to echo the token it
+refused, the keystore refusal was mutated to carry the secret, and the key pair's `Debug` was
+mutated to print the seed's bytes; each turned the corresponding test red, and each was reverted.
+
+The registry already had a test that the control API does not disclose a secret it was handed,
+and it still does: that one is about the cache's key in the configuration dump, and it speaks over
+the socket, so it does not run on Windows. The new one is at the handler, so it runs everywhere,
+and it adds the half that had no test at all — the **token**, checked across every route the
+control API answers rather than across one of them.
+
+PRIVACY.md section 7 and section 10 now say what the requirement means in practice, and they no
+longer claim that all five of section 10's items live in the conformance suite: the zero-egress
+test is the browser acceptance criterion, the uniform-request test needs two machines, and this
+one is a property of what an implementation puts into an error rather than of what it sends.
+
 ### Added — a check that decides COST.md's no-payment rule instead of trusting it
 
 **"No code path in any implementation accepts, records, transfers or requires a payment" is

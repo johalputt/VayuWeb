@@ -262,7 +262,17 @@ recurred in the same file after that lesson, which is the argument for the guard
 the correction.
 
 An error message that includes a key is a disclosure. The implementation MUST carry a test that
-formats every error type with secret material present and asserts none of it appears in the output.
+formats every error type with secret material present and asserts none of it appears in the
+output. **"With secret material present" is the part that decides whether the test is worth
+anything.** An error type that is handed a secret while it is being made, and a test that then
+searches the rendered error for it. A test that formats an error built from harmless strings
+asserts nothing, because the error would print them — and it passes whether the code is careful
+or not, which is the failure this project has been bitten by more than any other: a check that
+cannot fail is a check that reports nothing.
+
+The search covers both forms a secret can take. A leak of raw bytes does not print as text —
+`{:?}` on a byte slice prints a list of numbers — so a test that searched only for the text
+would miss the likelier leak of all.
 
 ## 8. The prohibition on telemetry
 
@@ -293,8 +303,11 @@ because it is trusted at the moment when being wrong costs the most.
 
 ## 10. Conformance
 
-Each of these is an executable test in the conformance suite, and each asserts on **observed
-behaviour**, not on configuration:
+Each of these is an executable test, and each asserts on what the implementation **does**, not on
+what a configuration file says. They are not all in the conformance suite, because not all of
+them are about the wire: the zero-egress test is the browser acceptance criterion, the
+uniform-request test needs two machines, and the no-secrets-in-errors test is a property of what
+an implementation puts into an error rather than of what it sends.
 
 1. **The zero-egress test.** Resolve one name and load one page under a socket monitor. Assert the
    observed connection set contains only VayuWeb network peers. Any other socket fails the build.
@@ -314,7 +327,10 @@ behaviour**, not on configuration:
 4. **The uniform-request test.** Two installs on different machines fetch the same page; assert
    byte-identical outbound request headers.
 5. **The no-secrets-in-errors test.** Format every error type with secrets present; assert none
-   appear.
+   appear. The secrets are the ones section 7 names — the Ed25519 private key, the content-cache
+   key and the control-API token — and they must be in scope while the error is made, at the
+   boundaries where the implementation holds them. Both forms a secret can take are searched, as
+   text and as bytes.
 6. **The single-choke-point test.** A build-time check that no code outside `egress` constructs a
    socket.
 7. **The no-logging test.** Grep the built binary's write paths; assert no resolution data reaches

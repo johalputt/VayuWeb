@@ -358,16 +358,42 @@ mod tests {
 
     #[test]
     fn an_error_never_carries_the_secret() {
-        let detail = StoreError::KeystoreRefused {
-            detail: "keyring locked".into(),
-        }
-        .to_string();
-        assert!(detail.contains("keyring locked"));
-        let refusal = StoreError::NoKeystoreAndNoFallback {
-            what: "private key",
-        }
-        .to_string();
-        assert!(refusal.contains("refusal rather than a downgrade"));
+        // PRIVACY.md 7: "The implementation MUST carry a test that formats every error type with
+        // secret material present and asserts none of it appears in the output."
+        //
+        // This test used to build two error values out of harmless strings and assert that those
+        // strings were present in the messages. No secret was ever in scope, so it could not fail
+        // for the reason its name gives — and it was the only evidence this crate offered for
+        // PRIVACY.md 7.3's "never placed in ... an error message".
+        //
+        // The secret is in scope now. `store` is handed one, the keystore refuses, and the error
+        // that comes back is the only thing that could carry it out.
+        let secret = secret_of(b"correct horse battery staple");
+        let error = store(
+            &FakeKeystore::refusing(),
+            "token",
+            &secret,
+            Sensitivity::TokenFallback,
+            |_| Err("the fallback file could not be written".into()),
+        )
+        .expect_err("a refusing keystore is an error");
+
+        let rendered = format!("{error} {error:?}");
+        // Both forms a secret can take. A leak of raw bytes does not print as text: `{:?}` on a
+        // byte slice prints a list of numbers instead, and a test that searched only for the text
+        // would miss the likelier leak of all.
+        let as_text = String::from_utf8_lossy(b"correct horse battery staple");
+        let as_numbers = format!("{:?}", b"correct horse battery staple");
+        assert!(
+            !rendered.contains(as_text.as_ref()) && !rendered.contains(&as_numbers),
+            "the secret reached the error: {rendered}"
+        );
+        // And the error is still worth reading: the platform's reason is what tells an operator
+        // what to unlock. A refusal that says nothing is a refusal that cannot be acted on.
+        assert!(
+            rendered.contains("keyring locked"),
+            "the error still carries the platform's reason: {rendered}"
+        );
     }
 
     #[test]
