@@ -145,6 +145,17 @@ export interface ControlPorts {
 }
 
 /**
+ * Is this address a Windows named pipe?
+ *
+ * One definition, because two files need the answer and two definitions of it is how a guard
+ * and the code it guards come to disagree. A named pipe is not a filesystem path: it has no mode,
+ * it is not created by `bind`, and `chmod` on it fails with EINVAL rather than doing anything.
+ */
+export function isWindowsNamedPipe(address: string): boolean {
+  return address.startsWith('\\\\.\\pipe\\') || address.startsWith('\\\\?\\pipe\\');
+}
+
+/**
  * Refuse anything that is not a Unix domain socket or a Windows named pipe.
  *
  * A guard at the boundary rather than a sentence in a document, because the sentence was already
@@ -165,7 +176,7 @@ export function assertSocketAddress(address: string): void {
         `never on TCP: refusing ${JSON.stringify(address)}. LOCAL-SURFACE.md section 1.`,
     );
   }
-  const isPipe = address.startsWith('\\\\.\\pipe\\') || address.startsWith('\\\\?\\pipe\\');
+  const isPipe = isWindowsNamedPipe(address);
   if (!isPipe && !address.startsWith('/') && !address.startsWith('./')) {
     throw new Error(
       `the control API socket path must be absolute or a Windows named pipe: ` +

@@ -65,6 +65,7 @@ import {
   TOKEN_BYTES,
   assertSocketAddress,
   handleControlRequest,
+  isWindowsNamedPipe,
   type ControlPorts,
   type ControlRequest,
   type ControlResponse,
@@ -667,16 +668,27 @@ export function serveControl(options: ControlServerOptions): Promise<Listener> {
     );
   }
 
-  const directory = dirname(options.path);
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  // A pre-existing directory keeps its mode from mkdir's point of view, so it is set explicitly.
-  chmodSync(directory, 0o700);
-  // A stale socket from a crashed run would make bind fail. Removing it is safe because the
-  // directory is now known to be 0700 and owned by this user.
-  try {
-    if (statSync(options.path)) rmSync(options.path, { force: true });
-  } catch {
-    // Nothing there, which is the ordinary case.
+  const namedPipe = isWindowsNamedPipe(options.path);
+  if (!namedPipe) {
+    // The directory is created 0700 and the socket is 0600, because a socket anyone on the
+    // machine can connect to is a control API anyone on the machine has, and a 0600 socket inside
+    // a world-writable directory can be replaced by whoever owns the directory.
+    //
+    // On Windows the address is a named pipe, which is not a filesystem path: it has no mode, it
+    // is not created by the bind, and `chmod` on it fails with EINVAL rather than doing anything
+    // useful. The pipe's access is governed by its ACL, and the token check is the gate that does
+    // not depend on a mode -- a caller with no token gets 401 whatever the filesystem says.
+    const directory = dirname(options.path);
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    // A pre-existing directory keeps its mode from mkdir's point of view, so it is set explicitly.
+    chmodSync(directory, 0o700);
+    // A stale socket from a crashed run would make bind fail. Removing it is safe because the
+    // directory is now known to be 0700 and owned by this user.
+    try {
+      if (statSync(options.path)) rmSync(options.path, { force: true });
+    } catch {
+      // Nothing there, which is the ordinary case.
+    }
   }
 
   const server = withConnectionCap(
@@ -727,8 +739,8 @@ export function serveControl(options: ControlServerOptions): Promise<Listener> {
     server.listen(options.path, () => {
       // After bind, not before: the file does not exist until listen succeeds. The window between
       // the two is why the directory is 0700 — it is what makes the gap unreachable rather than
-      // merely short.
-      chmodSync(options.path, 0o600);
+      // merely short. A named pipe has no mode to set, and asking for one is an error.
+      if (!namedPipe) chmodSync(options.path, 0o600);
       resolve({
         address: options.path,
         close: () =>

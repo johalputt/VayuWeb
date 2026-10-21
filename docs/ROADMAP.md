@@ -9,11 +9,14 @@ Understating progress is not the safe direction: it is as wrong as overstating i
 a reader to discount the rest of the page.
 
 **Phase 3's acceptance test now passes on one machine**, which is the first time any of them has.
-The rest are still held open by conditions a single sandbox cannot honestly meet — Phase 2 wants
-independent peers, Phase 4 wants a second machine that was never told where the content came
-from, Phase 5 wants a person who has never opened a terminal, and Phase 6 wants an implementation
-written by people with no connection to this one. Those are not near misses to be argued around;
-they are the point of writing an acceptance test that an outsider can check.
+The browser criterion now runs on Windows as well as on POSIX — it could not start on Windows at
+all, and a criterion that cannot run on the machine of the person who wrote it is a criterion
+that quietly stops being run. The rest are still held open by conditions a single sandbox cannot
+honestly meet — Phase 2 wants independent peers, Phase 4 wants a second machine that was never
+told where the content came from, Phase 5 wants a person who has never opened a terminal, and
+Phase 6 wants an implementation written by people with no connection to this one. Those are not
+near misses to be argued around; they are the point of writing an acceptance test that an outsider
+can check.
 
 This roadmap is organised by phase, not by calendar. Dates on a volunteer protocol project are a
 form of dishonesty: they are set by wishful thinking, missed, and then quietly deleted. Phases
@@ -34,7 +37,7 @@ meet for itself, the reason is stated there rather than hidden behind a percenta
 | **0** Charter and specification | Every document drafted; the improvement process, the threat model and the namespace annex are settled. Thirteen conformance suites cover the wire-visible rules. Thirteen mechanical checkers refuse the drift classes that produced most past defects | **Not met, and not meetable here.** Article 44.6 wants a competent implementer reading the specifications alone. The party that wrote them cannot be that reader |
 | **1** Registry core | **Effectively complete.** The log, the record schema, deterministic CBOR, Ed25519, Argon2id, all six operations with their validation ordering, and the lifecycle state machine including grace and quarantine. Sixteen commands drive it | Half met: the tool does everything the row asks. The second tool written from the specification does not exist |
 | **2** Peer replication | **Mostly done.** Transport-agnostic state machine, the reference binding, discovery topic and framing, and a `sync` verb. Two OS processes over a real socket converge, partition and heal. Equivocation is detected on both sides of a real fork and now *reported to the operator* rather than only written to a file | Partly met. "Independent peers" — two processes are that. Two machines, two network stacks and two genuinely independent clocks are not yet exercised |
-| **3** Resolution proxy | **Complete on one machine.** The browsing proxy, the fifteen-endpoint control API on a 0600 Unix socket, the resolution cache with bounded and now *ceilinged* sizes, the manifest path mapping, and the security header profile. Thirty-seven live checks plus an executable browser criterion | **Met on one machine** — the first acceptance test here to pass at all |
+| **3** Resolution proxy | **Complete on one machine.** The browsing proxy, the fifteen-endpoint control API on a 0600 Unix socket, the resolution cache with bounded and now *ceilinged* sizes, the manifest path mapping, and the security header profile. Thirty-seven live checks plus an executable browser criterion, which now runs on Windows and on POSIX, and which asks the browser whether a module script actually ran | **Met on one machine** — the first acceptance test here to pass at all |
 | **4** Hosting | **Started, and the publish path is real.** Fixed import parameters pinned against published IPFS reference CIDs, the full tree-to-root-CID encoder, and a publish walk whose exclusion rules are enforced rather than described | Not met. It wants a second machine that was never told where the content came from |
 | **5** Desktop client | Scaffolded in Rust | Not met. It wants a person who has never opened a terminal |
 | **6** Independent implementations | Nothing, by design | **Out of reach from inside this repository.** It requires an implementation by parties with no common employer or funder. It cannot be self-delivered, and will never be reported as done here |

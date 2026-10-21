@@ -36,6 +36,43 @@ The client now checks every header-enforced rule against the headers it actually
 compares its policy against the canonical block in CONTENT-SECURITY.md, which its own comment
 claimed byte-identity with and nothing had checked.
 
+### Fixed — the browser acceptance criterion runs on Windows, and now exercises the content types a real site uses
+
+**The criterion that proves a reader's browser gets a real page had never run on the machine of
+the person who wrote it.** It could not even start: the importer's module specifier was a bare
+path, which the ESM loader reads as a scheme named `c` and refuses; the resolver's control API
+was handed a filesystem path where Windows needs a named pipe; and the whole socket-observation
+machinery read `/proc`, so a harness that could start could not see what it was measuring. The
+script now runs on Windows — 24 of 24 checks, including the DNS-sampling and outbound-connection
+checks, which read `netstat -ano` and CIM instead of `/proc`.
+
+The Windows sample is coarser — half a second against twenty milliseconds, because each sample
+spawns a process — and the script says so rather than claiming a guarantee it does not have. The
+load-bearing evidence that no name fell through to DNS is unchanged and stronger: a name outside
+the ratified namespace is refused while a VayuWeb name renders, which no configuration that quietly
+resolved names could produce.
+
+**And the criterion now exercises the content types a real site uses.** The browsing proxy once
+answered a content type for nine extensions and served everything else as
+`application/octet-stream` under `X-Content-Type-Options: nosniff` — and a browser refuses a
+module script whose type it does not recognise, so every module script on every site was served
+as bytes and silently did nothing. The criterion passed anyway, because it exercised exactly the
+three types the nine covered: an HTML document, a stylesheet and a PNG. It now loads a module
+script and asks the browser whether it ran, and it asserts the type of a font, a module script,
+an icon, a JSON file, a WebAssembly module and a video. Taking the two entries out of the
+table was enough to make three of those checks fail, which is the only evidence that a check can
+fail at all.
+
+### Fixed — the resolver's control API starts on a Windows named pipe
+
+The control API is a Unix domain socket on POSIX and a named pipe on Windows, and the guard said
+so. The code behind the guard did not: it created a `0700` directory and set the socket's mode to
+`0600` — both of which are POSIX properties a named pipe does not have — so a resolver asked for a
+named pipe died with `EINVAL: invalid argument, chmod '\\.\pipe'` before it served anything. The
+mode-setting is now skipped where there is no mode, the directory handling with it, and the
+startup banner stops claiming "mode 0600" of a pipe that has no mode. The token check is what
+actually keeps the control API closed, and it does not depend on a filesystem mode.
+
 ### Fixed — the client's preview surface now sends the whole security header set
 
 **The two serving surfaces of this project sent different response headers.** The proxy sent all

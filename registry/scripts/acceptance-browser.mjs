@@ -36,9 +36,18 @@
  *
  * Chromium is found via PLAYWRIGHT_BROWSERS_PATH or CHROMIUM_PATH. Nothing is written outside a
  * temporary directory, and every process it starts is stopped before it exits.
+ *
+ * **It runs on Windows as well as on POSIX, which it did not.** Three things stopped it on
+ * Windows, and each was a thing the script did rather than the machine: the importer's module
+ * specifier was a bare path, which the ESM loader reads as a scheme named `c`; the control API
+ * was given a filesystem path where Windows needs a named pipe; and the whole observation
+ * machinery read `/proc`. The first two meant the harness could not start, and the third meant
+ * that a harness which could start could not see what it was measuring. A criterion that cannot
+ * run on the machine of the person who wrote it is a criterion that quietly stops being run, and
+ * the content-type defect in this repository's browsing proxy survived for exactly that long.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdtempSync,
@@ -115,6 +124,127 @@ function socketInodes(pid) {
   return { inodes: owned, observed: true };
 }
 
+/**
+ * The Windows branch of the observation machinery.
+ *
+ * `/proc` does not exist on Windows, so every measurement above reads something else:
+ *
+ * - `netstat -ano` is the socket table, and its last column is the OWNING PROCESS ID. That is
+ *   the per-process join the inode list provides on Linux, and it comes for free: the Windows
+ *   table is already per-process where the Linux one is per-network-namespace. It also shows the
+ *   REMOTE end of a connected socket — the one a DNS query uses — which is what makes the
+ *   name-resolution check possible at all.
+ * - The process tree comes from CIM, because nothing cheaper carries the parent PID: `tasklist`
+ *   does not, and neither does `Get-Process` before PowerShell 7.
+ *
+ * **The Windows sample is coarser, and says so.** The tree costs about a second to read, and the
+ * socket table costs a process spawn, so the tree is refreshed every few seconds and the sockets
+ * every half second. A DNS query that opens and closes inside that window is invisible here, and
+ * the check that says so says so here too rather than claiming a guarantee it does not have.
+ * The load-bearing evidence that no name fell through to DNS is still the refusal check: a name
+ * outside the ratified namespace is refused while a VayuWeb name renders, which no configuration
+ * that quietly resolved names could produce.
+ */
+const IS_WINDOWS = process.platform === 'win32';
+
+function commandOutput(command, args) {
+  const result = spawnSync(command, args, { encoding: 'utf8', windowsHide: true });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(
+      `${command} exited ${result.status}: ${String(result.stderr ?? '')
+        .trim()
+        .slice(0, 200)}`,
+    );
+  }
+  return result.stdout;
+}
+
+/** `host:port`, where the host may be bracketed (`[::1]:7654`) or a wildcard (`*:*`). */
+function splitEndpoint(endpoint) {
+  const bracketed = /^\[(.+)\]:(\d+)$/.exec(endpoint);
+  if (bracketed !== null) return { host: bracketed[1], port: Number(bracketed[2]) };
+  const colon = endpoint.lastIndexOf(':');
+  if (colon < 0) return { host: endpoint, port: 0 };
+  return { host: endpoint.slice(0, colon), port: Number(endpoint.slice(colon + 1)) };
+}
+
+function windowsIsLoopback(host) {
+  return (
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host === '0.0.0.0' ||
+    host === '::' ||
+    host === '*' ||
+    /^127\./.test(host)
+  );
+}
+
+/** The socket table, as `{ proto, local, remote, state, pid }` rows. */
+function windowsSocketRows() {
+  const text = commandOutput('netstat', ['-ano']);
+  const rows = [];
+  for (const line of text.split(/\r?\n/)) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 4) continue;
+    const proto = parts[0].toUpperCase();
+    if (proto !== 'TCP' && proto !== 'UDP') continue;
+    const pid = proto === 'TCP' ? parts[4] : parts[3];
+    if (!/^\d+$/.test(pid ?? '')) continue;
+    rows.push({
+      proto,
+      local: parts[1],
+      remote: parts[2],
+      state: proto === 'TCP' ? (parts[3] ?? '') : '',
+      pid,
+    });
+  }
+  return rows;
+}
+
+/**
+ * The process table, as `{ pid, ppid, name, commandLine }`.
+ *
+ * The command line is base64'd because it can contain anything at all — including a `|` — and
+ * because PowerShell's output encoding is the console's, which is not UTF-8 on every machine.
+ * Base64 is ASCII, so the line survives both problems.
+ */
+let windowsProcessCache = { at: 0, processes: [] };
+
+function windowsProcesses(maxAgeMs = 4000) {
+  const now = Date.now();
+  if (now - windowsProcessCache.at < maxAgeMs && windowsProcessCache.processes.length > 0) {
+    return windowsProcessCache.processes;
+  }
+  const script = [
+    '[Console]::OutputEncoding = [Text.Encoding]::UTF8',
+    'Get-CimInstance Win32_Process | ForEach-Object {',
+    '  $c = $_.CommandLine',
+    '  if ($null -eq $c) { $c = "" }',
+    '  $b = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($c))',
+    '  "$($_.ProcessId)|$($_.ParentProcessId)|$($_.Name)|$b"',
+    '}',
+  ].join('; ');
+  const text = commandOutput('powershell', ['-NoProfile', '-NonInteractive', '-Command', script]);
+  const processes = [];
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed === '') continue;
+    const parts = trimmed.split('|');
+    if (parts.length < 4) continue;
+    const [pid, ppid, name, encoded] = parts;
+    if (!/^\d+$/.test(pid) || !/^\d+$/.test(ppid)) continue;
+    processes.push({
+      pid,
+      ppid,
+      name,
+      commandLine: Buffer.from(encoded, 'base64').toString('utf8'),
+    });
+  }
+  windowsProcessCache = { at: now, processes };
+  return processes;
+}
+
 const isLoopback = (hex) => hex === '0100007F' || /^0{31}1$/.test(hex) || /^0+$/.test(hex);
 
 /**
@@ -128,6 +258,29 @@ const isLoopback = (hex) => hex === '0100007F' || /^0{31}1$/.test(hex) || /^0+$/
  * which is the shape a leak would actually take.
  */
 function outboundPeers(pid) {
+  if (IS_WINDOWS) {
+    // The same statement as the Linux branch: the listeners are inbound, and an outbound
+    // connection to anywhere is the phone-home the Constitution forbids. A UDP row is not a
+    // connection here, exactly as on Linux, where only the TCP tables are read.
+    const peers = [];
+    let observed = true;
+    let rows;
+    try {
+      rows = windowsSocketRows();
+    } catch {
+      observed = false;
+    }
+    if (rows !== undefined) {
+      for (const row of rows) {
+        if (row.proto !== 'TCP' || row.pid !== String(pid)) continue;
+        if (row.state === 'LISTENING') continue;
+        const remote = splitEndpoint(row.remote);
+        if (windowsIsLoopback(remote.host)) continue;
+        peers.push(`${row.remote}:${row.state}`);
+      }
+    }
+    return { peers, observed };
+  }
   const { inodes: owned, observed } = socketInodes(pid);
   const peers = [];
   for (const table of ['tcp', 'tcp6']) {
@@ -159,6 +312,12 @@ function outboundPeers(pid) {
  */
 function browserProcessPid(port) {
   const marker = `--proxy-server=http://127.0.0.1:${port}`;
+  if (IS_WINDOWS) {
+    for (const process of windowsProcesses()) {
+      if (process.commandLine.includes(marker)) return process.pid;
+    }
+    return null;
+  }
   for (const entry of readdirSync('/proc')) {
     if (!/^\d+$/.test(entry)) continue;
     try {
@@ -173,6 +332,22 @@ function browserProcessPid(port) {
 
 /** Every process in `root`'s tree, including `root` itself. */
 function processTree(root) {
+  if (IS_WINDOWS) {
+    const children = new Map();
+    for (const process of windowsProcesses()) {
+      const list = children.get(process.ppid) ?? [];
+      list.push(process.pid);
+      children.set(process.ppid, list);
+    }
+    const tree = [];
+    const queue = [String(root)];
+    while (queue.length > 0) {
+      const pid = queue.shift();
+      tree.push(pid);
+      queue.push(...(children.get(pid) ?? []));
+    }
+    return tree;
+  }
   const children = new Map();
   for (const entry of readdirSync('/proc')) {
     if (!/^\d+$/.test(entry)) continue;
@@ -215,6 +390,31 @@ function processTree(root) {
  * that quietly resolved names could produce.
  */
 function resolutionSockets(pids) {
+  if (IS_WINDOWS) {
+    const seen = [];
+    let observed = 0;
+    let rows;
+    try {
+      rows = windowsSocketRows();
+    } catch {
+      rows = undefined;
+    }
+    if (rows === undefined) return { seen, observed };
+    const wanted = new Set(pids.map(String));
+    // Every process in the tree was looked at, in a table that was read successfully. The count
+    // is of observations, not of findings: zero findings across zero observations is the shape of
+    // a check that cannot fail, which is what this one was.
+    observed = wanted.size;
+    for (const row of rows) {
+      if (!wanted.has(row.pid)) continue;
+      observed += 1;
+      const remote = splitEndpoint(row.remote);
+      if (remote.port !== 53) continue;
+      if (windowsIsLoopback(remote.host)) continue; // A local stub is not clearnet.
+      seen.push(`${row.pid}:${row.remote}`);
+    }
+    return { seen, observed };
+  }
   const seen = [];
   let observed = 0;
   for (const pid of pids) {
@@ -265,6 +465,7 @@ const INDEX = `<!doctype html>
     <meta charset="utf-8" />
     <title>Atlas Observatory</title>
     <link rel="stylesheet" href="/assets/style.css" />
+    <script type="module" src="/assets/app.mjs"></script>
   </head>
   <body>
     <h1 id="headline">${HEADLINE}</h1>
@@ -284,6 +485,50 @@ h1 { color: #7ee787; }
 `;
 
 /**
+ * A module script, and the page that loads it.
+ *
+ * **The type of this file is the point.** The browsing proxy once answered a content type for
+ * nine extensions and served everything else as `application/octet-stream` under
+ * `X-Content-Type-Options: nosniff` — and a browser REFUSES a module script whose type it does
+ * not recognise, so the script never ran and the page rendered with no behaviour at all. The
+ * Phase 3 acceptance test passed anyway, because it exercised exactly the three types the nine
+ * covered: an HTML document, a stylesheet and a PNG.
+ *
+ * So the criterion now loads a module script and asks the browser whether it ran. A resolver that
+ * serves `.mjs` as bytes fails this check in the browser's own words, and the failure is
+ * "Failed to load module script" rather than a test's opinion.
+ */
+const MODULE = `document.documentElement.dataset.moduleRan = 'yes';
+`;
+
+/**
+ * The content types a real site uses and the nine-extension table did not have.
+ *
+ * These are the IANA types a browser expects, not the types the implementation happens to
+ * answer: the point of the check is that a wrong answer is caught, and a check that compares
+ * the implementation with itself catches nothing.
+ */
+const CONTENT_TYPES = [
+  { path: '/assets/app.mjs', type: 'text/javascript; charset=utf-8' },
+  { path: '/assets/font.woff2', type: 'font/woff2' },
+  { path: '/assets/icon.svg', type: 'image/svg+xml' },
+  { path: '/assets/data.json', type: 'application/json' },
+  { path: '/assets/module.wasm', type: 'application/wasm' },
+  { path: '/assets/clip.mp4', type: 'video/mp4' },
+];
+
+/** The bytes behind each of those assets. Their contents are never decoded — the check is the
+ * type the response carries, and a file that is not a real font is not the point. */
+const ASSET_BYTES = {
+  '/assets/app.mjs': Buffer.from(MODULE, 'utf8'),
+  '/assets/font.woff2': Buffer.from('wOF2 not a real font', 'utf8'),
+  '/assets/icon.svg': Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>', 'utf8'),
+  '/assets/data.json': Buffer.from('{"atlas":"observatory"}', 'utf8'),
+  '/assets/module.wasm': Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]),
+  '/assets/clip.mp4': Buffer.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]),
+};
+
+/**
  * A real PNG: an 8-byte signature, an IHDR for a 1x1 image, and an IEND. Every byte of it above
  * 0x7f is one the broken path would have doubled, and a browser refuses to decode it if any of them
  * is wrong — so `naturalWidth` is an assertion about the bytes, made by the same decoder a reader's
@@ -293,6 +538,22 @@ const PIXEL = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   'base64',
 );
+
+/**
+ * Where the resolver's control API listens.
+ *
+ * The control API is a Unix domain socket on POSIX and a named pipe on Windows, because Node's
+ * `net` server binds a Windows filesystem path as a NAMED PIPE, and a named pipe must live
+ * under `\\.\pipe\`. The resolver refuses a plain Windows path for exactly this reason — "the
+ * control API socket path must be absolute or a Windows named pipe" — and the refusal is right;
+ * the harness was the thing passing the wrong thing. A harness that cannot start is a criterion
+ * that never runs, and a criterion that never runs catches nothing.
+ */
+function controlSocketPath(dir) {
+  return process.platform === 'win32'
+    ? `\\\\.\\pipe\\vayuweb-acceptance-${process.pid}`
+    : join(dir, 'control.sock');
+}
 
 function cli(args, options = {}) {
   return new Promise((resolve) => {
@@ -367,6 +628,9 @@ try {
   writeFileSync(join(site, 'index.html'), INDEX);
   writeFileSync(join(site, 'assets', 'style.css'), STYLE);
   writeFileSync(join(site, 'assets', 'pixel.png'), PIXEL);
+  for (const [path, bytes] of Object.entries(ASSET_BYTES)) {
+    writeFileSync(join(site, ...path.split('/').slice(1)), bytes);
+  }
   // The manifest, and a 404 document for it to name. PUBLISHING.md 2.3 is a SHALL and names its
   // own symptom: "a site with client-side routing 404s on every deep link unless a fallback
   // exists". Published as an ordinary file inside the tree, so it is covered by the root CID and
@@ -377,13 +641,24 @@ try {
 
   // The root CID comes out of the same importer the resolver uses, so the name is registered
   // against the address the content actually has rather than one asserted alongside it.
-  const { importSite } = await import(join(REGISTRY, 'src', 'unixfs.ts'));
+  //
+  // The specifier is a file:// URL rather than a path. A bare absolute path is a valid ESM
+  // specifier on a POSIX system, where it resolves against the file: scheme, and this script ran
+  // there; on Windows the loader reads `C:\...` as a scheme named `c` and refuses the import
+  // with "Only URLs with a scheme in: file, data, and node are supported". So the criterion
+  // could not start at all on the machine of the person who wrote it, which is the surest way
+  // for a criterion to stop being run.
+  const { importSite } = await import(pathToFileURL(join(REGISTRY, 'src', 'unixfs.ts')).href);
   const root = importSite([
     { path: '.vayu/manifest.json', content: Buffer.from(MANIFEST) },
     { path: '404.html', content: Buffer.from(NOT_FOUND) },
     { path: 'index.html', content: Buffer.from(INDEX) },
     { path: 'assets/style.css', content: Buffer.from(STYLE) },
     { path: 'assets/pixel.png', content: PIXEL },
+    ...Object.entries(ASSET_BYTES).map(([path, bytes]) => ({
+      path: path.slice(1),
+      content: bytes,
+    })),
   ]).root;
 
   const key = join(dir, 'key');
@@ -430,7 +705,7 @@ try {
       '--port',
       String(PORT),
       '--socket',
-      join(dir, 'control.sock'),
+      controlSocketPath(dir),
       '--site',
       site,
       // A locally declared answer for one pointer, which is what a publisher checking the
@@ -483,11 +758,18 @@ try {
   // `sampledPids` counts what was actually looked at, not what was found. Zero findings across
   // zero observations is the shape of a check that cannot fail, which is what this one was.
   let sampledPids = 0;
-  const sampler = setInterval(() => {
-    const { seen, observed } = resolutionSockets(processTree(browserPid));
-    sampledPids += observed;
-    for (const socket of seen) dnsSeen.add(socket);
-  }, 20);
+  // The cadence is the platform's. On Linux the socket table is a file read and a process's fd
+  // table, so twenty milliseconds is cheap and the window is narrow. On Windows each sample
+  // spawns a process, so half a second is what the machine can afford -- a wider window, stated
+  // here rather than discovered later.
+  const sampler = setInterval(
+    () => {
+      const { seen, observed } = resolutionSockets(processTree(browserPid));
+      sampledPids += observed;
+      for (const socket of seen) dnsSeen.add(socket);
+    },
+    IS_WINDOWS ? 500 : 20,
+  );
 
   const page = await context.newPage();
   const response = await page.goto(`http://${NAME}/`, { waitUntil: 'load', timeout: 20_000 });
@@ -573,6 +855,39 @@ try {
   );
   check("the browser's own decoder accepted it", decoded === 1, `naturalWidth ${decoded}`);
 
+  // The module script, in the browser's own words. A browser refuses a module script whose
+  // content type it does not recognise, and says "Failed to load module script" — so this check
+  // is the one that would have caught the nine-extension content-type table, which served every
+  // module script as bytes and every one of them silently did nothing.
+  const moduleRan = await page.evaluate(() => document.documentElement.dataset.moduleRan ?? null);
+  check(
+    'a module script ran, which means it was served with a JavaScript type',
+    moduleRan === 'yes',
+    JSON.stringify(moduleRan),
+  );
+
+  // The content types themselves, one by one. These are the types a browser expects, and they
+  // are the ones the old nine-extension table got wrong: a font, a module script, an icon, a
+  // JSON file, a WebAssembly module and a video.
+  const servedTypes = await page.evaluate(
+    async (paths) => {
+      const out = {};
+      for (const path of paths) {
+        const r = await fetch(path);
+        out[path] = r.headers.get('content-type');
+      }
+      return out;
+    },
+    CONTENT_TYPES.map((entry) => entry.path),
+  );
+  for (const entry of CONTENT_TYPES) {
+    check(
+      `${entry.path} is served as ${entry.type}`,
+      servedTypes[entry.path] === entry.type,
+      String(servedTypes[entry.path]),
+    );
+  }
+
   const csp = response?.headers()['content-security-policy'] ?? '';
   check("the CSP reached the browser with default-src 'none'", csp.includes("default-src 'none'"));
   check('no request failed', failed.length === 0, JSON.stringify(failed));
@@ -609,7 +924,7 @@ try {
   check(
     'the resolver was still running when its sockets were counted',
     resolver.exitCode === null && outbound.observed,
-    `exitCode ${resolver.exitCode}, fd table ${outbound.observed ? 'readable' : 'UNREADABLE'}`,
+    `exitCode ${resolver.exitCode}, socket table ${outbound.observed ? 'readable' : 'UNREADABLE'}`,
   );
   check(
     'the resolver opened no outbound connection (Constitution Art. 14)',

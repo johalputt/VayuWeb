@@ -45,7 +45,7 @@ import { fetchPath, FetchError } from './fetch.ts';
 import { proveInclusion, treeOf, type Proof, type Root } from './merkle.ts';
 import { greatestCorroboratedLength, verifyNameInclusion } from './checkpoint.ts';
 import { contentTypeOf as mimeContentTypeOf } from './mime.ts';
-import { TOKEN_BYTES } from './control.ts';
+import { TOKEN_BYTES, isWindowsNamedPipe } from './control.ts';
 import { EquivocationLedger, ledgerPathFor, type LedgerEntry } from './equivocation.ts';
 import { CheckpointLedger } from './checkpoint.ts';
 import {
@@ -1969,7 +1969,14 @@ async function cmdServe(args: Args): Promise<number> {
   }
 
   if (proxy !== null) out(`browsing proxy   http://${proxy.address}`);
-  out(`control API      ${control.address}  (mode 0600)`);
+  // The mode is a POSIX property, and a Windows named pipe has none. Saying "mode 0600" of a
+  // pipe that has no mode is a claim the banner makes to every operator on Windows and cannot
+  // keep, and the thing that actually keeps the control API closed is the token.
+  out(
+    isWindowsNamedPipe(control.address)
+      ? `control API      ${control.address}  (named pipe; the token below is the gate)`
+      : `control API      ${control.address}  (mode 0600)`,
+  );
   out('');
   out('control token (this run only, not written to disk):');
   out(`  ${token.current()}`);
