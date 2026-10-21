@@ -242,6 +242,107 @@ fn every_resolution_vector_decides_as_the_reference_does() {
     );
 }
 
+/// The record-verification suite: the refusal vocabulary, decided by this implementation.
+///
+/// This is the suite the client did not run, and it is the largest one — ninety-one vectors,
+/// one for every way a record may be refused, and nineteen that must be accepted. It is the
+/// suite that pins the NAMES: two implementations that refuse the same bytes for different
+/// reasons are two implementations whose peers cannot tell "this record is bad" from "this
+/// record is bad in a way you have not heard of".
+///
+/// The state each vector carries is read the way the reference's own runner reads it: the
+/// predecessor's bytes, the transferor's key when the predecessor is a settling TRANSFER, the
+/// revocation flag, the release flag and the proof-of-work flag.
+#[test]
+fn every_record_vector_is_refused_for_the_reason_the_specification_names() {
+    let raw = std::fs::read_to_string(VECTORS_PATH).expect("vectors.json exists");
+    let doc: Value = serde_json::from_str(&raw).expect("vectors.json parses");
+    let vectors = doc
+        .get("vectors")
+        .and_then(Value::as_array)
+        .expect("a record-verification section")
+        .clone();
+    assert!(
+        vectors.len() >= 90,
+        "the record suite has shrunk: {} vectors",
+        vectors.len()
+    );
+
+    let mut failures: Vec<String> = Vec::new();
+    for vector in &vectors {
+        let name = vector.get("name").and_then(Value::as_str).unwrap_or("?");
+        let rule = vector.get("rule").and_then(Value::as_str).unwrap_or("?");
+        let record = hex_to_bytes(vector.get("record").and_then(Value::as_str).unwrap_or(""));
+        let now = vector.get("now").and_then(Value::as_u64).unwrap_or(0);
+        let state = vector.get("state").expect("a state");
+
+        let predecessor = match state.get("predecessor").and_then(Value::as_str) {
+            None => None,
+            Some(hex) => {
+                let bytes = hex_to_bytes(hex);
+                let transferor = state
+                    .get("transferorKey")
+                    .and_then(Value::as_str)
+                    .map(hex_to_bytes);
+                let key: Option<[u8; 32]> = transferor.map(|bytes| {
+                    let mut key = [0u8; 32];
+                    key.copy_from_slice(&bytes);
+                    key
+                });
+                Some(
+                    vayuweb_client::verify::prev_view(&bytes, key.as_ref())
+                        .unwrap_or_else(|e| panic!("{name}: the predecessor does not read: {e}")),
+                )
+            }
+        };
+        let known = vayuweb_client::verify::Known {
+            previous: predecessor,
+            revoked: state
+                .get("revoked")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            fully_released: state
+                .get("fullyReleased")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            pow_verified: state
+                .get("powVerified")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        };
+
+        let verdict = vayuweb_client::verify::verify_against(&record, &known, now, 0);
+        let actual = match &verdict {
+            vayuweb_client::verify::Verdict::Accept => "accept".to_string(),
+            vayuweb_client::verify::Verdict::Reject { code, .. } => format!("reject:{code}"),
+            vayuweb_client::verify::Verdict::Defer { reason, .. } => format!("defer:{reason}"),
+        };
+        let expect = vector.get("expect").expect("an expectation");
+        let want = match expect.get("outcome").and_then(Value::as_str).unwrap_or("?") {
+            "accept" => "accept".to_string(),
+            "defer" => format!(
+                "defer:{}",
+                expect.get("reason").and_then(Value::as_str).unwrap_or("?")
+            ),
+            other => format!(
+                "{other}:{}",
+                expect.get("code").and_then(Value::as_str).unwrap_or("?")
+            ),
+        };
+        if actual != want {
+            failures.push(format!(
+                "{name}\n  rule:     {rule}\n  expected: {want}\n  actual:   {actual}"
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} record vector(s) disagree:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
 #[test]
 fn every_pow_vector_agrees_with_the_difficulty_schedule() {
     let raw = std::fs::read_to_string(VECTORS_PATH).expect("vectors.json exists");

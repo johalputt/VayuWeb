@@ -10,6 +10,41 @@ it.
 
 ## [Unreleased]
 
+### Fixed — the client now speaks the specification's refusal vocabulary
+
+The client ran eight of the nine conformance suites and skipped the one that matters most for
+interoperation: the ninety-one record-verification vectors, which pin the NAME of every refusal
+a verifier may return. It was skipped because the client's verifier is built around a store it
+holds rather than a state it is handed, so it could not be pointed at a synthetic state at all.
+That was the wrong reason to skip it. The suite is what says which code a refusal carries, and a
+client that names a refusal differently from its peers is a client whose peers cannot tell
+"this record is bad" from "this record is bad in a way you have not heard of".
+
+Running it found the vocabulary had diverged in about a dozen places. The client answered
+`BAD_NAME` where REGISTRY.md names `BAD_LABEL`, `BAD_VERSION` for `UNSUPPORTED_VERSION`,
+`BAD_SUITE` for `UNKNOWN_SUITE`, `BAD_TERM` for a missing field where the specification says
+`MISSING_FIELD`, and `TOO_MANY_ENTRIES` for `TOO_MANY_RECORDS`; it answered `BAD_OWNER` for a
+missing key and `BAD_SIG` for a signature of the wrong length, where the specification says
+`MISSING_FIELD` and `BAD_FIELD_TYPE`; and it refused a record carrying an unknown entry type,
+which REGISTRY.md says is stored and replicated unchanged — so a peer ahead of this client
+publishing an entry type this client does not know would have had its record rejected, and the
+chain broken at the first peer behind it. It also accepted a proof of work carrying its own cost
+parameters or salt, which PROOF-OF-WORK.md forbids: the salt is derived from the record's bytes
+precisely so that one proof cannot be reused across a thousand names.
+
+The client now parses a record in the specification's order — version, suite, op, name, tld,
+ownerKey, seq, the terms, the entries, the proof of work, the signatures — because a record
+carrying two defects is refused for the first of them, and two implementations that disagree
+about the order name different reasons for refusing the same bytes. A deferral now carries its
+reason, `CLOCK_SKEW`, so a peer can tell one kind of hold from another.
+
+### Added — the client runs all nine conformance suites
+
+`verify::verify_against` takes the state as an argument — the predecessor, the revocation flag,
+the release flag and the proof-of-work flag — which is what a conformance vector states and what
+the client's own view path already had. The client now runs the record-verification suite, so
+every suite in `conformance/vectors.json` is executed by both languages.
+
 ### Added — `vayu evidence`: the fork evidence a node holds, in a form a person can read
 
 The client could DETECT a fork — `vayu import` judges every pair of records in a

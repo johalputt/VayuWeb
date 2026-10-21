@@ -96,6 +96,20 @@ The file carries nine suites: `vectors` holds 91 record-verification vectors, an
 their own. Those eight pin what implementations must *agree* about rather than what one of them
 accepts, which is where a fork lives.
 
+**Both languages now run all nine.** The client used to run the eight and skip `vectors` — the
+record suite, the largest and the one that pins the refusal vocabulary. It was skipped because
+the client's verifier is structured around a store it holds rather than a state it is handed, so
+it could not be pointed at a synthetic state at all. That was the wrong reason to skip it: the
+suite is what says which NAME a refusal carries, and a client that names a refusal differently
+from its peers is a client whose peers cannot tell "this record is bad" from "this record is bad
+in a way you have not heard of". The client now takes the state as an argument
+(`verify::verify_against`) and runs the suite, and the suite found the vocabulary diverged in
+about a dozen places — `BAD_NAME` where the specification names `BAD_LABEL`, `BAD_VERSION` for
+`UNSUPPORTED_VERSION`, `BAD_SUITE` for `UNKNOWN_SUITE`, `BAD_TERM` for a missing field where
+the specification says `MISSING_FIELD` — along with a record the client refused that the
+specification says must be stored, and a proof of work it accepted that the specification says
+must be refused.
+
 **`pins` pins the sentence, not only the count.** The other suites decide whether two
 implementations *hold* the same thing; this one decides whether they *say* the same thing about
 it, which is a different and more dangerous fork — a user reads the sentence and believes it.

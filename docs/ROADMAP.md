@@ -572,6 +572,36 @@ is trusted on its own say-so: every derivation is pinned against
 crate that the registry implementation's own verifier accepts byte for byte — CI regenerates the
 fixtures and fails on drift, so the two languages cannot quietly diverge.
 
+**And now the client runs every suite in that file, which is how the refusal vocabulary was
+found to have drifted.** The client consumed eight of the nine suites and skipped `vectors` —
+the ninety-one record-verification vectors, the largest, and the one that pins the NAME of every
+refusal. It was skipped for a reason that looked like a reason: the client's verifier is built
+around a store it HOLDS rather than a state it is HANDED, so it could not be pointed at a
+synthetic state at all. But the suite is exactly what says which code a refusal carries, and a
+client that names a refusal differently from its peers is a client whose peers cannot tell "this
+record is bad" from "this record is bad in a way you have not heard of". Asking the question the
+way this project keeps asking it — what would somebody else's code do with these bytes — found
+the answer in about a dozen places: `BAD_NAME` where REGISTRY.md names `BAD_LABEL`,
+`BAD_VERSION` for `UNSUPPORTED_VERSION`, `BAD_SUITE` for `UNKNOWN_SUITE`, `BAD_TERM` for a
+missing field where the specification says `MISSING_FIELD`, `TOO_MANY_ENTRIES` for
+`TOO_MANY_RECORDS`. Two of the divergences were not vocabulary but behaviour, and both were
+serious. The client REFUSED a record carrying an unknown entry type, which REGISTRY.md says is
+stored and replicated unchanged: a peer ahead of this client publishing an entry type this
+client does not know would have had its record rejected and the chain broken at the first peer
+behind it — and this client had already been changed to CARRY such entries in a previous round,
+so the builder could produce a record its own verifier would not accept. And the client ACCEPTED
+a proof of work carrying its own cost parameters or salt, which PROOF-OF-WORK.md forbids: the
+salt is derived from the record's own bytes precisely so that one proof cannot be bought once
+and spent on a thousand names.
+
+The fix is `verify::verify_against`, which takes the state as an argument — the predecessor, the
+revocation flag, the release flag and the proof-of-work flag — which is what a vector states and
+what the client's own view path already had. The client now parses a record in the
+specification's ORDER as well as its vocabulary, because a record carrying two defects is
+refused for the first of them, and two implementations that disagree about the order name
+different reasons for refusing the same bytes. A deferral carries its reason now, too:
+`CLOCK_SKEW`, so a peer can tell one kind of hold from another.
+
 **The publish flow is now wired together on this side too — and its output is readable**:
 `src/doctor.rs` runs the section-3 authoring checks first, `src/publish.rs` builds and addresses
 a site's UnixFS tree against reference-IPFS blocks, `src/store.rs` pins those blocks locally

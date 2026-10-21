@@ -51,7 +51,14 @@ pub enum Verdict {
     /// The record is refused, with the same codes the implementation of record uses.
     Reject { code: &'static str, detail: String },
     /// The record is neither good nor bad yet: its clock has not caught up. Held, not rejected.
-    Defer { detail: String },
+    ///
+    /// The `reason` is the name the specification gives the deferral, so two implementations
+    /// can be compared on it: a peer that defers for a different reason is deferring on
+    /// different grounds, and a deferral is a cost — it holds memory until the clock catches up.
+    Defer {
+        reason: &'static str,
+        detail: String,
+    },
 }
 
 impl Verdict {
@@ -179,135 +186,371 @@ fn field<'a>(members: &'a [(Key, Value)], name: &str) -> Option<&'a Value> {
     })
 }
 
+/// A required field that is not there.
+fn missing(field: &str) -> Verdict {
+    reject("MISSING_FIELD", format!("{field} is required"))
+}
+
+/// A field that is there and is the wrong shape.
+fn wrong_type(field: &str, detail: &str) -> Verdict {
+    reject("BAD_FIELD_TYPE", format!("{field} {detail}"))
+}
+
+/// A required unsigned integer field.
+fn uint_field(members: &[(Key, Value)], name: &str) -> Result<u64, Verdict> {
+    match field(members, name) {
+        None => Err(missing(name)),
+        Some(Value::UInt(n)) => Ok(*n),
+        Some(_) => Err(wrong_type(name, "must be an unsigned integer")),
+    }
+}
+
+/// A required text field.
+fn text_field(members: &[(Key, Value)], name: &str) -> Result<String, Verdict> {
+    match field(members, name) {
+        None => Err(missing(name)),
+        Some(Value::Text(text)) => Ok(text.clone()),
+        Some(_) => Err(wrong_type(name, "must be text")),
+    }
+}
+
+/// A required byte string of an exact length.
+fn bytes_field(members: &[(Key, Value)], name: &str, length: usize) -> Result<Vec<u8>, Verdict> {
+    match field(members, name) {
+        None => Err(missing(name)),
+        Some(Value::Bytes(bytes)) if bytes.len() == length => Ok(bytes.clone()),
+        Some(Value::Bytes(bytes)) => Err(wrong_type(
+            name,
+            &format!("must be {length} bytes, got {}", bytes.len()),
+        )),
+        Some(_) => Err(wrong_type(name, "must be a byte string")),
+    }
+}
+
+/// The Ed25519 small-order encodings: keys that certify themselves.
+///
+/// A small-order point is one whose signatures verify under it however they were made, so a
+/// record naming one as its owner would attribute itself to nobody and to anybody. The
+/// reference refuses such a key at schema level, so the refusal is BAD_KEY rather than a
+/// signature failure later — and the same fourteen encodings, because the set is a property of
+/// Ed25519 and not of an implementation.
+const SMALL_ORDER_ENCODINGS: [&str; 14] = [
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "0100000000000000000000000000000000000000000000000000000000000000",
+    "0000000000000000000000000000000000000000000000000000000000000080",
+    "0100000000000000000000000000000000000000000000000000000000000080",
+    "e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800",
+    "e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b880",
+    "5f9c95bca3508c24b1d0b1559c83ef5b04445cc4581c8e86d8224eddd09f1157",
+    "5f9c95bca3508c24b1d0b1559c83ef5b04445cc4581c8e86d8224eddd09f11d7",
+    "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+    "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+    "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+    "eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+];
+
+/// True when the key is a small-order point and therefore unusable as an owner key.
+pub fn is_small_order_key(key: &[u8]) -> bool {
+    if key.len() != 32 {
+        return false;
+    }
+    let hex: String = key.iter().map(|b| format!("{b:02x}")).collect();
+    SMALL_ORDER_ENCODINGS.contains(&hex.as_str())
+}
+
+/// Parse and structurally validate a decoded record map.
+///
+/// **The order is the specification's, and it is load-bearing.** A record carrying two defects
+/// is refused for the FIRST of them, so two implementations must agree on the order or they
+/// will name different reasons for refusing the same bytes — and a peer comparing reasons sees
+/// a fork where there is none. REGISTRY.md's verification lists them as version, suite, op,
+/// name, tld, ownerKey, seq, the terms, the entries, the proof of work and the signatures, and
+/// this follows that list exactly.
+///
+/// Does not verify signatures or proof of work: those need the signing input and the current
+/// difficulty respectively, and mixing them here would make a pure function depend on state.
 fn parse_record(value: &Value) -> Result<ParsedRecord, Verdict> {
     let Value::Map(members) = value else {
         return Err(reject("NOT_A_MAP", "record must be a CBOR map"));
     };
     let bad = |code: &'static str, detail: &str| reject(code, detail);
 
-    let version = uint(field(members, "version").ok_or(bad("BAD_VERSION", "no version"))?)
-        .map_err(|_| bad("BAD_VERSION", "version is not an integer"))?;
-    if version != 1 {
-        return Err(reject("BAD_VERSION", format!("unknown version {version}")));
+    let version = uint_field(members, "version")?;
+    if version != crate::record::SUPPORTED_VERSION {
+        return Err(reject(
+            "UNSUPPORTED_VERSION",
+            format!("version {version} is not implemented"),
+        ));
     }
 
-    let Value::Text(op) = field(members, "op").ok_or(bad("UNKNOWN_OP", "no op"))? else {
-        return Err(reject("UNKNOWN_OP", "op is not text"));
-    };
+    // CRYPTO-AGILITY.md 4.2: a verifier MUST reject a record whose suite it does not know, and
+    // MUST NOT skip the signature or accept it provisionally.
+    let suite_id = uint_field(members, "suite")?;
+    if suite_id != crate::record::LAUNCH_SUITE {
+        return Err(reject(
+            "UNKNOWN_SUITE",
+            format!("suite {suite_id} is not an active suite"),
+        ));
+    }
+    let suite =
+        u8::try_from(suite_id).map_err(|_| bad("UNKNOWN_SUITE", "suite is out of range"))?;
+
+    let op = text_field(members, "op")?;
     if !matches!(
         op.as_str(),
         "REGISTER" | "RENEW" | "UPDATE" | "TRANSFER" | "RELINQUISH" | "REVOKE"
     ) {
-        return Err(reject("UNKNOWN_OP", format!("unknown operation {op:?}")));
+        return Err(reject("UNKNOWN_OP", format!("unknown op: {op}")));
     }
 
-    let Value::Text(label) = field(members, "name").ok_or(bad("BAD_NAME", "no name"))? else {
-        return Err(reject("BAD_NAME", "name is not text"));
-    };
-    let Value::Text(tld) = field(members, "tld").ok_or(bad("BAD_NAME", "no tld"))? else {
-        return Err(reject("BAD_NAME", "tld is not text"));
-    };
-    if let Some(rejection) = names::name_rejection(label, tld) {
-        return Err(reject("BAD_NAME", rejection.code()));
+    let label = text_field(members, "name")?;
+    if let Some(problem) = names::label_rejection(&label) {
+        return Err(reject("BAD_LABEL", format!("{label}: {}", problem.code())));
+    }
+    let tld = text_field(members, "tld")?;
+    if !names::is_ratified_tld(&tld) {
+        return Err(reject(
+            "UNKNOWN_TLD",
+            format!("{tld} is not a ratified TLD"),
+        ));
     }
 
-    let seq = uint(field(members, "seq").ok_or(bad("BAD_SEQ", "no seq"))?)
-        .map_err(|_| bad("BAD_SEQ", "seq is not an integer"))?;
-    let not_before = uint(field(members, "notBefore").ok_or(bad("BAD_TERM", "no notBefore"))?)
-        .map_err(|_| bad("BAD_TERM", "notBefore is not an integer"))?;
-    let not_after = uint(field(members, "notAfter").ok_or(bad("BAD_TERM", "no notAfter"))?)
-        .map_err(|_| bad("BAD_TERM", "notAfter is not an integer"))?;
+    // Length from the suite, never assumed: no code path may assume a 32-byte key.
+    let owner_key_bytes = bytes_field(members, "ownerKey", 32)?;
+    if is_small_order_key(&owner_key_bytes) {
+        return Err(reject("BAD_KEY", "ownerKey is a small-order point"));
+    }
+    let mut owner_key = [0u8; 32];
+    owner_key.copy_from_slice(&owner_key_bytes);
 
-    let owner_key = key32(field(members, "ownerKey").ok_or(bad("BAD_OWNER", "no ownerKey"))?)
-        .map_err(|detail| bad("BAD_OWNER", &detail))?;
+    let seq = uint_field(members, "seq")?;
+    if seq > crate::record::MAX_SEQ {
+        return Err(reject("BAD_SEQ", format!("seq {seq} exceeds 2^32-1")));
+    }
 
-    let suite = u8::try_from(
-        uint(field(members, "suite").ok_or(bad("BAD_SUITE", "no suite"))?)
-            .map_err(|_| bad("BAD_SUITE", "suite is not an integer"))?,
-    )
-    .map_err(|_| bad("BAD_SUITE", "suite out of range"))?;
-    if suite != 1 {
-        return Err(reject("BAD_SUITE", format!("unknown crypto suite {suite}")));
+    let not_before = uint_field(members, "notBefore")?;
+    let not_after = uint_field(members, "notAfter")?;
+    if not_after < not_before {
+        return Err(reject("BAD_TERM", "notAfter precedes notBefore"));
     }
 
     // Entries: at most MAX_RECORD_ENTRIES; each well-shaped; an alias never beside another
     // entry, because a name is either a pointer or a destination.
+    let raw_entries = match field(members, "records") {
+        None => return Err(missing("records")),
+        Some(Value::Array(entries)) => entries,
+        Some(_) => return Err(wrong_type("records", "must be an array")),
+    };
+    if raw_entries.len() > MAX_RECORD_ENTRIES {
+        return Err(reject(
+            "TOO_MANY_RECORDS",
+            format!("{} entries exceeds {MAX_RECORD_ENTRIES}", raw_entries.len()),
+        ));
+    }
     let mut alias_count = 0usize;
-    if let Some(Value::Array(entries)) = field(members, "records") {
-        if entries.len() > MAX_RECORD_ENTRIES {
+    for entry in raw_entries {
+        let Value::Map(fields) = entry else {
+            return Err(reject("BAD_RECORD_ENTRY", "an entry is a map"));
+        };
+        let Value::Text(kind) =
+            field(fields, "type").ok_or(bad("BAD_RECORD_ENTRY", "entry has no type"))?
+        else {
+            return Err(reject("BAD_RECORD_ENTRY", "entry type is not text"));
+        };
+        let Some(entry_value) = field(fields, "value") else {
+            return Err(reject("BAD_RECORD_ENTRY", "entry value is required"));
+        };
+        if let Some(ttl) = field(fields, "ttl") {
+            let ttl = uint(ttl).map_err(|_| bad("BAD_RECORD_ENTRY", "ttl is not an integer"))?;
+            if !(crate::record::MIN_TTL..=crate::record::MAX_TTL).contains(&ttl) {
+                return Err(reject("BAD_RECORD_ENTRY", "ttl outside the agreed bounds"));
+            }
+        }
+        // The size bound applies to EVERY entry, known type or not: an unknown type must not be
+        // a way to smuggle an oversized value past the limit.
+        let size = match entry_value {
+            Value::Bytes(bytes) => bytes.len(),
+            Value::Text(text) => text.len(),
+            _ => 0,
+        };
+        if size > crate::record::MAX_ENTRY_VALUE_BYTES {
             return Err(reject(
-                "TOO_MANY_ENTRIES",
-                format!("{} entries exceeds {MAX_RECORD_ENTRIES}", entries.len()),
+                "BAD_RECORD_ENTRY",
+                format!(
+                    "entry value {size} bytes exceeds {}",
+                    crate::record::MAX_ENTRY_VALUE_BYTES
+                ),
             ));
         }
-        for entry in entries {
-            let Value::Map(fields) = entry else {
-                return Err(reject("BAD_RECORD_ENTRY", "an entry is a map"));
-            };
-            let Value::Text(kind) =
-                field(fields, "type").ok_or(bad("BAD_RECORD_ENTRY", "entry has no type"))?
-            else {
-                return Err(reject("BAD_RECORD_ENTRY", "entry type is not text"));
-            };
-            match kind.as_str() {
-                "cid" | "peer" | "ipns" | "txt" | "alias" => {}
-                other => {
+        // **An unknown entry type is retained, not refused.** REGISTRY.md says unknown entry
+        // types are stored and replicated unchanged, and a record carrying one is a valid
+        // record: the client that does not understand a type must still carry it, or it breaks
+        // the chain the moment a peer ahead of it publishes one. So the shape is checked only
+        // for the types this implementation knows.
+        match kind.as_str() {
+            "peer" => {
+                let Value::Bytes(bytes) = entry_value else {
                     return Err(reject(
                         "BAD_RECORD_ENTRY",
-                        format!("unknown entry type {other:?}"),
-                    ))
+                        "peer value must be a 32-byte key",
+                    ));
+                };
+                if bytes.len() != 32 {
+                    return Err(reject(
+                        "BAD_RECORD_ENTRY",
+                        "peer value must be a 32-byte key",
+                    ));
                 }
             }
-            if kind == "alias" {
+            "ipns" => {
+                let Value::Text(text) = entry_value else {
+                    return Err(reject(
+                        "BAD_RECORD_ENTRY",
+                        "ipns value must be 1-128 characters",
+                    ));
+                };
+                if text.is_empty() || text.chars().count() > 128 {
+                    return Err(reject(
+                        "BAD_RECORD_ENTRY",
+                        "ipns value must be 1-128 characters",
+                    ));
+                }
+            }
+            "cid" => {
+                let Value::Bytes(bytes) = entry_value else {
+                    return Err(reject("BAD_RECORD_ENTRY", "cid value must be 1-64 bytes"));
+                };
+                if bytes.is_empty() || bytes.len() > 64 {
+                    return Err(reject("BAD_RECORD_ENTRY", "cid value must be 1-64 bytes"));
+                }
+            }
+            "txt" => {
+                let Value::Text(text) = entry_value else {
+                    return Err(reject("BAD_RECORD_ENTRY", "txt value must be text"));
+                };
+                if text.is_empty() || text.len() > 255 {
+                    return Err(reject("BAD_RECORD_ENTRY", "txt value must be 1-255 bytes"));
+                }
+                if text.chars().any(|c| (c as u32) < 0x20) {
+                    return Err(reject(
+                        "BAD_RECORD_ENTRY",
+                        "txt value must not contain control characters",
+                    ));
+                }
+            }
+            "alias" => {
+                let Value::Text(text) = entry_value else {
+                    return Err(reject(
+                        "BAD_RECORD_ENTRY",
+                        "alias must name a valid, ratified label.tld",
+                    ));
+                };
+                let Some(alias) = names::parse_alias(text) else {
+                    return Err(reject(
+                        "BAD_RECORD_ENTRY",
+                        "alias must name a valid, ratified label.tld",
+                    ));
+                };
+                // A name may not alias itself: the trivial self-loop is the case a resolver
+                // written straight from the prose is most likely to get wrong, and it is the one
+                // case decidable from a single record.
+                if alias.label == label && alias.tld == tld {
+                    return Err(reject(
+                        "BAD_RECORD_ENTRY",
+                        format!("{label}.{tld} may not alias itself"),
+                    ));
+                }
                 alias_count += 1;
                 if alias_count > 1 {
                     return Err(reject("BAD_RECORD_ENTRY", "at most one alias per record"));
                 }
-                if entries.len() > 1 {
+                if raw_entries.len() > 1 {
                     return Err(reject(
                         "BAD_RECORD_ENTRY",
                         "an alias MUST NOT coexist with another entry type",
                     ));
                 }
             }
-            if let Some(ttl) = field(fields, "ttl") {
-                let ttl =
-                    uint(ttl).map_err(|_| bad("BAD_RECORD_ENTRY", "ttl is not an integer"))?;
-                if !(crate::record::MIN_TTL..=crate::record::MAX_TTL).contains(&ttl) {
-                    return Err(reject("BAD_RECORD_ENTRY", "ttl outside the agreed bounds"));
-                }
-            }
+            // An unknown type: retained unchanged, and not a defect.
+            _ => {}
         }
     }
 
-    let sig = match field(members, "sig") {
-        Some(Value::Bytes(sig)) if sig.len() == 64 => sig.clone(),
-        _ => return Err(reject("BAD_SIG", "sig is missing or not 64 bytes")),
-    };
-    let co_sig = match field(members, "coSig") {
-        None | Some(Value::Null) => None,
-        Some(Value::Bytes(sig)) if sig.len() == 64 => Some(sig.clone()),
-        _ => return Err(reject("BAD_COSIG", "coSig is present but not 64 bytes")),
-    };
-
+    // The proof of work, and the rule about which operations carry one.
     let (pow_bits, pow_nonce) = match field(members, "powProof") {
-        None | Some(Value::Null) => (None, None),
+        None => return Err(missing("powProof")),
+        Some(Value::Null) => (None, None),
         Some(Value::Map(proof)) => {
-            let bits = uint(field(proof, "bits").ok_or(bad("BAD_POW", "powProof has no bits"))?)
-                .map_err(|_| bad("BAD_POW", "bits is not an integer"))?;
-            let bits = u32::try_from(bits).map_err(|_| bad("BAD_POW", "bits out of range"))?;
-            let Value::Bytes(nonce) =
-                field(proof, "nonce").ok_or(bad("BAD_POW", "powProof has no nonce"))?
+            let Value::Text(alg) =
+                field(proof, "alg").ok_or(bad("BAD_POW_SHAPE", "powProof has no alg"))?
             else {
-                return Err(reject("BAD_POW", "nonce is not bytes"));
+                return Err(reject("BAD_POW_SHAPE", "powProof alg is not text"));
+            };
+            if alg != crate::pow::POW_ALGORITHM {
+                return Err(reject(
+                    "BAD_POW_SHAPE",
+                    format!("unsupported pow algorithm: {alg}"),
+                ));
+            }
+            // Refuse a proof carrying tuning knobs rather than ignoring them. Ignoring would let
+            // a record that an attacker believes is cheap round-trip unchanged through the log,
+            // and the field would become load-bearing for some future implementation that did
+            // read it — and the salt especially: it is derived from the record's own bytes, so a
+            // carried salt is a free parameter that makes one proof of work buy unlimited names.
+            for forbidden in ["m", "t", "p", "salt"] {
+                if field(proof, forbidden).is_some() {
+                    return Err(reject(
+                        "BAD_POW_SHAPE",
+                        format!("powProof must not carry {forbidden}"),
+                    ));
+                }
+            }
+            let bits =
+                uint(field(proof, "bits").ok_or(bad("BAD_POW_SHAPE", "powProof has no bits"))?)
+                    .map_err(|_| bad("BAD_POW_SHAPE", "bits is not an integer"))?;
+            let bits =
+                u32::try_from(bits).map_err(|_| bad("BAD_POW_SHAPE", "bits out of range"))?;
+            let Value::Bytes(nonce) =
+                field(proof, "nonce").ok_or(bad("BAD_POW_SHAPE", "powProof has no nonce"))?
+            else {
+                return Err(reject("BAD_POW_SHAPE", "nonce is not bytes"));
             };
             let nonce: [u8; POW_NONCE_LENGTH] = nonce
                 .as_slice()
                 .try_into()
-                .map_err(|_| bad("BAD_POW", "nonce is not the agreed length"))?;
+                .map_err(|_| bad("BAD_POW_SHAPE", "nonce is not the agreed length"))?;
             (Some(bits), Some(nonce))
         }
-        _ => return Err(reject("BAD_POW", "powProof is malformed")),
+        Some(_) => return Err(reject("BAD_POW_SHAPE", "powProof must be a map or null")),
+    };
+    let needs_pow = op == "REGISTER" || op == "RENEW";
+    if needs_pow && pow_bits.is_none() {
+        return Err(reject(
+            "MISSING_POW",
+            format!("{op} requires a proof of work"),
+        ));
+    }
+    if !needs_pow && pow_bits.is_some() {
+        return Err(reject(
+            "UNEXPECTED_POW",
+            format!("{op} must carry powProof null"),
+        ));
+    }
+
+    let sig = bytes_field(members, "sig", 64)?;
+    let _prev_hash = bytes_field(members, "prevHash", 32)?;
+    let co_sig = match field(members, "coSig") {
+        None | Some(Value::Null) => None,
+        Some(Value::Bytes(bytes)) if bytes.len() == 64 => Some(bytes.clone()),
+        Some(Value::Bytes(bytes)) => {
+            return Err(reject(
+                "BAD_COSIG",
+                format!("coSig must be a 64-byte signature, got {}", bytes.len()),
+            ))
+        }
+        Some(_) => return Err(reject("BAD_COSIG", "coSig must be a 64-byte signature")),
     };
 
     Ok(ParsedRecord {
@@ -518,12 +761,51 @@ pub fn equivocation_key(bytes: &[u8]) -> Option<String> {
     ))
 }
 
+/// The state a verifier consults, as REGISTRY.md's `state.current` reduces to it.
+///
+/// REGISTRY.md's verification reads four things from the log: the record this one follows, the
+/// incumbent's term, whether the name has been revoked, and whether the proof of work has been
+/// verified. A verifier holding only the bytes cannot answer the first three — and a
+/// conformance vector that cannot state them is not reproducible, which is why the reference's
+/// own runner builds a view per vector.
+#[derive(Debug, Clone, Default)]
+pub struct Known {
+    /// The record this one claims to follow. For a REGISTER this is the INCUMBENT: the record
+    /// that holds the name, if any.
+    pub previous: Option<PrevView>,
+    /// True once a REVOKE has been accepted for this name; no later record is ever accepted.
+    pub revoked: bool,
+    /// True when the incumbent's term has ended and its quarantine has run out, so the name is
+    /// once more in the open pool and a fresh REGISTER may take it.
+    pub fully_released: bool,
+    /// True when the proof of work has already been verified. False means the verifier does the
+    /// work itself.
+    pub pow_verified: bool,
+}
+
 /// Verify one record's exact bytes against an optional predecessor and the clock.
 ///
 /// `window_count` is the trailing-window registration count for the name's TLD — index state
 /// the caller supplies, exactly as the implementation of record's RegistryView does. Zero gives
 /// the rate floor.
 pub fn verify(bytes: &[u8], previous: Option<&PrevView>, now: u64, window_count: u64) -> Verdict {
+    verify_against(
+        bytes,
+        &Known {
+            previous: previous.cloned(),
+            ..Known::default()
+        },
+        now,
+        window_count,
+    )
+}
+
+/// Verify one record's exact bytes against a known state.
+///
+/// The state-carrying form, and the one a conformance vector needs: a vector says what the log
+/// held, and this decides the record against exactly that. The state-free [`verify`] is the
+/// same function with an empty log, and the client's own view path passes the tip it holds.
+pub fn verify_against(bytes: &[u8], known: &Known, now: u64, window_count: u64) -> Verdict {
     // Framing first: a malleable encoding makes a malleable record_hash, and record_hash is
     // the convergence tie-break.
     if bytes.len() > MAX_RECORD_BYTES {
@@ -575,14 +857,22 @@ pub fn verify(bytes: &[u8], previous: Option<&PrevView>, now: u64, window_count:
         // plainly-taken name — costs a lookup, not 64 MiB of Argon2id. Standalone mode has no
         // incumbent set, so this check belongs to whoever holds the view; stated here so its
         // absence is a decision on record rather than an oversight.
+        if known.previous.is_some() && !known.fully_released {
+            return reject(
+                "NAME_TAKEN",
+                format!("{}.{} is held", record.label, record.tld),
+            );
+        }
         if record.not_after - record.not_before != TERM {
             return reject("BAD_TERM", "a registration term is exactly one year");
         }
         if !Identity::verify(&record.owner_key, &input, &record.sig) {
             return reject("BAD_SIG", "signature does not verify under ownerKey");
         }
-        if let Some(verdict) = check_pow(&record, window_count) {
-            return verdict;
+        if !known.pow_verified {
+            if let Some(verdict) = check_pow(&record, window_count) {
+                return verdict;
+            }
         }
         // Deferral last among REGISTER's checks: it is the one outcome that costs memory, so
         // it must be earned by everything before it.
@@ -593,7 +883,7 @@ pub fn verify(bytes: &[u8], previous: Option<&PrevView>, now: u64, window_count:
     }
 
     // Every other operation follows a predecessor.
-    let Some(prev) = previous else {
+    let Some(prev) = known.previous.as_ref() else {
         return reject(
             "NO_PREDECESSOR",
             format!("{}.{} has no accepted history", record.label, record.tld),
@@ -626,7 +916,7 @@ pub fn verify(bytes: &[u8], previous: Option<&PrevView>, now: u64, window_count:
             ),
         );
     }
-    if prev.revoked {
+    if known.revoked || prev.revoked {
         return reject(
             "REVOKED",
             "the name has been revoked and accepts no further records",
@@ -704,8 +994,10 @@ pub fn verify(bytes: &[u8], previous: Option<&PrevView>, now: u64, window_count:
                     format!("RENEW must set notAfter to {}", base + TERM),
                 );
             }
-            if let Some(verdict) = check_pow(&record, window_count) {
-                return verdict;
+            if !known.pow_verified {
+                if let Some(verdict) = check_pow(&record, window_count) {
+                    return verdict;
+                }
             }
         }
         "TRANSFER" => {
@@ -762,6 +1054,7 @@ pub fn verify(bytes: &[u8], previous: Option<&PrevView>, now: u64, window_count:
 fn clock_verdict(not_before: u64, now: u64) -> Option<Verdict> {
     if not_before > now.saturating_add(MAX_CLOCK_SKEW) {
         return Some(Verdict::Defer {
+            reason: "CLOCK_SKEW",
             detail: format!("notBefore {not_before} is ahead of the verifier clock"),
         });
     }
@@ -891,6 +1184,147 @@ mod tests {
             Verdict::Reject { code, .. } => format!("REJECT {code}"),
             Verdict::Defer { .. } => "DEFER".to_string(),
         }
+    }
+
+    /// The refusal a parse produced, as a comparable name.
+    fn parse_code(result: Result<ParsedRecord, Verdict>) -> String {
+        match result {
+            Ok(_) => "ACCEPTED".to_string(),
+            Err(Verdict::Reject { code, .. }) => code.to_string(),
+            Err(Verdict::Defer { reason, .. }) => format!("DEFER {reason}"),
+            Err(Verdict::Accept) => "ACCEPTED".to_string(),
+        }
+    }
+
+    #[test]
+    fn an_unknown_entry_type_is_carried_not_refused() {
+        // **REGISTRY.md: unknown entry types are stored and replicated unchanged.** A client
+        // that refuses one breaks the chain at the first peer behind the peer that published
+        // it, and this client had already been changed to CARRY such an entry through a
+        // renewal — so the builder could produce a record its own verifier would not accept.
+        //
+        // The check is on the parsed record rather than the verdict, because that is where the
+        // decision was made: a refusal here is a refusal of the record's SHAPE, and a shape
+        // defect is not what an unfamiliar entry type is.
+        let id = identity(9);
+        let bytes = registered(&id, "future");
+        let decoded = decode_record(&bytes).expect("decodes");
+        let Value::Map(members) = decoded else {
+            panic!("a record is a map")
+        };
+        // Rewrite the entries: one of a type this build does not know.
+        let unknown = Value::Map(vec![
+            (Key::Text("type".into()), Value::Text("future".into())),
+            (Key::Text("value".into()), Value::Text("whatever".into())),
+        ]);
+        let rewritten: Vec<(Key, Value)> = members
+            .iter()
+            .map(|(k, v)| match k {
+                Key::Text(text) if text == "records" => {
+                    (k.clone(), Value::Array(vec![unknown.clone()]))
+                }
+                _ => (k.clone(), v.clone()),
+            })
+            .collect();
+        let parsed =
+            parse_record(&Value::Map(rewritten)).expect("an unknown entry type is not a defect");
+        assert_eq!(parsed.op, "REGISTER");
+    }
+
+    #[test]
+    fn a_proof_carrying_its_own_parameters_or_salt_is_refused() {
+        // PROOF-OF-WORK.md: the cost parameters and the salt are protocol constants, not
+        // record fields. A record carrying its own `m` lets the registrant pick the work
+        // factor — `m = 8 KiB` turns a memory-hard function into a cheap one that still
+        // verifies, because the verifier evaluates the function the attacker named. A record
+        // carrying its own salt is worse: the salt is derived from the record's canonical
+        // bytes, so a carried salt makes one ground pair buy a thousand names.
+        let id = identity(9);
+        let bytes = registered(&id, "tuned");
+        let decoded = decode_record(&bytes).expect("decodes");
+        let Value::Map(members) = decoded else {
+            panic!("a record is a map")
+        };
+        let rewritten: Vec<(Key, Value)> = members
+            .iter()
+            .map(|(k, v)| match k {
+                Key::Text(text) if text == "powProof" => {
+                    let Value::Map(proof) = v else {
+                        panic!("a proof is a map")
+                    };
+                    let mut proof = proof.clone();
+                    proof.push((Key::Text("salt".into()), Value::Bytes(vec![0u8; 16])));
+                    (k.clone(), Value::Map(proof))
+                }
+                _ => (k.clone(), v.clone()),
+            })
+            .collect();
+        match parse_record(&Value::Map(rewritten)) {
+            Err(Verdict::Reject { code, .. }) => assert_eq!(code, "BAD_POW_SHAPE"),
+            _ => panic!("a carried salt must be refused"),
+        }
+    }
+
+    #[test]
+    fn a_refusal_carries_the_name_the_specification_gives_it() {
+        // The vocabulary is a wire-visible contract: a peer that reads "BAD_LABEL" knows what
+        // to do with it, and one that reads "BAD_NAME" does not. These are the names
+        // REGISTRY.md's verification block uses, and they are the ones the conformance suite
+        // pins.
+        let id = identity(11);
+        let bytes = registered(&id, "vocabulary");
+
+        // A missing field is MISSING_FIELD, not a code borrowed from another condition.
+        let decoded = decode_record(&bytes).expect("decodes");
+        let Value::Map(members) = decoded else {
+            panic!("a record is a map")
+        };
+        let without_version: Vec<(Key, Value)> = members
+            .iter()
+            .filter(|(k, _)| !matches!(k, Key::Text(text) if text == "version"))
+            .cloned()
+            .collect();
+        assert_eq!(
+            parse_code(parse_record(&Value::Map(without_version))),
+            "MISSING_FIELD"
+        );
+
+        // An unknown version is UNSUPPORTED_VERSION, and an unknown suite is UNKNOWN_SUITE.
+        let wrong_version: Vec<(Key, Value)> = members
+            .iter()
+            .map(|(k, v)| match k {
+                Key::Text(text) if text == "version" => (k.clone(), Value::UInt(9)),
+                _ => (k.clone(), v.clone()),
+            })
+            .collect();
+        assert_eq!(
+            parse_code(parse_record(&Value::Map(wrong_version))),
+            "UNSUPPORTED_VERSION"
+        );
+        let wrong_suite: Vec<(Key, Value)> = members
+            .iter()
+            .map(|(k, v)| match k {
+                Key::Text(text) if text == "suite" => (k.clone(), Value::UInt(3)),
+                _ => (k.clone(), v.clone()),
+            })
+            .collect();
+        assert_eq!(
+            parse_code(parse_record(&Value::Map(wrong_suite))),
+            "UNKNOWN_SUITE"
+        );
+
+        // And a bad label is BAD_LABEL.
+        let bad_label: Vec<(Key, Value)> = members
+            .iter()
+            .map(|(k, v)| match k {
+                Key::Text(text) if text == "name" => (k.clone(), Value::Text("Bad".into())),
+                _ => (k.clone(), v.clone()),
+            })
+            .collect();
+        assert_eq!(
+            parse_code(parse_record(&Value::Map(bad_label))),
+            "BAD_LABEL"
+        );
     }
 
     #[test]

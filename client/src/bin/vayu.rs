@@ -824,9 +824,9 @@ fn cmd_import(argv: &[String]) -> i32 {
                         }
                     }
                 }
-                vayuweb_client::verify::Verdict::Defer { detail } => {
+                vayuweb_client::verify::Verdict::Defer { reason, detail } => {
                     deferred += 1;
-                    println!("DEFER: {detail}");
+                    println!("DEFER {reason}: {detail}");
                 }
                 vayuweb_client::verify::Verdict::Accept => unreachable!(),
             },
@@ -1763,8 +1763,8 @@ fn print_verdict(verdict: &vayuweb_client::verify::Verdict) -> i32 {
             println!("REJECT {code}: {detail}");
             1
         }
-        vayuweb_client::verify::Verdict::Defer { detail } => {
-            println!("DEFER: {detail}");
+        vayuweb_client::verify::Verdict::Defer { reason, detail } => {
+            println!("DEFER {reason}: {detail}");
             println!(
                 "the record is neither good nor bad yet: hold it and retry when the clock catches up."
             );
