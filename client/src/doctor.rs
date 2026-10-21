@@ -275,8 +275,8 @@ rule!(
 rule!(MANIFEST_INVALID, (
     "manifest-invalid",
     ".vayu/manifest.json is not usable",
-    "The manifest tells VayuWeb where your landing page is and what your site needs; one that cannot be read means the checker cannot vouch for anything else.",
-    "fix the JSON in .vayu/manifest.json -- it must be a single JSON object."
+    "The manifest tells VayuWeb where your landing page is and what your site needs; one that cannot be read -- or that declares no version -- means the checker cannot vouch for anything else, and every field but the version is optional, so a manifest without one declares nothing at all.",
+    "fix .vayu/manifest.json -- it must be a single JSON object, and it must declare a \"version\" this checker knows (1)."
 ), Publish, &[], &[]);
 
 /// The whole rule set, in one place — the artifact another implementation consumes or generates
@@ -380,7 +380,7 @@ impl Finding {
 enum JValue {
     Null,
     Bool(bool),
-    Number,
+    Number(f64),
     Str(String),
     Array(Vec<JValue>),
     Object(Vec<(String, JValue)>),
@@ -522,7 +522,7 @@ impl<'a> JsonParser<'a> {
             Some(b't') => self.literal("true").map(|_| JValue::Bool(true)),
             Some(b'f') => self.literal("false").map(|_| JValue::Bool(false)),
             Some(b'n') => self.literal("null").map(|_| JValue::Null),
-            Some(b'-') | Some(b'0'..=b'9') => self.number().map(|_| JValue::Number),
+            Some(b'-') | Some(b'0'..=b'9') => self.number().map(JValue::Number),
             _ => Err(self.error("expected a JSON value")),
         }
     }
@@ -536,7 +536,7 @@ impl<'a> JsonParser<'a> {
         }
     }
 
-    fn number(&mut self) -> Result<(), String> {
+    fn number(&mut self) -> Result<f64, String> {
         let start = self.pos;
         if self.peek() == Some(b'-') {
             self.pos += 1;
@@ -562,7 +562,14 @@ impl<'a> JsonParser<'a> {
         if start == self.pos {
             return Err(self.error("empty number"));
         }
-        Ok(())
+        // **The value, not just the fact of a number.** The manifest's `version` is the one field
+        // whose VALUE decides whether the manifest may be read at all, so a parser that threw the
+        // number away could not tell `"version": 1` from `"version": 2` — and the two are not the
+        // same manifest. Parsed from the text that was already validated, so no second grammar
+        // gets a chance to disagree with the first.
+        let text = core::str::from_utf8(&self.bytes[start..self.pos])
+            .map_err(|_| self.error("not a number"))?;
+        text.parse::<f64>().map_err(|_| self.error("not a number"))
     }
 
     /// Parse one complete document: a value, then end of input.
@@ -621,6 +628,32 @@ pub fn parse_manifest(text: &str) -> Manifest {
     };
     // Duplicate top-level keys are legal-but-ambiguous in raw JSON; last one wins, which the
     // verifier's own reading of manifests also does.
+    //
+    // **The version decides whether any of this may be read at all.** PUBLISHING.md section 2:
+    // "Every field is optional except `version`." A manifest with no version, or with a version
+    // this implementation does not know, is not a manifest — it is a file at the path where a
+    // manifest goes, and reading its fields anyway would be reading a document whose meaning
+    // nobody has defined. The registry's proxy has always refused to read such a manifest whole;
+    // this parser did read it, so the two serving surfaces of this project routed a site
+    // differently depending on which one the reader happened to be using. The checker's rule for
+    // this is `manifest-invalid`, and the same rule now covers a manifest that parses and still
+    // is not usable.
+    let mut version_ok = false;
+    for (key, value) in &members {
+        if key == "version" {
+            if let JValue::Number(number) = value {
+                version_ok = *number == 1.0;
+            }
+        }
+    }
+    if !version_ok {
+        manifest.parse_error = Some(
+            "the manifest declares no version this implementation knows, and every field but the \
+             version is optional -- so there is nothing in it that can be read"
+                .to_string(),
+        );
+        return manifest;
+    }
     for (key, value) in members {
         match (key.as_str(), value) {
             ("index", JValue::Str(v)) => manifest.index = Some(v),
@@ -1262,6 +1295,56 @@ mod tests {
             .find(|f| f.rule == MISSING_INDEX.id)
             .expect("still missing");
         assert_eq!(landing.file, "landing.html");
+    }
+
+    #[test]
+    fn a_manifest_with_no_version_is_a_finding_in_its_own_right() {
+        // PUBLISHING.md section 2: "Every field is optional except `version`." A manifest without
+        // one declares nothing, and a checker that read it anyway would be checking a document
+        // whose meaning nobody has defined.
+        let files = vec![
+            html("index.html", "<!doctype html><p>x</p>"),
+            html(".vayu/manifest.json", "{\"index\":\"landing.html\"}"),
+        ];
+        let findings = check(&files);
+        assert!(
+            rules(&findings).contains(&"manifest-invalid"),
+            "{:?}",
+            rules(&findings)
+        );
+    }
+
+    #[test]
+    fn a_manifest_with_a_version_nobody_knows_is_ignored_whole() {
+        // Not "read optimistically": a version this implementation does not know may give a field
+        // a different meaning, and acting on it would be acting on a guess.
+        let files = vec![
+            html("index.html", "<!doctype html><p>x</p>"),
+            html(
+                ".vayu/manifest.json",
+                "{\"version\":2,\"index\":\"landing.html\"}",
+            ),
+        ];
+        let findings = check(&files);
+        assert!(
+            rules(&findings).contains(&"manifest-invalid"),
+            "{:?}",
+            rules(&findings)
+        );
+        // And the version-2 manifest's index is not the index that is looked for: the declared
+        // fields are unread, so the requirement falls back to the default.
+        assert!(
+            !rules(&findings).contains(&"missing-index"),
+            "the unread manifest's index moved the requirement: {:?}",
+            rules(&findings)
+        );
+    }
+
+    #[test]
+    fn a_manifest_with_a_version_this_implementation_knows_is_read() {
+        let manifest = parse_manifest("{\"version\":1,\"index\":\"landing.html\"}");
+        assert!(manifest.parse_error.is_none());
+        assert_eq!(manifest.index.as_deref(), Some("landing.html"));
     }
 
     #[test]

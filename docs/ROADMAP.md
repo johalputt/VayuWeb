@@ -328,6 +328,15 @@ words ("resolving `/` and directory paths to the manifest's `index` when one is 
 sides, as step 13 says a declared file is. The `paths` suite states the mapping — a published
 tree, a request path, and the file that must answer — and both implementations answer it.
 
+**And the two serving surfaces read the manifest differently.** PUBLISHING.md section 2 says
+"Every field is optional except `version`", and the proxy has always honoured that: a manifest
+that declares no version, or a version it does not know, is ignored whole, because reading its
+fields anyway would be reading a document whose meaning nobody has defined. The client read the
+fields anyway, so a site whose manifest had no `version` was routed on the client's serving
+surface and not routed at all on the proxy — and the checker said nothing about it. The client
+now applies the same rule, reports such a manifest as `manifest-invalid`, and reads none of its
+fields.
+
 The two surfaces are deliberately of different kinds. The proxy is TCP because a browser must
 reach it; the control API is a Unix domain socket because a browser must never reach it, and
 `assertSocketAddress` throws on a TCP address rather than leaving that to a sentence in a

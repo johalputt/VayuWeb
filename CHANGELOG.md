@@ -36,6 +36,31 @@ The client now checks every header-enforced rule against the headers it actually
 compares its policy against the canonical block in CONTENT-SECURITY.md, which its own comment
 claimed byte-identity with and nothing had checked.
 
+### Fixed — a manifest with no version is not a manifest, and both surfaces now say so
+
+**The client read a manifest the proxy refused to read.** PUBLISHING.md section 2 says "Every
+field is optional except `version`", and the registry's proxy has always honoured that: a
+manifest that declares no version, or a version it does not know, is ignored whole, because
+reading its fields anyway would be reading a document whose meaning nobody has defined. The
+client's parser read the fields anyway — so a site whose manifest had no `version` was routed by
+the client's serving surface and not routed at all by the proxy, and the checker said nothing
+about it.
+
+The client now applies the same rule. A manifest with no version, or with a version this
+implementation does not know, is reported by the checker as `manifest-invalid` — the rule that
+already covered a manifest whose JSON does not parse — and none of its fields are read, so the
+routing falls back to the default exactly as it does on the proxy. The rule's text says so too:
+"fix .vayu/manifest.json -- it must be a single JSON object, and it must declare a `version`
+this checker knows (1)."
+
+This needed the JSON reader to keep a number's value rather than only the fact that a number was
+there: `"version": 1` and `"version": 2` are not the same manifest, and a parser that threw the
+number away could not tell them apart. The number is parsed from the text the reader had already
+validated, so no second grammar gets a chance to disagree with the first.
+
+Two vectors in the `paths` suite pin it: a manifest with no version declares nothing, and a
+manifest with a version nobody knows declares nothing.
+
 ### Fixed — a directory path answers with the site's declared index, whichever way it is written
 
 **The two serving surfaces of this project mapped a request path onto a published tree

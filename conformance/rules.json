@@ -245,8 +245,8 @@
     {
       "id": "manifest-invalid",
       "what": ".vayu/manifest.json is not usable",
-      "why": "The manifest tells VayuWeb where your landing page is and what your site needs; one that cannot be read means the checker cannot vouch for anything else.",
-      "fix": "fix the JSON in .vayu/manifest.json -- it must be a single JSON object.",
+      "why": "The manifest tells VayuWeb where your landing page is and what your site needs; one that cannot be read -- or that declares no version -- means the checker cannot vouch for anything else, and every field but the version is optional, so a manifest without one declares nothing at all.",
+      "fix": "fix .vayu/manifest.json -- it must be a single JSON object, and it must declare a \"version\" this checker knows (1).",
       "enforcement": "publish-check",
       "evidence": [
       ],

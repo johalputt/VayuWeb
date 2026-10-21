@@ -2757,5 +2757,34 @@ export function buildPathVectors(): PathVector[] {
       files: [{ path: 'index.html', content: 'ROOT-INDEX' }, manifest(declared)],
       expect: { status: 200, path: 'index.html' },
     },
+    {
+      name: 'paths/a-manifest-with-no-version-declares-nothing',
+      rule:
+        'PUBLISHING.md section 2: every field is optional except `version`, so a manifest without ' +
+        'one is not a manifest and declares nothing',
+      request: '/',
+      files: [
+        { path: 'index.html', content: 'ROOT-INDEX' },
+        { path: 'home.html', content: 'ROOT-HOME' },
+        { path: '.vayu/manifest.json', content: JSON.stringify({ index: 'home.html' }) },
+      ],
+      expect: { status: 200, path: 'index.html' },
+    },
+    {
+      name: 'paths/a-manifest-with-a-version-nobody-knows-declares-nothing',
+      rule:
+        'PUBLISHING.md section 2: a manifest declaring a version this implementation does not know ' +
+        'is read whole or not at all -- never optimistically',
+      request: '/',
+      files: [
+        { path: 'index.html', content: 'ROOT-INDEX' },
+        { path: 'home.html', content: 'ROOT-HOME' },
+        {
+          path: '.vayu/manifest.json',
+          content: JSON.stringify({ version: 2, index: 'home.html' }),
+        },
+      ],
+      expect: { status: 200, path: 'index.html' },
+    },
   ];
 }
