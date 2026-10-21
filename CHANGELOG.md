@@ -10,6 +10,32 @@ it.
 
 ## [Unreleased]
 
+### Fixed — a refusal now carries the security headers, because it always claimed to
+
+`vayu serve` refused a malformed request, an oversized head and any method but GET and HEAD
+with a 400, a 431 and a 405 — and each of those answers was built with the security headers
+appended AFTER the blank line that ends the head. They were therefore the first bytes of the
+BODY, not headers at all, and a browser reads no policy from a body. Every refusal went out
+with no content security policy, no permissions policy and no referrer policy, while the code
+above the bug said "Response headers on EVERY answer, success or refusal".
+
+The registry's proxy has always done this correctly and has always had a test for it — a
+refusal must carry the same security headers as a success, because otherwise the header set
+itself tells a reader that the answer came from somewhere that is not VayuWeb. The client had
+the claim and not the behaviour, and the difference between a policy that is sent and a policy
+that is only written down is the difference between a browser obeying it and a browser
+displaying it as text.
+
+### Added — the client's own rule table is checked against the client's own headers
+
+PUBLISHING.md 3.1.6 calls the rule table one shared definition, and the registry's test checks
+the client's rules against the REGISTRY's proxy. Nothing checked them against the CLIENT's
+serving surface, so a directive dropped from the client's headers would have left the rule
+table claiming an enforcement the client does not perform — a rule nobody enforces is a wish.
+The client now checks every header-enforced rule against the headers it actually sends, and
+compares its policy against the canonical block in CONTENT-SECURITY.md, which its own comment
+claimed byte-identity with and nothing had checked.
+
 ### Fixed — the client now speaks the specification's refusal vocabulary
 
 The client ran eight of the nine conformance suites and skipped the one that matters most for

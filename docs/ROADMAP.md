@@ -627,6 +627,19 @@ application that offers one to somebody who has never opened a terminal does not
 the phase's acceptance test still needs that person plus a GUI this environment cannot compile or
 launch.
 
+**And the serving surface's own headers were never checked against the serving surface's own
+rule table.** The registry's test reads the CLIENT's rules and holds them against the REGISTRY's
+proxy headers, so a directive dropped there fails CI. Nothing held them against the CLIENT's
+headers — and the client's `serve.rs` had a defect the registry's equivalent had never had: the
+refusal path appended the security headers AFTER the blank line that ends the head, so every
+400, 405 and 431 went out with the policy as the first bytes of the BODY. A browser reads no
+policy from a body. The code said "Response headers on EVERY answer, success or refusal" and
+the refusal answer carried none, and the registry has had a test for exactly that since it was
+written — a refusal without the header set tells a reader the answer came from somewhere that
+is not VayuWeb. The client now checks every header-enforced rule against the headers it
+actually sends, and compares its policy against the canonical block in CONTENT-SECURITY.md,
+which its own comment claimed byte-identity with and nothing had checked.
+
 **What Rust buys here that a garbage-collected language cannot** is two of the four requirements
 outright: `Drop` runs at a known point, so zeroisation is not a hope, and requirement 3's "never
 placed in a garbage-collected string" is satisfied by construction. The crate builds and tests

@@ -320,6 +320,72 @@ fn usage_mistakes_exit_two_with_the_text() {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn a_refusal_carries_the_security_headers_too() {
+    // **The refusal path built its head in the wrong order.** The security headers were
+    // appended AFTER the blank line that ends the head, so on every 400, 405 and 431 they
+    // were the first bytes of the BODY rather than headers at all — and a browser reads no
+    // policy from a body. The code said "Response headers on EVERY answer, success or
+    // refusal", and the refusal answer carried none.
+    //
+    // The body of a refusal is a fixed ASCII string, so this is not an injection hole; it is
+    // a promise the code made and did not keep, and the fix is a reordering.
+    let work = TempDir::new("serve-refusal-headers");
+    let site = work.path().join("site");
+    work.file(
+        "site/index.html",
+        "<!doctype html><title>refusal</title><h1>hello</h1>",
+    );
+    let store = work.path().join("store");
+    let seed_path = work.path().join("seed.hex");
+    std::fs::write(&seed_path, seed_hex(0x73)).expect("writes");
+    let now = 1_800_000_000u64;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vayu"))
+        .args([
+            "publish",
+            site.to_str().expect("utf8"),
+            "--name",
+            "refused.vayu",
+            "--store",
+            store.to_str().expect("utf8"),
+            "--key-file",
+            seed_path.to_str().expect("utf8"),
+            "--now",
+            &now.to_string(),
+        ])
+        .output()
+        .expect("runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let mut server = spawn_serve_by_name(&store, "refused.vayu", &now.to_string(), None);
+    // A POST is refused with 405, and the refusal is built by a different function from the
+    // one that answers a GET.
+    let (status, head, body) = server.exchange(
+        "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+    );
+    assert_eq!(status, 405, "{head}");
+    assert!(
+        head.to_ascii_lowercase()
+            .contains("content-security-policy:"),
+        "a refusal must carry the policy too: {head}"
+    );
+    assert!(
+        head.to_ascii_lowercase().contains("default-src 'none'"),
+        "and it must be the real policy, not an empty one: {head}"
+    );
+    // The body is the refusal text and nothing else: the headers are headers, not body.
+    assert!(
+        !String::from_utf8_lossy(&body).contains("content-security-policy"),
+        "the headers must not be appended after the blank line: {:?}",
+        String::from_utf8_lossy(&body)
+    );
+}
+
+#[test]
 fn serve_refuses_a_tree_the_checker_would_stop() {
     let work = TempDir::new("serve-refused");
     let store = work.path().join("store");
@@ -881,6 +947,36 @@ struct ServeChild {
 }
 
 impl ServeChild {
+    /// Send raw bytes and read the whole exchange back, split into head and body.
+    ///
+    /// A refusal has to be exercised with the bytes a client would really send — a POST, a
+    /// malformed head — because the path that builds it is not the path that builds a 200.
+    fn exchange(&mut self, request: &str) -> (u16, String, Vec<u8>) {
+        use std::io::Read;
+        let mut stream = std::net::TcpStream::connect(&self.addr).expect("connects");
+        use std::io::Write;
+        stream.write_all(request.as_bytes()).expect("writes");
+        let mut raw = Vec::new();
+        stream.read_to_end(&mut raw).expect("reads");
+        let split = raw
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .unwrap_or_else(|| {
+                panic!(
+                    "a response without headers: {:?}",
+                    String::from_utf8_lossy(&raw)
+                )
+            });
+        let head = String::from_utf8_lossy(&raw[..split]).to_string();
+        let status: u16 = head
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|code| code.parse().ok())
+            .expect("a status line");
+        (status, head, raw[split + 4..].to_vec())
+    }
+
     /// GET with bounded whole-exchange retries. On total failure the panic says
     /// whether the child DIED (with its stderr) or sat alive but unreachable —
     /// those need opposite fixes, and a bare "refused" cannot tell them apart.

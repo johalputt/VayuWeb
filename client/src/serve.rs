@@ -423,8 +423,13 @@ fn refuse(stream: &mut TcpStream, error: &RequestError) {
             (405, "Method Not Allowed", b"only GET and HEAD are served\n")
         }
     };
+    // The security headers go BEFORE the blank line that ends the head. They were appended
+    // after it, which made them the first bytes of the BODY: a browser reads no policy from a
+    // body, so every 400, 405 and 431 was served with no policy at all, while the code above
+    // said the headers go on EVERY answer, success or refusal.
     let mut head = format!(
-        "HTTP/1.1 {status} {reason}\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+        "HTTP/1.1 {status} {reason}\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: \
+         {}\r\n",
         text.len(),
     );
     for (name, value) in SECURITY_HEADERS {
@@ -433,6 +438,7 @@ fn refuse(stream: &mut TcpStream, error: &RequestError) {
         head.push_str(value);
         head.push_str("\r\n");
     }
+    head.push_str("connection: close\r\n\r\n");
     let _ = stream.write_all(head.as_bytes());
     let _ = stream.write_all(text);
     let _ = stream.flush();
@@ -574,4 +580,85 @@ pub fn spawn(
         running,
         join: Some(join),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::doctor::{Enforcement, RULES};
+
+    /// The value this server sends for a header name, if it sends one at all.
+    fn header_value(name: &str) -> Option<&'static str> {
+        SECURITY_HEADERS
+            .iter()
+            .find(|(header, _)| *header == name)
+            .map(|(_, value)| *value)
+    }
+
+    /// **The rule table's own claims, checked against the headers THIS server sends.**
+    ///
+    /// PUBLISHING.md 3.1.6 calls the rule table one shared definition, and the registry-side
+    /// test checks the client's rules against the REGISTRY's proxy — so a directive dropped
+    /// from the registry's headers fails CI. Nothing checked them against the CLIENT's own
+    /// serving surface: the rule table claimed a read-time enforcement the client did not
+    /// perform, and the site a user reads through `vayu serve` was looser than the one the
+    /// checker had promised. A rule nobody enforces is a wish.
+    #[test]
+    fn every_header_enforced_rule_is_enforced_by_the_headers_this_server_sends() {
+        for rule in RULES {
+            if rule.enforcement != Enforcement::Csp {
+                continue;
+            }
+            for (header, contains) in rule.evidence {
+                let value = header_value(header)
+                    .unwrap_or_else(|| panic!("{}: this server sends no {header}", rule.id));
+                assert!(
+                    value.contains(contains),
+                    "{}: {header} must contain \"{contains}\" -- the rule's read-time \
+                     enforcement depends on it",
+                    rule.id
+                );
+            }
+            for (header, omit) in rule.evidence_absent {
+                let value = header_value(header)
+                    .unwrap_or_else(|| panic!("{}: this server sends no {header}", rule.id));
+                assert!(
+                    !value.contains(omit),
+                    "{}: {header} must NOT contain \"{omit}\" -- its presence would grant what \
+                     this rule refuses",
+                    rule.id
+                );
+            }
+        }
+    }
+
+    /// **The policy is the specification's, not a paraphrase of it.**
+    ///
+    /// The registry's proxy has always been checked against the canonical block in
+    /// CONTENT-SECURITY.md; this client only said it was byte-identical to it, in a comment.
+    /// A second copy of a security policy is a copy that drifts, and this one is wire-visible:
+    /// a directive lost in transcription is a relaxation nobody chose. So the specification is
+    /// read back and compared rather than trusted to have been copied correctly.
+    #[test]
+    fn the_emitted_policy_is_byte_identical_to_the_canonical_block_in_the_specification() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/spec/CONTENT-SECURITY.md"
+        );
+        let spec = std::fs::read_to_string(path).expect("the specification is in the repository");
+        let block = spec
+            .split("<!-- canonical:content-security-policy -->")
+            .nth(1)
+            .expect("the specification carries a canonical block");
+        let fenced = block.split("```").nth(1).expect("a fenced block");
+        let canonical = fenced
+            .trim_start_matches("text\n")
+            .trim()
+            .trim_start_matches("Content-Security-Policy:")
+            .trim();
+        assert_eq!(
+            DEFAULT_CSP, canonical,
+            "the client's policy must be the specification's, byte for byte"
+        );
+    }
 }
