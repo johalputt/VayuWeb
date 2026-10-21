@@ -106,7 +106,7 @@ test('a declared index that is not in the tree is discarded', () => {
   assert.equal(answered.path, '/index.html');
 });
 
-test("a miss is a miss, and the site's own pages answer it", () => {
+test('a miss is a miss, and the site’s own pages answer it', () => {
   const bare = serveStep13(
     portOver([{ path: 'index.html', content: 'ROOT-INDEX' }]),
     'cid',

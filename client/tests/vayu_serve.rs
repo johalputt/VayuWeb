@@ -192,6 +192,141 @@ fn every_response_carries_the_security_headers_and_nothing_identifying() {
 }
 
 #[test]
+fn a_declared_fallback_or_not_found_document_is_refused_when_it_breaks_a_rule_no_header_can() {
+    // **The declared documents were served unscanned, and a fallback is the document every
+    // unmatched path answers with.** A site that declares `"fallback": "app.html"` serves that
+    // file — with HTTP 200 — for every deep link a reader follows, so it is the most-read
+    // document on the site and the one a publisher is most likely to have got wrong. It was
+    // served without the scan that every other document goes through, while the registry's proxy
+    // refused it: the two surfaces of this project disagreed about a document the reader sees.
+    //
+    // The rule here is one no header can express: a speculative `<link rel="preconnect">` tells
+    // the reader's browser to open a connection to a host the reader named nobody.
+    let files = vec![
+        SiteFile {
+            path: "index.html".into(),
+            content: b"<!doctype html><title>home</title>".to_vec(),
+        },
+        SiteFile {
+            path: "app.html".into(),
+            content: b"<!doctype html><link rel=\"preconnect\" href=\"https://tracker.example/\"><p>app</p>"
+                .to_vec(),
+        },
+        SiteFile {
+            path: "missing.html".into(),
+            content: b"<!doctype html><meta http-equiv=\"refresh\" content=\"0;url=https://elsewhere.example/\"><p>gone</p>"
+                .to_vec(),
+        },
+        SiteFile {
+            path: ".vayu/manifest.json".into(),
+            content: br#"{"version":1,"fallback":"app.html","notFound":"missing.html"}"#.to_vec(),
+        },
+    ];
+    let fixture = serve_tree("declared-scan", &files);
+
+    // The `notFound` document is declared, so it answers first -- PUBLISHING.md 2.3: "on no path
+    // match the resolver SHALL serve `notFound` with HTTP 404 if present; otherwise, if
+    // `fallback` is declared, serve it with HTTP 200". The `fallback` is then never reached, so
+    // the file that needs a separate fixture is the one that is actually served.
+    let (status, _, body) = request(&fixture, "/reports/2026/march", "GET");
+    assert_eq!(
+        status,
+        403,
+        "a notFound document that breaks a scan rule is refused, and the body says why: {}",
+        String::from_utf8_lossy(&body)
+    );
+    assert!(
+        String::from_utf8_lossy(&body).contains("meta-refresh"),
+        "the refusal names the rule: {}",
+        String::from_utf8_lossy(&body)
+    );
+}
+
+#[test]
+fn a_declared_fallback_document_is_refused_when_it_breaks_a_rule_no_header_can() {
+    // The `fallback` on its own, so it is the document that answers.
+    let files = vec![
+        SiteFile {
+            path: "index.html".into(),
+            content: b"<!doctype html><title>home</title>".to_vec(),
+        },
+        SiteFile {
+            path: "app.html".into(),
+            content: b"<!doctype html><link rel=\"preconnect\" href=\"https://tracker.example/\"><p>app</p>"
+                .to_vec(),
+        },
+        SiteFile {
+            path: ".vayu/manifest.json".into(),
+            content: br#"{"version":1,"fallback":"app.html"}"#.to_vec(),
+        },
+    ];
+    let fixture = serve_tree("declared-fallback-scan", &files);
+    let (status, _, body) = request(&fixture, "/reports/2026/march", "GET");
+    assert_eq!(
+        status,
+        403,
+        "a fallback that breaks a scan rule is refused: {}",
+        String::from_utf8_lossy(&body)
+    );
+    assert!(
+        String::from_utf8_lossy(&body).contains("speculative-link"),
+        "the refusal names the rule: {}",
+        String::from_utf8_lossy(&body)
+    );
+}
+
+#[test]
+fn a_declared_fallback_or_not_found_document_that_breaks_no_rule_is_served() {
+    // The other half of the rule above: a scan that refused everything would be a site that
+    // serves nothing, and the refusal has to be about the RULE and not about the document.
+    let files = vec![
+        SiteFile {
+            path: "index.html".into(),
+            content: b"<!doctype html><title>home</title>".to_vec(),
+        },
+        SiteFile {
+            path: "app.html".into(),
+            content: b"<!doctype html><p>app</p>".to_vec(),
+        },
+        SiteFile {
+            path: "missing.html".into(),
+            content: b"<!doctype html><p>gone</p>".to_vec(),
+        },
+        SiteFile {
+            path: ".vayu/manifest.json".into(),
+            content: br#"{"version":1,"fallback":"app.html","notFound":"missing.html"}"#.to_vec(),
+        },
+    ];
+    let fixture = serve_tree("declared-ok", &files);
+
+    // The `notFound` is declared, so it answers the miss -- with 404 -- and the `fallback` is
+    // only reached when there is no `notFound`.
+    let (status, _, body) = request(&fixture, "/nothing-here", "GET");
+    assert_eq!(status, 404, "a clean notFound document is served with 404");
+    assert_eq!(body, b"<!doctype html><p>gone</p>");
+
+    // And the fallback on its own, which is the case a site with client-side routing uses.
+    let fallback_only = vec![
+        SiteFile {
+            path: "index.html".into(),
+            content: b"<!doctype html><title>home</title>".to_vec(),
+        },
+        SiteFile {
+            path: "app.html".into(),
+            content: b"<!doctype html><p>app</p>".to_vec(),
+        },
+        SiteFile {
+            path: ".vayu/manifest.json".into(),
+            content: br#"{"version":1,"fallback":"app.html"}"#.to_vec(),
+        },
+    ];
+    let fallback_fixture = serve_tree("declared-fallback-ok", &fallback_only);
+    let (status, _, body) = request(&fallback_fixture, "/reports/2026/march", "GET");
+    assert_eq!(status, 200, "a clean fallback is served with 200");
+    assert_eq!(body, b"<!doctype html><p>app</p>");
+}
+
+#[test]
 fn a_script_that_registers_a_service_worker_is_refused_at_read_time() {
     // The service-worker rule is scan-enforced: no header can stop a registration, so
     // the SERVING SURFACE must refuse the document. The rule lives in the script, not

@@ -138,7 +138,13 @@ const artifact = {
       '`notFound` with 404, then its `fallback` with 200, and otherwise a plain 404. A directory ' +
       'path is one written with a trailing slash or without: the two must answer alike, and the ' +
       "manifest's index answers both. A declared file that is not in the tree is discarded rather " +
-      'than reported, so the next candidate answers instead.',
+      'than reported, so the next candidate answers instead. The suite pins the ROUTING. The scan ' +
+      'class -- a rule no header can express, which both serving surfaces enforce on the ' +
+      'document they finally serve -- is not part of it, because the two surfaces enforce it at ' +
+      "different layers and a vector about it would be a vector about one implementation's " +
+      'layering rather than about what a reader receives. Each implementation tests it on its own ' +
+      'surface: a declared `fallback` that breaks a rule is refused, not served, and a declared ' +
+      'document that breaks no rule is served.',
     headers:
       'A `headers` vector is the whole set of response headers a serving surface must send, and ' +
       'the value each must carry. The map is complete on purpose: a header an implementation does ' +

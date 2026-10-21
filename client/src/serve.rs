@@ -361,28 +361,38 @@ pub fn route(
     }
 
     // Deep-link miss: notFound with 404, else fallback with 200, else bare 404.
+    //
+    // **The declared documents go through the scan, like every other document.**
+    //
+    // They used to be served without it, and a declared `fallback` is the document EVERY
+    // unmatched path answers with: a site that declares one serves that file, with HTTP 200, to
+    // every deep link a reader follows. So it is the most-read document on such a site, it is
+    // the one a publisher is most likely to have got wrong, and it was the one document in the
+    // tree that reached a reader without the check that refuses a speculative link or a
+    // `<meta http-equiv="refresh">`. The registry's proxy scans the document it finally serves,
+    // so the two surfaces of this project disagreed about a document the reader sees.
     if let Some(name) = manifest.as_ref().and_then(|m| m.not_found.clone()) {
         let segments: Vec<String> = vec![name];
         if let Some(body) = try_file(&segments) {
-            return Ok(Response {
-                status: 404,
-                reason: "Not Found",
-                content_type: mime_of(segments[0].as_str()),
+            return scan_and_answer_with_status(
+                &segments[0],
+                mime_of(segments[0].as_str()),
                 body,
-                path: Some(segments[0].clone()),
-            });
+                404,
+                "Not Found",
+            );
         }
     }
     if let Some(name) = manifest.as_ref().and_then(|m| m.fallback.clone()) {
         let segments: Vec<String> = vec![name];
         if let Some(body) = try_file(&segments) {
-            return Ok(Response {
-                status: 200,
-                reason: "OK",
-                content_type: mime_of(segments[0].as_str()),
+            return scan_and_answer_with_status(
+                &segments[0],
+                mime_of(segments[0].as_str()),
                 body,
-                path: Some(segments[0].clone()),
-            });
+                200,
+                "OK",
+            );
         }
     }
     Ok(Response {
@@ -413,13 +423,29 @@ fn scan_and_answer(
     content_type: &'static str,
     body: Vec<u8>,
 ) -> Result<Response, WalkError> {
+    scan_and_answer_with_status(path, content_type, body, 200, "OK")
+}
+
+/// The same, for a document that answers with a status of its own.
+///
+/// A declared `notFound` answers with 404 and a declared `fallback` with 200, and both are
+/// documents the reader is shown — so both go through the scan. The status is a parameter
+/// because the scan does not change it: a document that breaks a rule is refused whatever it
+/// would otherwise have answered with.
+fn scan_and_answer_with_status(
+    path: &str,
+    content_type: &'static str,
+    body: Vec<u8>,
+    status: u16,
+    reason: &'static str,
+) -> Result<Response, WalkError> {
     let is_html = content_type.starts_with("text/html");
     let is_script = content_type.starts_with("text/javascript")
         || content_type.starts_with("application/javascript");
     if !is_html && !is_script {
         return Ok(Response {
-            status: 200,
-            reason: "OK",
+            status,
+            reason,
             content_type,
             body,
             path: Some(path.to_string()),
@@ -443,8 +469,8 @@ fn scan_and_answer(
         .collect();
     if refused.is_empty() {
         return Ok(Response {
-            status: 200,
-            reason: "OK",
+            status,
+            reason,
             content_type,
             body,
             path: Some(path.to_string()),

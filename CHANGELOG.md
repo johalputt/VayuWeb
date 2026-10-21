@@ -73,6 +73,28 @@ mode-setting is now skipped where there is no mode, the directory handling with 
 startup banner stops claiming "mode 0600" of a pipe that has no mode. The token check is what
 actually keeps the control API closed, and it does not depend on a filesystem mode.
 
+### Fixed — a declared `fallback` or `notFound` document is scanned before it is served
+
+**The client's serving surface served its declared documents without the scan, and a declared
+`fallback` is the document every unmatched path answers with.** A site that declares
+`"fallback": "app.html"` serves that file — with HTTP 200 — for every deep link a reader
+follows, so it is the most-read document on the site and the one a publisher is most likely to
+have got wrong. It was the one document in the tree that reached a reader without the check that
+refuses a speculative `<link rel="preconnect">` or a `<meta http-equiv="refresh">`, while the
+registry's proxy refused exactly that document: the two serving surfaces of this project
+disagreed about a document the reader sees.
+
+Both declared documents now go through the same scan every other document goes through, and a
+document that breaks a rule is refused whatever it would otherwise have answered with — 404 for
+a `notFound`, 200 for a `fallback`, 403 for either when it breaks a rule. The client's refusal
+still carries the rendered findings, because that surface serves the person who published the
+tree; the proxy's stays empty, because a body that explains itself would confirm VayuWeb is
+running.
+
+The `paths` suite pins the routing and says so: the scan class is enforced at a different layer
+in each implementation, so a vector about it would be about one implementation's layering rather
+than about what a reader receives. Each surface tests it on its own.
+
 ### Fixed — the client's preview surface now sends the whole security header set
 
 **The two serving surfaces of this project sent different response headers.** The proxy sent all

@@ -1286,6 +1286,33 @@ test('a document with no scan-class violation is served as it always was', () =>
   assert.match(new TextDecoder().decode(answer.body), /hello/);
 });
 
+test('a declared fallback that breaks a rule no header can is refused', () => {
+  // **The declared documents are the most-read documents a site has.** A `fallback` answers every
+  // unmatched path and a `notFound` answers every broken link, so a defect in one of them
+  // reaches every reader of the site rather than the one path that names it. The proxy scans the
+  // document it finally serves, so it always refused this; the client's serving surface served
+  // it, and the two surfaces of this project disagreed about a document the reader sees.
+  const site = siteWith({
+    '/app.html': '<!doctype html><link rel="preconnect" href="https://tracker.example/"><p>app</p>',
+    '/.vayu/manifest.json': manifest({ fallback: 'app.html' }),
+  });
+
+  const answer = request(site.port, '/reports/2026/march');
+  assert.equal(answer.status, 403, 'a rule-breaking fallback is refused, not served');
+  assert.equal(answer.body.length, 0, 'a refusal carries no body');
+});
+
+test('a declared fallback that breaks no rule is served', () => {
+  const site = siteWith({
+    '/app.html': '<!doctype html><p>app</p>',
+    '/.vayu/manifest.json': manifest({ fallback: 'app.html' }),
+  });
+
+  const answer = request(site.port, '/reports/2026/march');
+  assert.equal(answer.status, 200, "the site's own router shell answers");
+  assert.match(new TextDecoder().decode(answer.body), /app/);
+});
+
 test('the refusal names the rule to an operator who asked for diagnostics', () => {
   // The diagnostic headers are off by default and only the control API may turn them on, because
   // a header that brands every response is disclosure rather than diagnostics. When they ARE on,
