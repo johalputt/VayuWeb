@@ -257,6 +257,38 @@ export function importSite(files: readonly SiteFile[]): { blocks: Block[]; root:
   return { blocks, root: root.cid };
 }
 
+/**
+ * What a published tree costs in storage, measured rather than inferred.
+ *
+ * COST.md section 7 item 3 asks the client to report the actual overhead of a published site so
+ * a publisher can see the coding cost instead of inferring it. The numerator is every block of
+ * the tree — the data blocks AND the structure blocks, because the structure blocks are stored
+ * too and cost the network just as much. The denominator is the publisher's own bytes.
+ *
+ * `ratio` is null for an empty site, because there is no multiple of nothing.
+ */
+export interface StorageOverhead {
+  readonly sourceBytes: number;
+  readonly storedBytes: number;
+  readonly blockCount: number;
+  readonly ratio: number | null;
+}
+
+/** Measure the storage overhead of a tree that has been imported. */
+export function storageOverhead(
+  files: readonly SiteFile[],
+  blocks: readonly Block[],
+): StorageOverhead {
+  const sourceBytes = files.reduce((sum, file) => sum + file.content.length, 0);
+  const storedBytes = blocks.reduce((sum, block) => sum + block.bytes.length, 0);
+  return {
+    sourceBytes,
+    storedBytes,
+    blockCount: blocks.length,
+    ratio: sourceBytes === 0 ? null : storedBytes / sourceBytes,
+  };
+}
+
 /** Build one directory level, recursing into subdirectories first. */
 function buildDirectory(
   prefix: string,

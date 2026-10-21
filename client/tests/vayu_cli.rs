@@ -153,6 +153,19 @@ fn publish_registers_pins_and_writes_the_record() {
         store.join(root.to_text()).exists(),
         "the root block is pinned by its CID text"
     );
+
+    // The publisher is told what the site costs in storage, measured rather than inferred
+    // (COST.md section 7 item 3). Without the line, a publisher can only infer it, which is
+    // the thing the specification says they must not have to do.
+    let printed = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        printed.contains("storage  ") && printed.contains("overhead"),
+        "the publish reports the storage overhead:\n{printed}"
+    );
+    assert!(
+        printed.contains("no erasure coding is applied"),
+        "and says what the number is not, so nobody reads it as a coding rate:\n{printed}"
+    );
 }
 
 #[test]

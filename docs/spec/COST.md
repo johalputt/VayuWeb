@@ -84,8 +84,17 @@ RS(16, 27) erasure coding:     1.69× storage overhead   (27 ÷ 16)
 ```
 
 **That is a 44% reduction in the storage the network must carry** for equal-or-better durability,
-and storage is the cost that recurs forever. It is the single biggest cheapness lever available,
-and it is why erasure coding is specified rather than left as an optimisation.
+and storage is the cost that recurs forever. It is the single biggest cheapness lever available.
+
+**This coding is a recommendation, not a specification, and it is not implemented.** The study
+that recommends it is named above; the corpus does not specify the shard format, the stripe
+size, the coding point or the reconstruction procedure, and neither implementation applies any
+coding — a published tree is plain UnixFS. The arithmetic above is therefore a statement about
+the lever, not a description of the system. Until a specification fixes those parameters, the
+storage overhead a publisher is shown is the tree structure's own overhead and not a coding rate,
+and it must say so: the cost of publishing a site of many tiny files is dominated by the
+directory nodes, and a report of that number without the explanation reads as a broken coder
+rather than an absent one.
 
 ### 3.2 Deduplication is automatic
 
@@ -184,7 +193,10 @@ pricing promise it cannot be revised by whoever is running things in ten years.
 1. No code path in any implementation accepts, records, transfers or requires a payment.
 2. Registration completes within the stated target on a defined low-end mobile reference device.
 3. The client reports the actual storage overhead of a published site, so a publisher can see the
-   coding cost rather than infer it.
+   coding cost rather than infer it. The number is the publisher's own bytes against the tree's,
+   counting the structure blocks as well as the data blocks, and it is reported with a statement
+   of what it is not: no erasure coding is applied (section 3.1), so the overhead shown is the
+   tree structure's and not a coding rate.
 4. Name resolution issues zero network requests when the local replica holds the name — asserted
    on the observed socket set, per [CONTENT-SECURITY.md](CONTENT-SECURITY.md) test 3.
 5. The client reports the current replication factor of anything the user has published, so

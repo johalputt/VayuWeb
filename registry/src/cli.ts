@@ -38,7 +38,7 @@ import { serveControl, serveProxy } from './serve.ts';
 import { drivePeer, SWARM_LIMITS, type PeerOutcome } from './swarm.ts';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import { contentCacheKey, sourceValueOf, type ContentPort, type IpnsPort } from './proxy.ts';
-import { importSite, type SiteFile } from './unixfs.ts';
+import { importSite, storageOverhead, type SiteFile } from './unixfs.ts';
 import { cidBytes, decodeCid } from './content.ts';
 import { memorySource } from './blockstore.ts';
 import { fetchPath, FetchError } from './fetch.ts';
@@ -1298,6 +1298,27 @@ function siteContentOf(
   const source = memorySource(built.blocks);
   out(`published ${files.length} file(s) from ${directory}`);
   out(`  root CID  ${built.root}`);
+  // The storage overhead, measured rather than inferred (COST.md section 7 item 3). The
+  // publisher's own bytes against the tree's: the data blocks AND the structure blocks, because
+  // the structure blocks are stored too and cost the network just as much.
+  //
+  // The number is the tree structure's overhead, not a coding rate. No erasure coding is
+  // applied — the published tree is plain UnixFS — and COST.md section 3.1 recommends RS(16, 27)
+  // as the biggest cheapness lever available, but that coding is recommended by a design study,
+  // is not specified normatively anywhere else yet, and nothing here applies it. A report that
+  // showed 1.69x would be a fiction. The overhead is also not a constant: it is large for a site
+  // of many tiny files, whose directory nodes cost more than their contents, and close to one for
+  // a site of large ones.
+  const overhead = storageOverhead(files, built.blocks);
+  out(
+    `  storage  ${overhead.ratio === null ? 'n/a' : `${overhead.ratio.toFixed(3)}x`} overhead ` +
+      `(${overhead.sourceBytes} source bytes, ${overhead.storedBytes} stored bytes in ` +
+      `${overhead.blockCount} blocks)`,
+  );
+  out(
+    '  note     no erasure coding is applied: the tree is plain UnixFS, so this is the tree\n' +
+      "          structure's overhead and not a coding rate",
+  );
 
   const content: ContentPort = {
     fetch: (chosen, path) => {

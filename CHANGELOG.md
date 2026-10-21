@@ -73,6 +73,31 @@ mode-setting is now skipped where there is no mode, the directory handling with 
 startup banner stops claiming "mode 0600" of a pipe that has no mode. The token check is what
 actually keeps the control API closed, and it does not depend on a filesystem mode.
 
+### Added — the client reports the actual storage overhead of a published site
+
+**COST.md section 7 item 3 asks for it and nothing did it: "The client reports the actual storage
+overhead of a published site, so a publisher can see the coding cost rather than infer it."** A
+publisher could publish a site and be told the root CID, the number of blocks and the number of
+bytes in the record — none of which is the cost of the site in storage. The number that answers
+the question was derivable only by measuring the store by hand.
+
+Both publishing surfaces now report it, and both report the same measurement: the publisher's
+own bytes against the tree's, where the tree's size counts **every** block — the data blocks and
+the structure blocks alike, because the network stores the directory nodes too and pays for them
+exactly as it pays for the data. So the overhead is never below one.
+
+**The number is a measurement and not a constant, and the report says so.** A site of many tiny
+files spends more on structure than on contents — a two-file site measures 2.68× — while a site
+of large ones approaches 1.0×. The report names this, because a number that moved with the
+shape of the site would otherwise look like an error.
+
+**The report also says what the number is not.** No erasure coding is applied: the published
+tree is plain UnixFS. COST.md section 3.1 recommends RS(16, 27) as the single biggest cheapness
+lever available, and describes its 1.69× rate — but that coding is recommended by a design
+study, is not specified normatively anywhere else in the corpus, and is not implemented in either
+language. A report that showed 1.69× would be a fiction, and a publisher reading 2.68× with no
+explanation would reasonably assume the coding was broken rather than absent.
+
 ### Fixed — a bare miss is an ordinary 404 on both serving surfaces
 
 **The client's preview surface answered a miss with `not found in this tree`, and the registry's

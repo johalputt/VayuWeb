@@ -6,6 +6,7 @@ import {
   encodePbNode,
   fileBlocks,
   importSite,
+  storageOverhead,
   unixfsDirectory,
   unixfsFile,
 } from './unixfs.ts';
@@ -179,4 +180,49 @@ test('a duplicate entry in one directory is refused', () => {
       ]),
     /duplicate/,
   );
+});
+
+test('the storage overhead of a published tree is measured, not inferred', () => {
+  // COST.md section 7 item 3: "The client reports the actual storage overhead of a published
+  // site, so a publisher can see the coding cost rather than infer it." The number has to be the
+  // tree's real size, and the tree's real size includes the structure blocks — the directory
+  // nodes — because the network stores those too and pays for them exactly as it pays for the
+  // data.
+  //
+  // So the overhead is never below one: a tree that was exactly the size of its contents would
+  // be a tree with no directory nodes, and every site has at least one.
+  const files = [
+    { path: 'index.html', content: utf8('hello') },
+    { path: 'style.css', content: utf8('body{}') },
+  ];
+  const built = importSite(files);
+  const measured = storageOverhead(files, built.blocks);
+
+  assert.equal(measured.sourceBytes, 11, "the publisher's own bytes are the denominator");
+  assert.equal(measured.blockCount, built.blocks.length, 'every block counts, data and structure');
+  assert.equal(
+    measured.storedBytes,
+    built.blocks.reduce((sum, block) => sum + block.bytes.length, 0),
+    'the numerator is the bytes the tree occupies',
+  );
+  assert.ok(measured.ratio !== null && measured.ratio > 1, 'a tree costs more than its contents');
+  assert.equal(measured.ratio, measured.storedBytes / measured.sourceBytes);
+
+  // The number is a MEASUREMENT, not a constant: a site whose content is one large file spends
+  // a far smaller fraction on structure than a site of many tiny ones, because the file and
+  // directory nodes are fixed-size and the content is not.
+  const big = importSite([{ path: 'index.html', content: new Uint8Array(100_000) }]);
+  const big_measured = storageOverhead(
+    [{ path: 'index.html', content: new Uint8Array(100_000) }],
+    big.blocks,
+  );
+  assert.ok(
+    big_measured.ratio !== null && measured.ratio !== null && big_measured.ratio < measured.ratio,
+    'a bigger site spends proportionally less on structure',
+  );
+
+  // An empty site has no multiple of nothing to report.
+  const empty = storageOverhead([], importSite([]).blocks);
+  assert.equal(empty.sourceBytes, 0);
+  assert.equal(empty.ratio, null);
 });

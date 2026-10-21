@@ -80,8 +80,37 @@ pub struct Published {
     /// How many blocks were newly written to the store during this publish.
     pub newly_pinned: usize,
     /// The signed record bytes. Hold them, append them to a log, hand them to peers — but only
-    /// now does anything point at `root`.
+    /// now does anything points at `root`.
     pub record: Vec<u8>,
+    /// The bytes the publisher's own files add up to.
+    ///
+    /// The denominator of the storage overhead, and the thing a publisher already knows: it is
+    /// the size of the directory they are publishing.
+    pub source_bytes: u64,
+    /// The bytes the published tree actually occupies in the store.
+    ///
+    /// The numerator of the storage overhead: every block of the tree, the data blocks and the
+    /// structure blocks alike, because the structure blocks are stored too and cost the network
+    /// just as much. COST.md section 7 item 3 asks the client to report the real number rather
+    /// than leave a publisher to infer it.
+    pub stored_bytes: u64,
+    /// How many blocks the tree is made of, data and structure together.
+    pub block_count: usize,
+}
+
+impl Published {
+    /// The storage overhead of this publish, as a multiple of the source bytes.
+    ///
+    /// `None` when the source is empty, because there is no multiple of nothing. The divisor is
+    /// the publisher's own bytes and the dividend is the tree's, so the number answers the
+    /// question a publisher actually has: how much more space does this take than the directory
+    /// I am publishing?
+    pub fn storage_overhead(&self) -> Option<f64> {
+        if self.source_bytes == 0 {
+            return None;
+        }
+        Some(self.stored_bytes as f64 / self.source_bytes as f64)
+    }
 }
 
 /// One publish attempt, stated as a value so the argument list stays honest about what it is:
@@ -143,6 +172,14 @@ pub fn publish_site(
     // Steps 2 and 3: build the tree and address it.
     let (blocks, root) = import_site(files).map_err(FlowError::Import)?;
 
+    // The storage overhead, measured rather than inferred (COST.md section 7 item 3). The
+    // numerator is every block of the tree — the data blocks AND the structure blocks, because
+    // the structure blocks are stored too and cost the network just as much. The denominator is
+    // the publisher's own bytes.
+    let source_bytes: u64 = files.iter().map(|file| file.content.len() as u64).sum();
+    let stored_bytes: u64 = blocks.iter().map(|block| block.bytes.len() as u64).sum();
+    let block_count = blocks.len();
+
     // Step 4: pin locally. Before anything is signed — enforced by control flow, not comment.
     let newly_pinned = store
         .put_all(
@@ -177,6 +214,9 @@ pub fn publish_site(
         root,
         newly_pinned,
         record,
+        source_bytes,
+        stored_bytes,
+        block_count,
     })
 }
 
@@ -208,6 +248,87 @@ mod tests {
                 content: b"alpha\n".to_vec(),
             },
         ]
+    }
+
+    #[test]
+    fn the_storage_overhead_of_a_published_site_is_measured_rather_than_inferred() {
+        // COST.md section 7 item 3: "The client reports the actual storage overhead of a
+        // published site, so a publisher can see the coding cost rather than infer it."
+        //
+        // The number has to be the tree's real size, and the tree's real size includes the
+        // structure blocks — the directory nodes — because the network stores those too and pays
+        // for them exactly as it pays for the data. So the overhead is never below one.
+        let (store, path) = temp_store("overhead");
+        let who = identity(0xd4);
+        let files = sample_files();
+
+        let published = publish_site(
+            &store,
+            PublishRequest {
+                identity: &who,
+                label: "flow-overhead-001",
+                tld: "vayu",
+                files: &files,
+                now: 1_900_000_000,
+                predecessor: None,
+                window_count: 0,
+                pow_limit: 10_000,
+            },
+        )
+        .expect("publishes");
+
+        let source: u64 = files.iter().map(|file| file.content.len() as u64).sum();
+        assert_eq!(
+            published.source_bytes, source,
+            "the publisher's own bytes are the denominator"
+        );
+        assert_eq!(
+            published.block_count, published.newly_pinned,
+            "a fresh store holds every block of the tree"
+        );
+        assert!(
+            published.stored_bytes > published.source_bytes,
+            "a tree costs more than its contents: {} stored against {} source",
+            published.stored_bytes,
+            published.source_bytes
+        );
+
+        let overhead = published
+            .storage_overhead()
+            .expect("a site with bytes has a ratio");
+        assert!((overhead - published.stored_bytes as f64 / source as f64).abs() < f64::EPSILON);
+        assert!(overhead > 1.0, "a tree costs more than its contents");
+
+        // The number is a MEASUREMENT, not a constant: a site whose content is one large file
+        // spends a far smaller fraction on structure than a site of many tiny ones, because the
+        // file and directory nodes are fixed-size and the content is not.
+        let big = vec![SiteFile {
+            path: "index.html".into(),
+            content: vec![b'x'; 100_000],
+        }];
+        let (big_store, big_path) = temp_store("overhead-big");
+        let big_published = publish_site(
+            &big_store,
+            PublishRequest {
+                identity: &who,
+                label: "flow-overhead-002",
+                tld: "vayu",
+                files: &big,
+                now: 1_900_000_000,
+                predecessor: None,
+                window_count: 0,
+                pow_limit: 10_000,
+            },
+        )
+        .expect("publishes");
+        let big_overhead = big_published.storage_overhead().expect("a ratio");
+        assert!(
+            big_overhead < overhead,
+            "a bigger site spends proportionally less on structure: {big_overhead} against {overhead}"
+        );
+
+        let _ = std::fs::remove_dir_all(&path);
+        let _ = std::fs::remove_dir_all(&big_path);
     }
 
     #[test]

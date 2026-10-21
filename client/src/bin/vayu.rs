@@ -2635,11 +2635,33 @@ fn cmd_publish(argv: &[String]) -> i32 {
         Err(e) => eprintln!("warning: could not open the registry view: {e}"),
     }
 
+    // The storage overhead, measured rather than inferred (COST.md section 7 item 3): the
+    // publisher's own bytes against the tree's, so a publisher can see the cost rather than
+    // infer it.
+    //
+    // The number is the tree structure's overhead, not a coding rate. No erasure coding is
+    // applied — the published tree is plain UnixFS — and COST.md section 3.1 recommends
+    // RS(16, 27) as the biggest cheapness lever available, but that coding is recommended by a
+    // design study, is not specified normatively anywhere else yet, and nothing in this
+    // implementation applies it. A report that showed 1.69x would be a fiction. The overhead is
+    // also not a constant: it is large for a site of many tiny files, whose directory nodes
+    // cost more than their contents, and close to one for a site of large ones.
+    let overhead = match published.storage_overhead() {
+        Some(ratio) => format!("{ratio:.3}x"),
+        None => "n/a".to_string(),
+    };
     println!(
-        "root     {}\nblocks   {} newly pinned\nrecord   {} bytes{}\n",
+        "root     {}\nblocks   {} newly pinned\nrecord   {} bytes\n\
+         storage  {} overhead ({} source bytes, {} stored bytes in {} blocks)\n\
+         note     no erasure coding is applied: the tree is plain UnixFS, so this is the\n\
+         \x20        tree structure's overhead and not a coding rate{}\n",
         published.root.to_text(),
         published.newly_pinned,
         published.record.len(),
+        overhead,
+        published.source_bytes,
+        published.stored_bytes,
+        published.block_count,
         flags
             .get("out")
             .map(|out| format!("\nwritten  {out}"))
