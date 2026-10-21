@@ -192,6 +192,24 @@ fn every_response_carries_the_security_headers_and_nothing_identifying() {
 }
 
 #[test]
+fn a_bare_miss_is_an_ordinary_404_that_says_nothing_about_what_is_answering() {
+    // RESOLUTION.md step 13: "an ordinary 404, the site's problem rather than the network's".
+    // The body used to say "not found in this tree" -- a phrase no ordinary server produces, and
+    // one that tells a page able to probe the preview that something tree-shaped is running on
+    // the reader's own machine. The registry's proxy has always answered a bare miss with an
+    // empty body, so the two serving surfaces of this project also disagreed about what a miss
+    // looks like.
+    let fixture = serve_tree("bare-miss", &site_files());
+    let (status, head, body) = request(&fixture, "/nothing-here", "GET");
+    assert_eq!(status, 404);
+    assert_eq!(body, b"", "a bare 404 carries no body");
+    assert!(
+        head.contains("content-type: text/plain; charset=utf-8"),
+        "and the type an ordinary 404 carries: {head}"
+    );
+}
+
+#[test]
 fn a_declared_fallback_or_not_found_document_is_refused_when_it_breaks_a_rule_no_header_can() {
     // **The declared documents were served unscanned, and a fallback is the document every
     // unmatched path answers with.** A site that declares `"fallback": "app.html"` serves that

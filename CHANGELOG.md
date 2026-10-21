@@ -73,6 +73,19 @@ mode-setting is now skipped where there is no mode, the directory handling with 
 startup banner stops claiming "mode 0600" of a pipe that has no mode. The token check is what
 actually keeps the control API closed, and it does not depend on a filesystem mode.
 
+### Fixed — a bare miss is an ordinary 404 on both serving surfaces
+
+**The client's preview surface answered a miss with `not found in this tree`, and the registry's
+proxy answered the same miss with an empty body.** The phrase is not one an ordinary server
+produces, and it tells a page able to probe the preview that something tree-shaped is running on
+the reader's own machine — a small fingerprint of exactly the kind LOCAL-SURFACE.md section 2.4
+rules out. RESOLUTION.md step 13 calls this answer "an ordinary 404, the site's problem rather
+than the network's", and an ordinary 404 is one that says nothing about what is answering.
+
+The publisher is not left without a diagnosis: `vayu doctor` says what the tree contains, and the
+preview's own console says what it is serving. A body a browser renders is not a diagnostic
+channel. This was the last answer on which the two serving surfaces of this project disagreed.
+
 ### Fixed — a declared `fallback` or `notFound` document is scanned before it is served
 
 **The client's serving surface served its declared documents without the scan, and a declared

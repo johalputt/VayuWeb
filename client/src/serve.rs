@@ -395,11 +395,22 @@ pub fn route(
             );
         }
     }
+    // A bare miss. RESOLUTION.md step 13 calls it "an ordinary 404, the site's problem rather
+    // than the network's", and an ordinary 404 is one that says nothing about what is answering:
+    // this body used to say "not found in this tree", which is a phrase no ordinary server
+    // produces and which tells a page that can probe the preview that something tree-shaped is
+    // running on the reader's own machine (LOCAL-SURFACE.md 2.4). The registry's proxy has
+    // always answered a bare miss with an empty body, so the two serving surfaces of this
+    // project also disagreed about what a miss looks like.
+    //
+    // The publisher is not left without a diagnosis: `vayu doctor` says what the tree contains,
+    // and the preview's own console says what it is serving. A body a browser renders is not a
+    // diagnostic channel.
     Ok(Response {
         status: 404,
         reason: "Not Found",
         content_type: "text/plain; charset=utf-8",
-        body: b"not found in this tree\n".to_vec(),
+        body: Vec::new(),
         // No file answered, and the suite asks which one did.
         path: None,
     })
